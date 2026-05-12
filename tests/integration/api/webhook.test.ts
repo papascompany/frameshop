@@ -145,5 +145,51 @@ describe('POST /api/webhook/payment', () => {
     expect(raw._frameshop?.amountMismatch).toBe(true);
   });
 
-  it.todo('accepts valid signature + matching amount (200) and idempotent on duplicates');
+  it('accepts valid signature + matching amount (200) and records event', async () => {
+    const { POST } = await import('@/app/api/webhook/payment/route');
+
+    // Webhook claims 12000; order is exactly 12000 → should transition + insert.
+    const body = JSON.stringify(makeEvent(12000));
+    const req = new Request('http://localhost/api/webhook/payment', {
+      method: 'POST',
+      headers: {
+        'tosspayments-signature': sign(body),
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    // State machine transition was attempted (CREATED → PAID).
+    expect(mockState.transitionCalls).toBe(1);
+    // Event recorded WITHOUT the mismatch marker.
+    expect(mockState.insertedEvents).toHaveLength(1);
+    const inserted = mockState.insertedEvents[0]!;
+    expect(inserted.payment_key).toBe('pk-test-amount-mismatch');
+    expect(inserted.status).toBe('DONE');
+    const raw = inserted.raw_payload as { _frameshop?: { amountMismatch?: boolean } };
+    expect(raw._frameshop).toBeUndefined();
+  });
+
+  it('is idempotent: skips processing when payment_key already recorded', async () => {
+    const { POST } = await import('@/app/api/webhook/payment/route');
+
+    // Existing event already present in payment_events for this payment_key.
+    mockState.existingEvent = { id: 'pe-existing' };
+
+    const body = JSON.stringify(makeEvent(12000));
+    const req = new Request('http://localhost/api/webhook/payment', {
+      method: 'POST',
+      headers: {
+        'tosspayments-signature': sign(body),
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+    const res = await POST(req);
+    // Still returns 200 (idempotent), but no new event nor transition.
+    expect(res.status).toBe(200);
+    expect(mockState.insertedEvents).toHaveLength(0);
+    expect(mockState.transitionCalls).toBe(0);
+  });
 });
