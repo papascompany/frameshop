@@ -50,14 +50,9 @@ function makeChain(table: string) {
     };
   }
   if (table === 'order_sequences') {
-    return {
-      select: () => ({
-        eq: () => ({
-          maybeSingle: () => Promise.resolve({ data: { seq: 0 }, error: null }),
-        }),
-      }),
-      upsert: () => Promise.resolve({ error: null }),
-    };
+    // No longer accessed directly — generateOrderNo now calls rpc('next_order_no').
+    // Kept for any legacy test using direct table access.
+    throw new Error('order_sequences accessed directly; generateOrderNo should use rpc');
   }
   if (table === 'orders') {
     return {
@@ -128,9 +123,18 @@ function makeChain(table: string) {
   throw new Error(`Unmocked table: ${table}`);
 }
 
+let rpcCallCount = 0;
+
 vi.mock('@/lib/supabase/service', () => ({
   getServiceRoleSupabase: () => ({
     from: (table: string) => makeChain(table),
+    rpc: async (fn: string, _args: unknown) => {
+      if (fn === 'next_order_no') {
+        rpcCallCount += 1;
+        return { data: rpcCallCount, error: null };
+      }
+      return { data: null, error: { message: `unmocked rpc ${fn}` } };
+    },
   }),
 }));
 
