@@ -1,0 +1,79 @@
+/**
+ * Common branded ID types and shared primitives.
+ *
+ * Branded types prevent accidental mixups between different ID kinds at the
+ * type level (e.g. passing a ProductId where an OrderId is expected). At
+ * runtime they are plain strings.
+ *
+ * FROZEN: 2026-05-12 by Architect.
+ */
+
+// ---------- Branded ID types ----------
+
+declare const __brand: unique symbol;
+type Brand<T, B extends string> = T & { readonly [__brand]: B };
+
+export type CategoryId = Brand<string, 'CategoryId'>;
+export type ProductId = Brand<string, 'ProductId'>;
+export type ProductImageId = Brand<string, 'ProductImageId'>;
+export type FrameAssetId = Brand<string, 'FrameAssetId'>;
+export type ProductVariantId = Brand<string, 'ProductVariantId'>;
+export type PhotoId = Brand<string, 'PhotoId'>;
+export type CartItemId = Brand<string, 'CartItemId'>;
+export type OrderId = Brand<string, 'OrderId'>;
+export type OrderItemId = Brand<string, 'OrderItemId'>;
+export type CurationId = Brand<string, 'CurationId'>;
+export type ShippingMethodId = Brand<string, 'ShippingMethodId'>;
+export type PaymentEventId = Brand<string, 'PaymentEventId'>;
+export type UserId = Brand<string, 'UserId'>;
+
+/**
+ * Client-generated UUID used to dedup cart items between LocalStorage and DB.
+ * Distinct from CartItemId (server primary key).
+ */
+export type LocalId = Brand<string, 'LocalId'>;
+
+/** Editor session ID (client-generated, used in /studio/[sessionId] route). */
+export type SessionId = Brand<string, 'SessionId'>;
+
+/** Toss payment key (server-issued by PG). */
+export type PaymentKey = Brand<string, 'PaymentKey'>;
+
+/** Order number in `YYYYMMDD-NNNN` format. */
+export type OrderNo = Brand<string, 'OrderNo'>;
+
+// ---------- Helpers ----------
+
+/** Cast a plain string into a branded ID. Use at IO boundaries only. */
+export function asBrand<T extends Brand<string, string>>(id: string): T {
+  return id as T;
+}
+
+// ---------- Result / Pagination primitives ----------
+
+/** Standard Result type for explicit success/failure. */
+export type Result<T, E = string> =
+  | { ok: true; value: T }
+  | { ok: false; error: E };
+
+/** ISO 8601 timestamp string. */
+export type IsoTimestamp = string;
+
+/** Pagination input for list queries. */
+export type ListOptions = {
+  page?: number;
+  pageSize?: number;
+};
+
+/** Pagination output. */
+export type Paginated<T> = {
+  items: T[];
+  total: number;
+  hasMore: boolean;
+  page: number;
+  pageSize: number;
+};
+
+/** Default page sizes (kept here so all modules agree). */
+export const DEFAULT_PAGE_SIZE = 20;
+export const MAX_PAGE_SIZE = 100;
