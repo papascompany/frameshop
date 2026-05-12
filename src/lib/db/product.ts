@@ -1,0 +1,163 @@
+/**
+ * Product detail + option matrix (M-ProductDetail).
+ *
+ * RLS allows anon SELECT on product / image / frame / variant tables.
+ */
+
+import 'server-only';
+import type { ProductId } from '@/types/common';
+import {
+  variantKey,
+  type FrameAsset,
+  type MatteCode,
+  type OptionMatrix,
+  type PaperCode,
+  type ProductDetail,
+  type ProductImage,
+  type ProductVariant,
+} from '@/types/product';
+import {
+  mapFrameAsset,
+  mapProduct,
+  mapProductImage,
+  mapVariant,
+} from './mappers';
+import { getServerSupabase } from '../supabase/server';
+
+export async function getProductDetail(
+  id: ProductId,
+): Promise<ProductDetail | null> {
+  const supabase = await getServerSupabase();
+
+  const { data: productRow, error } = await supabase
+    .from('products')
+    .select('*')
+    .eq('id', id as string)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`getProductDetail failed: ${error.message}`);
+  }
+  if (!productRow) return null;
+
+  const [{ data: imageRows }, { data: frameRows }, { data: variantRows }] =
+    await Promise.all([
+      supabase
+        .from('product_images')
+        .select('*')
+        .eq('product_id', id as string)
+        .order('sort_order', { ascending: true }),
+      supabase
+        .from('frame_assets')
+        .select('*')
+        .eq('product_id', id as string),
+      supabase
+        .from('product_variants')
+        .select('*')
+        .eq('product_id', id as string)
+        .eq('is_active', true)
+        .order('price', { ascending: true }),
+    ]);
+
+  const product = mapProduct(productRow);
+
+  const images = (imageRows ?? []).map(mapProductImage);
+  const frames: FrameAsset[] = (frameRows ?? []).map(mapFrameAsset);
+  const variants: ProductVariant[] = (variantRows ?? []).map(mapVariant);
+
+  const grouped = {
+    thumbnail: [] as ProductImage[],
+    gallery: [] as ProductImage[],
+    guide: [] as ProductImage[],
+  };
+  for (const img of images) grouped[img.type].push(img);
+
+  const startingPrice = variants[0]?.price ?? product.basePrice;
+  const defaultVariantId = variants[0]?.id ?? null;
+
+  return {
+    product,
+    images: grouped,
+    frames,
+    defaultVariantId,
+    startingPrice,
+  };
+}
+
+export async function getProductOptions(id: ProductId): Promise<OptionMatrix> {
+  const supabase = await getServerSupabase();
+
+  const [{ data: variantRows }, { data: frameRows }] = await Promise.all([
+    supabase
+      .from('product_variants')
+      .select('*')
+      .eq('product_id', id as string)
+      .eq('is_active', true),
+    supabase
+      .from('frame_assets')
+      .select('color_code, color_label, preview_url')
+      .eq('product_id', id as string),
+  ]);
+
+  const variants = (variantRows ?? []).map(mapVariant);
+
+  const sizeMap = new Map<string, OptionMatrix['sizes'][number]>();
+  const colorMap = new Map<string, OptionMatrix['colors'][number]>();
+  const matteMap = new Map<MatteCode, OptionMatrix['mattes'][number]>();
+  const paperMap = new Map<PaperCode, OptionMatrix['papers'][number]>();
+
+  const variantsByKey: Record<string, ProductVariant> = {};
+
+  for (const v of variants) {
+    if (!sizeMap.has(v.sizeCode)) {
+      sizeMap.set(v.sizeCode, {
+        code: v.sizeCode,
+        label: v.sizeLabel,
+        widthMm: v.widthMm,
+        heightMm: v.heightMm,
+      });
+    }
+    if (!colorMap.has(v.colorCode)) {
+      const frame = (frameRows ?? []).find((f) => f.color_code === v.colorCode);
+      colorMap.set(v.colorCode, {
+        code: v.colorCode,
+        label: frame?.color_label ?? v.colorCode,
+        previewUrl: frame?.preview_url ?? null,
+      });
+    }
+    if (!matteMap.has(v.matteCode)) {
+      matteMap.set(v.matteCode, {
+        code: v.matteCode,
+        label: v.matteCode === 'none' ? '없음' : '있음',
+      });
+    }
+    if (!paperMap.has(v.paperCode)) {
+      paperMap.set(v.paperCode, {
+        code: v.paperCode,
+        label:
+          v.paperCode === 'glossy'
+            ? '유광'
+            : v.paperCode === 'matte'
+              ? '무광'
+              : '파인아트',
+      });
+    }
+    variantsByKey[
+      variantKey({
+        sizeCode: v.sizeCode,
+        colorCode: v.colorCode,
+        matteCode: v.matteCode,
+        paperCode: v.paperCode,
+      })
+    ] = v;
+  }
+
+  return {
+    sizes: [...sizeMap.values()],
+    colors: [...colorMap.values()],
+    mattes: [...matteMap.values()],
+    papers: [...paperMap.values()],
+    variantsByKey,
+  };
+}
