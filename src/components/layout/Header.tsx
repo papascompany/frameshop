@@ -1,59 +1,130 @@
 import Link from 'next/link';
 import { Container } from './Container';
+import { cn } from '@/lib/cn';
 
 /**
- * Primary nav — Nike-aligned.
+ * Primary nav — Nike-aligned, gallery-grade.
  *
- *  Surface (DESIGN-nike.md `primary-nav`):
- *   - bg-canvas, text-ink, 56–64px height
- *   - 1px inset hairline-soft bottom edge (the system's only "shadow")
- *   - logo at left, centered nav row, right cluster (cart/account)
- *   - active section gets a 2px underline in ink (no fill)
+ *  Surface:
+ *   - Sticky bg-canvas / text-ink. 1px inset hairline-soft bottom edge.
+ *   - Logo at left (Bebas Neue uppercase, no icon — the wordmark IS the
+ *     mark on Phase 1).
+ *   - Centered nav row with magnetic underline (.nav-link).
+ *   - Right cluster: search pill + 주문조회 + cart (with badge slot).
  *
- *  Mobile: center nav row collapses; brand + cart link remain. The bottom
- *  tab bar (`<MobileNav />`) carries the category navigation on small
- *  viewports.
+ *  Mobile: the center row collapses, but `<MobileNav />` (bottom tab bar)
+ *  carries the navigation. The right cluster collapses to cart-only.
+ *
+ *  Active-state underline uses `aria-current="page"`. Phase 2 wires this
+ *  via `usePathname()` in a thin client wrapper — Phase 1 keeps the file
+ *  RSC-only to avoid an extra client-bundle hop on every render.
  */
 export function Header() {
   return (
     <header className="sticky top-0 z-40 bg-canvas text-ink inset-hairline-bottom">
-      <Container size="xl" className="flex items-center justify-between h-14">
+      <Container size="xl" className="flex items-center justify-between h-14 md:h-16 gap-4">
+        {/* ── Brand ───────────────────────────────────────────────────── */}
         <Link
           href="/"
-          className="body-strong tracking-tight uppercase text-ink"
+          className="display-campaign text-ink shrink-0"
+          style={{ fontSize: '22px', letterSpacing: '0.02em', lineHeight: 1 }}
+          aria-label="FrameShop 홈"
         >
-          FrameShop
+          FRAMESHOP
         </Link>
+
+        {/* ── Center nav (desktop) ───────────────────────────────────── */}
         <nav
           aria-label="Primary"
-          className="hidden md:flex items-center gap-8 body-strong"
+          className="hidden md:flex items-center gap-6 body-strong"
         >
-          <Link
-            href="/"
-            className="text-ink hover:text-charcoal transition-colors"
-          >
-            홈
+          <Link href="/catalog/basic-frame" className="nav-link">
+            액자
           </Link>
           <Link
-            href="/catalog/basic-frame"
-            className="text-ink hover:text-charcoal transition-colors"
+            href="/catalog/basic-frame?theme=masterpiece"
+            className="nav-link"
           >
-            카탈로그
+            명화
           </Link>
           <Link
-            href="/order/lookup"
-            className="text-ink hover:text-charcoal transition-colors"
+            href="/catalog/basic-frame?theme=landscape"
+            className="nav-link"
           >
+            풍경
+          </Link>
+          <Link href="/#how-it-works" className="nav-link">
+            제작과정
+          </Link>
+          <Link href="/order/lookup" className="nav-link">
             주문조회
           </Link>
         </nav>
-        <div className="flex items-center gap-4">
+
+        {/* ── Right cluster ──────────────────────────────────────────── */}
+        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          {/* Search pill — visual placeholder on Phase 1 (search route lands
+           * in Phase 2). The disabled cursor + title attr signals the
+           * "coming soon" state to power users without clutter. */}
+          <span
+            className={cn(
+              'hidden md:inline-flex items-center gap-2',
+              'h-10 px-4 rounded-[24px] bg-soft-cloud caption-md text-mute',
+              'cursor-not-allowed select-none',
+            )}
+            aria-disabled="true"
+            title="검색 기능은 Phase 2에서 출시됩니다."
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 16 16"
+              fill="none"
+              aria-hidden
+            >
+              <circle
+                cx="7"
+                cy="7"
+                r="5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <path
+                d="M14 14L11 11"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span>검색</span>
+          </span>
+
           <Link
             href="/cart"
-            className="caption-md text-ink hover:text-charcoal transition-colors"
+            className={cn(
+              'inline-flex items-center gap-2 px-3 h-10 rounded-[24px]',
+              'caption-md text-ink hover:bg-soft-cloud transition-colors',
+            )}
             aria-label="장바구니"
           >
-            장바구니
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 20 20"
+              fill="none"
+              aria-hidden
+            >
+              <path
+                d="M3 4h2l1.5 9.5a2 2 0 0 0 2 1.5h6.4a2 2 0 0 0 2-1.6L18 6H6"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="8.5" cy="17.5" r="1.2" fill="currentColor" />
+              <circle cx="15.5" cy="17.5" r="1.2" fill="currentColor" />
+            </svg>
+            <span className="hidden sm:inline">장바구니</span>
           </Link>
         </div>
       </Container>

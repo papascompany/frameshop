@@ -67,8 +67,10 @@ function makeChain(table: string) {
   throw new Error(`Unmocked table: ${table}`);
 }
 
-vi.mock('@/lib/supabase/server', () => ({
-  getServerSupabase: async () => ({
+// `getProductDetail` now uses the anonymous read-only client so the
+// page can be statically prerendered (no cookies() side-effect).
+vi.mock('@/lib/supabase/anon', () => ({
+  getAnonSupabase: () => ({
     from: (table: string) => makeChain(table),
   }),
 }));

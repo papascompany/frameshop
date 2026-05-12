@@ -81,14 +81,10 @@
   --color-danger: var(--color-sale);
 
   /* ── Typography ────────────────────────────────────────────────────── */
-  /* Display tier: Bebas Neue (Google Fonts) — the open-source substitute
-   * recommended in DESIGN-nike.md for Nike Futura ND at 96px/0.9 uppercase.
-   * UI tier: Pretendard Variable for Korean optical quality. */
-  --font-display: 'Bebas Neue', 'Inter', 'Pretendard Variable', system-ui,
-    sans-serif;
-  --font-sans: 'Pretendard Variable', 'Pretendard', 'Inter',
-    'Spoqa Han Sans Neo', -apple-system, BlinkMacSystemFont, system-ui,
-    'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  /* Font variables `--font-display` and `--font-sans` are injected by
+   * `next/font` at runtime (src/lib/fonts.ts). The fallbacks below are
+   * applied when the browser hasn't fetched the variable font yet so the
+   * Korean glyphs don't fall back to Times. */
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 
   /* ── Radius (pill vocabulary) ──────────────────────────────────────── */
@@ -166,9 +162,13 @@
   --color-warning: var(--color-warning);
   --color-danger: var(--color-danger);
 
-  /* Fonts */
-  --font-display: var(--font-display);
-  --font-sans: var(--font-sans);
+  /* Fonts — `--font-display` & `--font-sans` are injected by next/font
+   * onto <html>. We chain them through Tailwind tokens with a system
+   * fallback in case the variable font hasn't loaded yet (FOUT-safe). */
+  --font-display: var(--font-display), 'Bebas Neue', 'Inter', system-ui,
+    sans-serif;
+  --font-sans: var(--font-sans), 'Inter', -apple-system, BlinkMacSystemFont,
+    system-ui, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   --font-mono: var(--font-mono);
 
   /* Radius */
@@ -185,17 +185,9 @@
   --spacing-section: var(--spacing-section);
 }
 
-/* ── Pretendard self-hosted via CDN (Phase 1 expedient) ──────────────── */
-@font-face {
-  font-family: 'Pretendard Variable';
-  font-weight: 45 920;
-  font-style: normal;
-  font-display: swap;
-  src: url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/woff2/PretendardVariable.woff2')
-    format('woff2-variations');
-}
-
-/* Bebas Neue loaded via <link> tag in layout.tsx (Google Fonts CDN). */
+/* Pretendard Variable + Bebas Neue are now self-hosted via next/font
+ * (`src/lib/fonts.ts`). The jsdelivr CDN @font-face was removed to cut
+ * 200–500 ms off first paint on Korean mobile networks. */
 
 /* ────────────────────────────────────────────────────────────────────────
  * Global resets / typography
@@ -336,4 +328,146 @@ button {
  * Used by sticky primary-nav and tab strips. */
 .inset-hairline-bottom {
   box-shadow: inset 0 -1px 0 var(--color-hairline-soft);
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Premium editorial utilities (added 2026-05-13)
+ *
+ *  Used by the landing redesign — masterpiece gallery, lifestyle studio,
+ *  hero showcase — to give the photography-first surfaces just enough
+ *  depth to read as "gallery" rather than "catalog grid".
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/* Soft gradient overlay used on photographic tiles where text sits over
+ * the lower third. Tuned to keep headlines readable without flattening
+ * the photograph's contrast. */
+.scrim-bottom {
+  background-image: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.72) 0%,
+    rgba(0, 0, 0, 0.35) 35%,
+    rgba(0, 0, 0, 0) 70%
+  );
+}
+.scrim-top {
+  background-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.5) 0%,
+    rgba(0, 0, 0, 0) 60%
+  );
+}
+
+/* Wall-mounted frame effect — a layered border + ambient shadow that
+ * reads as "framed picture on a gallery wall" without breaking the
+ * Nike-flat aesthetic on its surrounding chrome. */
+.frame-mount {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.08),
+    0 24px 48px -16px rgba(0, 0, 0, 0.35),
+    0 8px 16px -8px rgba(0, 0, 0, 0.2);
+}
+
+/* Subtle hover lift for product cards. Stays under 4 px so the page
+ * doesn't appear to bounce when the user scrolls a grid. */
+.lift-on-hover {
+  transition: transform var(--duration-base) var(--easing-out);
+  will-change: transform;
+}
+.lift-on-hover:hover {
+  transform: translateY(-2px);
+}
+
+/* Color swatch dots used on product cards & filter chips. Outline rather
+ * than solid so the same chip works on any background. */
+.swatch-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15) inset;
+}
+
+/* Image zoom on hover used by ProductCard / masterpiece tiles. */
+.zoom-on-hover {
+  transition: transform 600ms var(--easing-out);
+}
+.group:hover .zoom-on-hover,
+.zoom-on-hover:hover {
+  transform: scale(1.04);
+}
+
+/* Editorial fade-in for above-the-fold sections — keeps the first paint
+ * energetic without violating reduced-motion. */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fadeUp 520ms var(--easing-out) both;
+}
+.fade-up-delay-1 {
+  animation-delay: 80ms;
+}
+.fade-up-delay-2 {
+  animation-delay: 160ms;
+}
+.fade-up-delay-3 {
+  animation-delay: 240ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fade-up,
+  .fade-up-delay-1,
+  .fade-up-delay-2,
+  .fade-up-delay-3 {
+    animation: none;
+  }
+}
+
+/* Eyebrow label — small uppercase Bebas-set kicker shown above section
+ * headlines. Mirrors Nike's "MEMBERSHIP" / "JUST DROPPED" tags. */
+.eyebrow {
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+/* Magnetic underline for nav links — only shows on hover/focus.
+ * Width animates from 0 to full via a pseudo element. */
+.nav-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 0;
+  color: var(--color-ink);
+}
+.nav-link::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 0;
+  background: var(--color-ink);
+  transition: width var(--duration-base) var(--easing-out);
+}
+.nav-link:hover::after,
+.nav-link[aria-current='page']::after {
+  width: 100%;
+}
+
+/* Edge-bleed container — used by hero & full-width campaign rows. */
+.edge-bleed {
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  margin-right: calc(50% - 50vw);
 }

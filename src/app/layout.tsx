@@ -1,23 +1,25 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { fontDisplay, fontSans } from '@/lib/fonts';
 
 export const metadata: Metadata = {
-  title: 'FrameShop — 내 사진을 액자로',
-  description: '사진을 액자에 미리 맞춰보고 주문하세요. 베이직 액자부터 프리미엄까지.',
+  title: 'FrameShop — 사진을 작품으로',
+  description:
+    '풍경, 가족, 명화. 당신의 한 장을 액자에 담아 거실의 작품으로 만들어 드립니다.',
 };
 
 /**
  * Root layout.
  *
- * Font strategy (Nike-aligned):
- *  - Display tier: Bebas Neue (Google Fonts, weight 400) — substitute for
- *    Nike Futura ND in 96px uppercase campaign headlines. Used only via
- *    the `.display-campaign` utility class.
- *  - UI tier: Pretendard Variable (self-hosted via @font-face in globals.css)
- *    — Korean-optimized workhorse for nav, body, buttons, captions.
+ *  Font strategy (self-hosted, render-blocking-free):
+ *   - Display tier (`--font-display`): Bebas Neue via `next/font/google`
+ *     for campaign headlines (.display-campaign utility).
+ *   - UI tier (`--font-sans`): Pretendard Variable via `next/font/local`,
+ *     shipped from `public/fonts/`. Replaces the prior jsdelivr CDN that
+ *     added 200–500 ms of first-paint latency on Korean mobile networks.
  *
- * Bebas Neue is loaded here (not in globals.css) so the preconnect hint
- * fires before any CSS parse work.
+ *  Both font CSS variables are exposed on `<html>` so Tailwind utilities
+ *  resolve them through globals.css `@theme inline`.
  */
 export default function RootLayout({
   children,
@@ -25,19 +27,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko" className="h-full antialiased">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap"
-        />
-      </head>
+    <html
+      lang="ko"
+      className={`h-full antialiased ${fontDisplay.variable} ${fontSans.variable}`}
+    >
       <body className="min-h-full flex flex-col bg-canvas text-ink">
         {children}
       </body>

@@ -1,14 +1,24 @@
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { Container } from '@/components/layout/Container';
 import { ProductCard } from '@/components/ProductCard';
-import { CampaignTile } from '@/components/marketing/CampaignTile';
 import { CategoryIconCard } from '@/components/marketing/CategoryIconCard';
+import { CollectionRail } from '@/components/marketing/CollectionRail';
 import { FaqRow } from '@/components/marketing/FaqRow';
-import { MemberBenefitCard } from '@/components/marketing/MemberBenefitCard';
+import { HeroShowcase } from '@/components/marketing/HeroShowcase';
+import { LifestyleStudio } from '@/components/marketing/LifestyleStudio';
+import { MasterpieceGallery } from '@/components/marketing/MasterpieceGallery';
 import { SectionHeader } from '@/components/marketing/SectionHeader';
+import {
+  HERO_SLIDES,
+  LANDSCAPE_TILES,
+  LIFESTYLE_BLOCKS,
+  MASTERPIECE_TILES,
+  MEMBER_BENEFIT_TILES,
+} from '@/data/landing-curation';
 import { getProductsByCategory } from '@/lib/db/catalog';
 import { cn } from '@/lib/cn';
 import type { ProductListItem } from '@/types';
@@ -16,29 +26,41 @@ import type { ProductListItem } from '@/types';
 export const metadata: Metadata = {
   title: 'FrameShop — 사진을 작품으로',
   description:
-    '당신의 사진을 액자로. 미리보고 주문하는 모바일 액자 커머스.',
+    '풍경, 가족, 명화. 당신의 한 장을 액자에 담아 거실의 작품으로. 300dpi 미세 인쇄 + 3일 제작.',
+  openGraph: {
+    title: 'FrameShop — Your Memories, Framed Forever.',
+    description: '풍경, 가족, 명화. 당신의 한 장을 액자에 담아 거실의 작품으로.',
+    type: 'website',
+    locale: 'ko_KR',
+  },
 };
 
 /**
- * Landing — Nike-style editorial commerce home.
+ * Landing page — gallery-grade editorial home (2026-05-13 redesign).
  *
- *  Section rhythm (DESIGN-nike.md):
- *   1. Hero campaign tile (full-bleed)
- *   2. Featured Frames (3-up product grid, mobile 2-up)
- *   3. Shop by Size (4 icon cards, mobile horizontal scroll)
- *   4. Editorial campaign (single tile, drives editor entry)
- *   5. Member Benefits (3 dark-photographic cards)
- *   6. How It Works (4-step typographic row)
- *   7. FAQ (5-row accordion)
- *   8. Final CTA (black full-bleed slab)
+ *  Cached as ISR with a 10-minute revalidate window. The only DB-dependent
+ *  row is the FEATURED FRAMES grid; everything else is hard-coded
+ *  editorial photography from `data/landing-curation.ts`. A cached HTML
+ *  payload + the Next 16 Router Cache (staleTimes.dynamic = 30 s) is what
+ *  takes the prior "3-second menu hop" down into the high-millisecond
+ *  range on warm sessions.
  *
- *  Data: only the Featured Frames row depends on real DB rows.
- *  Everything else is hard-coded editorial content per PRD §1.1–1.2.
- *  Fetch failure or empty result is absorbed by Upcoming placeholders.
+ *  Section rhythm:
+ *    1. HeroShowcase           — 3-slide cinematic carousel (Bebas Neue)
+ *    2. FEATURED FRAMES        — real DB products
+ *    3. MASTERPIECE GALLERY    — 6 framed art editions
+ *    4. SHOP BY SIZE           — 4 icon cards
+ *    5. LIFESTYLE STUDIO       — split editorial spread
+ *    6. LANDSCAPE COLLECTION   — horizontal rail of nature prints
+ *    7. MEMBER BENEFITS        — 3 photographic cards (real photos)
+ *    8. HOW IT WORKS           — 4-step typographic row
+ *    9. FAQ                    — accordion
+ *   10. FINAL CTA              — black slab
  */
+export const revalidate = 600; // 10 minutes ISR
+
 export default async function LandingPage() {
   let featuredProducts: ProductListItem[] = [];
-
   try {
     const result = await getProductsByCategory('basic-frame', { pageSize: 3 });
     featuredProducts = result.items;
@@ -46,17 +68,18 @@ export default async function LandingPage() {
     console.warn('Landing: getProductsByCategory("basic-frame") failed:', err);
   }
 
-  // Pad to 3 slots — real products first, "Coming Soon" placeholders fill the rest.
+  // Pad the FEATURED FRAMES row to 3 cells using "Coming Soon" placeholders.
   const featuredSlots: Array<
-    { kind: 'product'; product: ProductListItem } | { kind: 'upcoming'; name: string; tagline: string }
+    | { kind: 'product'; product: ProductListItem }
+    | { kind: 'upcoming'; name: string; tagline: string }
   > = [
     ...featuredProducts.slice(0, 3).map(
       (p) => ({ kind: 'product' as const, product: p }),
     ),
   ];
   const upcomingFillers = [
-    { name: '프리미엄 액자', tagline: '원목 프레임 / 매트 포함' },
-    { name: '캔버스 액자', tagline: '대형 인테리어용' },
+    { name: '프리미엄 우드 액자', tagline: '오크 · 월넛 · 메이플' },
+    { name: '캔버스 액자', tagline: '대형 인테리어 (16×20 이상)' },
   ];
   while (featuredSlots.length < 3) {
     const idx = featuredSlots.filter((s) => s.kind === 'upcoming').length;
@@ -64,41 +87,13 @@ export default async function LandingPage() {
     featuredSlots.push({ kind: 'upcoming', name: filler.name, tagline: filler.tagline });
   }
 
-  // Hero image: reuse the first featured product's thumbnail when available
-  // so the landing never goes blank in production, but degrade to a pure
-  // typography campaign when the seed hasn't been uploaded yet.
-  const heroImage = featuredProducts[0]?.thumbnail ?? null;
-
   return (
     <>
-      {/* ── 1. Hero campaign ───────────────────────────────────────────────── */}
-      {heroImage ? (
-        <CampaignTile
-          imageUrl={heroImage}
-          imageAlt="FrameShop 캠페인 — 사진을 작품으로"
-          headline={
-            <>
-              TURN YOUR PHOTOS
-              <br />
-              INTO ART.
-            </>
-          }
-          subhead="당신의 순간을, 액자에 담아 작품으로."
-          cta={{ label: '지금 시작하기', href: '/catalog/basic-frame' }}
-          aspect="16/9"
-          headlineColor="light"
-        />
-      ) : (
-        <HeroTypographyFallback
-          headlineTop="TURN YOUR PHOTOS"
-          headlineBottom="INTO ART."
-          subhead="당신의 순간을, 액자에 담아 작품으로."
-          cta={{ label: '지금 시작하기', href: '/catalog/basic-frame' }}
-        />
-      )}
+      {/* ── 1. Hero showcase ───────────────────────────────────────────── */}
+      <HeroShowcase slides={HERO_SLIDES} />
 
-      {/* ── 2. Featured Frames ─────────────────────────────────────────────── */}
-      <Container size="xl" className="py-[48px] md:py-[72px]">
+      {/* ── 2. Featured Frames (DB-backed) ─────────────────────────────── */}
+      <Container size="xl" className="py-[48px] md:py-[80px]">
         <SectionHeader
           title="FEATURED FRAMES"
           eyebrow="추천 액자"
@@ -109,7 +104,11 @@ export default async function LandingPage() {
           {featuredSlots.map((slot, i) => (
             <li key={i}>
               {slot.kind === 'product' ? (
-                <ProductCard product={slot.product} />
+                <ProductCard
+                  product={slot.product}
+                  badge={i === 0 ? 'BEST' : undefined}
+                  lazyImage={i > 0}
+                />
               ) : (
                 <UpcomingProductCard name={slot.name} tagline={slot.tagline} />
               )}
@@ -118,11 +117,23 @@ export default async function LandingPage() {
         </ul>
       </Container>
 
-      {/* ── 3. Shop by Size ────────────────────────────────────────────────── */}
-      <section className="bg-canvas py-[48px] md:py-[72px] border-t border-hairline-soft">
+      {/* ── 3. Masterpiece Gallery ─────────────────────────────────────── */}
+      <section className="bg-canvas py-[48px] md:py-[80px] border-t border-hairline-soft">
+        <Container size="xl">
+          <SectionHeader
+            title="MASTERPIECE GALLERY"
+            eyebrow="명화 컬렉션"
+            linkLabel="명화 전체"
+            linkHref="/catalog/basic-frame?theme=masterpiece"
+          />
+          <MasterpieceGallery tiles={MASTERPIECE_TILES} />
+        </Container>
+      </section>
+
+      {/* ── 4. Shop by Size ────────────────────────────────────────────── */}
+      <section className="bg-soft-cloud py-[48px] md:py-[80px]">
         <Container size="xl">
           <SectionHeader title="SHOP BY SIZE" eyebrow="사이즈로 찾기" />
-          {/* Desktop: 4-up grid. Mobile: horizontal snap rail. */}
           <div className="hidden md:grid grid-cols-4 gap-6">
             {SIZE_CARDS.map((s) => (
               <CategoryIconCard
@@ -140,10 +151,7 @@ export default async function LandingPage() {
             )}
           >
             {SIZE_CARDS.map((s) => (
-              <div
-                key={s.code}
-                className="snap-start shrink-0 w-[140px]"
-              >
+              <div key={s.code} className="snap-start shrink-0 w-[140px]">
                 <CategoryIconCard
                   icon={<SizeRatioIcon ratio={s.ratio} />}
                   label={s.label}
@@ -155,50 +163,79 @@ export default async function LandingPage() {
         </Container>
       </section>
 
-      {/* ── 4. Editorial campaign (studio entry) ───────────────────────────── */}
-      <section className="py-[48px] md:py-[72px]">
+      {/* ── 5. Lifestyle Studio ────────────────────────────────────────── */}
+      <section className="py-[48px] md:py-[96px]">
         <Container size="xl">
-          <HeroTypographyFallback
-            headlineTop="EVERY PHOTO"
-            headlineBottom="DESERVES A FRAME."
-            subhead="1분 만에 미리보고 주문하세요."
-            cta={{ label: '사진으로 시작하기', href: '/catalog/basic-frame' }}
-            inset
-          />
+          {LIFESTYLE_BLOCKS.map((block, i) => (
+            <LifestyleStudio
+              key={block.headline}
+              block={block}
+              imageOn={i % 2 === 0 ? 'right' : 'left'}
+            />
+          ))}
         </Container>
       </section>
 
-      {/* ── 5. Member Benefits ─────────────────────────────────────────────── */}
-      <section className="bg-canvas py-[48px] md:py-[72px] border-t border-hairline-soft">
+      {/* ── 6. Landscape Collection ────────────────────────────────────── */}
+      <section className="bg-canvas py-[48px] md:py-[80px] border-t border-hairline-soft">
+        <Container size="xl">
+          <SectionHeader
+            title="LANDSCAPE PRINTS"
+            eyebrow="풍경 컬렉션"
+            linkLabel="컬렉션 전체"
+            linkHref="/catalog/basic-frame?theme=landscape"
+          />
+          <CollectionRail tiles={LANDSCAPE_TILES} />
+        </Container>
+      </section>
+
+      {/* ── 7. Member Benefits ─────────────────────────────────────────── */}
+      <section className="bg-canvas py-[48px] md:py-[80px] border-t border-hairline-soft">
         <Container size="xl">
           <SectionHeader title="MEMBER BENEFITS" eyebrow="회원 특별 혜택" />
           <ul className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3">
-            {MEMBER_BENEFITS.map((b) => (
+            {MEMBER_BENEFIT_TILES.map((b) => (
               <li key={b.headline}>
-                {b.imageUrl ? (
-                  <MemberBenefitCard
-                    imageUrl={b.imageUrl}
-                    imageAlt={b.imageAlt ?? b.headline}
-                    headline={b.headline}
-                    eyebrow={b.eyebrow}
-                    cta={b.cta}
+                <article className="relative w-full aspect-[4/5] overflow-hidden rounded-none bg-ink">
+                  <Image
+                    src={b.imageUrl}
+                    alt={b.imageAlt}
+                    fill
+                    sizes="(max-width: 768px) 100vw, 33vw"
+                    className="object-cover opacity-90"
+                    loading="lazy"
                   />
-                ) : (
-                  <BenefitFallbackCard
-                    headline={b.headline}
-                    eyebrow={b.eyebrow}
-                    body={b.body}
-                    cta={b.cta}
-                  />
-                )}
+                  <div aria-hidden className="absolute inset-0 scrim-bottom" />
+                  <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-8 text-on-primary">
+                    <p className="caption-sm uppercase text-stone mb-3 tracking-wider">
+                      {b.eyebrow}
+                    </p>
+                    <h3 className="heading-lg max-w-[14ch]">{b.headline}</h3>
+                    <div className="mt-5">
+                      <Link
+                        href={b.cta.href}
+                        className={cn(
+                          'inline-flex items-center justify-center',
+                          'h-11 px-6 rounded-[30px] body-strong tap-collapse',
+                          'bg-canvas text-ink hover:bg-soft-cloud transition-colors',
+                        )}
+                      >
+                        {b.cta.label}
+                      </Link>
+                    </div>
+                  </div>
+                </article>
               </li>
             ))}
           </ul>
         </Container>
       </section>
 
-      {/* ── 6. How It Works ────────────────────────────────────────────────── */}
-      <section className="py-[48px] md:py-[72px] border-t border-hairline-soft">
+      {/* ── 8. How It Works ────────────────────────────────────────────── */}
+      <section
+        id="how-it-works"
+        className="py-[48px] md:py-[80px] border-t border-hairline-soft scroll-mt-24"
+      >
         <Container size="xl">
           <SectionHeader title="HOW IT WORKS" eyebrow="3분이면 충분합니다" />
           <ol className="grid grid-cols-1 md:grid-cols-4 gap-6 md:gap-3">
@@ -215,10 +252,10 @@ export default async function LandingPage() {
         </Container>
       </section>
 
-      {/* ── 7. FAQ ─────────────────────────────────────────────────────────── */}
+      {/* ── 9. FAQ ─────────────────────────────────────────────────────── */}
       <section
         id="faq"
-        className="bg-canvas py-[48px] md:py-[72px] border-t border-hairline-soft scroll-mt-24"
+        className="bg-soft-cloud py-[48px] md:py-[80px] scroll-mt-24"
       >
         <Container size="md">
           <SectionHeader title="FAQ" eyebrow="자주 묻는 질문" />
@@ -236,7 +273,7 @@ export default async function LandingPage() {
         </Container>
       </section>
 
-      {/* ── 8. Final CTA ───────────────────────────────────────────────────── */}
+      {/* ── 10. Final CTA ──────────────────────────────────────────────── */}
       <FinalCallToAction />
     </>
   );
@@ -246,16 +283,11 @@ export default async function LandingPage() {
 // Inline sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Upcoming product card — keeps the FEATURED FRAMES row from feeling empty
- * when the seed only ships one product. Mirrors `ProductCard` geometry so
- * the grid alignment stays mathematically tight.
- */
 function UpcomingProductCard({ name, tagline }: { name: string; tagline: string }) {
   return (
     <div className="block rounded-none cursor-default" aria-disabled="true">
       <div className="relative aspect-square bg-soft-cloud overflow-hidden">
-        <div className="absolute top-3 left-3">
+        <div className="absolute top-3 left-3 z-10">
           <span
             className={cn(
               'inline-flex items-center caption-sm uppercase tracking-wider',
@@ -266,11 +298,17 @@ function UpcomingProductCard({ name, tagline }: { name: string; tagline: string 
             Coming Soon
           </span>
         </div>
-        <div className="absolute inset-0 grid place-items-center">
+        <div
+          className="absolute inset-0 grid place-items-center"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(45deg, transparent 0 11px, rgba(0,0,0,0.04) 11px 12px)',
+          }}
+        >
           <span className="caption-md text-mute">곧 만나요</span>
         </div>
       </div>
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="mt-3 flex flex-col gap-1.5">
         <p className="body-strong text-ink truncate">{name}</p>
         <p className="caption-md text-mute truncate">{tagline}</p>
         <p className="body-strong text-mute">준비 중</p>
@@ -279,67 +317,8 @@ function UpcomingProductCard({ name, tagline }: { name: string; tagline: string 
   );
 }
 
-/**
- * Hero typography fallback — pure-CSS campaign block used when no hero photo
- * is available (Phase 0 / Storage upload pending) AND for the secondary
- * editorial campaign that intentionally skips photography per DESIGN's
- * "typography can carry a campaign alone" allowance.
- */
-function HeroTypographyFallback({
-  headlineTop,
-  headlineBottom,
-  subhead,
-  cta,
-  inset = false,
-}: {
-  headlineTop: string;
-  headlineBottom: string;
-  subhead: string;
-  cta: { label: string; href: string };
-  /** When true, render as an inset block (inside a Container). */
-  inset?: boolean;
-}) {
-  return (
-    <section
-      className={cn(
-        'relative w-full overflow-hidden rounded-none bg-ink text-on-primary',
-        'aspect-[4/5] md:aspect-[16/9]',
-        // Subtle radial wash so the slab doesn't feel completely flat.
-        '[background-image:radial-gradient(circle_at_30%_70%,#1f1f1f_0%,#111111_60%)]',
-        inset ? '' : '',
-      )}
-    >
-      <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-12">
-        <h2 className="display-campaign max-w-[14ch]">
-          {headlineTop}
-          <br />
-          {headlineBottom}
-        </h2>
-        <p className="mt-4 body-md max-w-[40ch]">{subhead}</p>
-        <div className="mt-6">
-          <Link
-            href={cta.href}
-            className={cn(
-              'inline-flex items-center justify-center',
-              'h-12 px-8 rounded-[30px] body-strong tap-collapse',
-              'bg-canvas text-ink hover:bg-soft-cloud transition-colors',
-            )}
-          >
-            {cta.label}
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/**
- * Size ratio icon — a true-proportion outlined rectangle that reads at a
- * glance which aspect each catalog filter maps to. Drawn at 56×56 max bbox.
- */
 function SizeRatioIcon({ ratio }: { ratio: [number, number] }) {
   const [w, h] = ratio;
-  // Normalize so the longer side fits 48px while preserving proportion.
   const maxSide = 48;
   const longer = Math.max(w, h);
   const drawW = (w / longer) * maxSide;
@@ -347,13 +326,7 @@ function SizeRatioIcon({ ratio }: { ratio: [number, number] }) {
   const offsetX = (56 - drawW) / 2;
   const offsetY = (56 - drawH) / 2;
   return (
-    <svg
-      width="56"
-      height="56"
-      viewBox="0 0 56 56"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden
-    >
+    <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden>
       <rect
         x={offsetX}
         y={offsetY}
@@ -367,59 +340,6 @@ function SizeRatioIcon({ ratio }: { ratio: [number, number] }) {
   );
 }
 
-/**
- * Photographic-feel benefit card without a photograph — degrades the
- * `MemberBenefitCard` to a pure-tone surface when no asset is available.
- * Keeps the 4:5 aspect ratio so the 3-up row stays even.
- */
-function BenefitFallbackCard({
-  headline,
-  eyebrow,
-  body,
-  cta,
-}: {
-  headline: string;
-  eyebrow?: string;
-  body: string;
-  cta: { label: string; href: string };
-}) {
-  return (
-    <article
-      className={cn(
-        'relative w-full overflow-hidden rounded-none bg-ink text-on-primary',
-        'aspect-[4/5]',
-        '[background-image:radial-gradient(circle_at_70%_30%,#1f1f1f_0%,#111111_70%)]',
-      )}
-    >
-      <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-8">
-        {eyebrow ? (
-          <p className="caption-sm uppercase text-stone mb-3 tracking-wider">
-            {eyebrow}
-          </p>
-        ) : null}
-        <h3 className="heading-lg text-on-primary max-w-[14ch]">{headline}</h3>
-        <p className="mt-3 body-md text-stone max-w-[28ch]">{body}</p>
-        <div className="mt-5">
-          <Link
-            href={cta.href}
-            className={cn(
-              'inline-flex items-center justify-center',
-              'h-11 px-6 rounded-[30px] body-strong tap-collapse',
-              'bg-canvas text-ink hover:bg-soft-cloud transition-colors',
-            )}
-          >
-            {cta.label}
-          </Link>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-/**
- * How-it-works step — large display numeral over a short title + body line.
- * Pure typography per DESIGN's "no decorative gradient" principle.
- */
 function HowItWorksStep({
   index,
   title,
@@ -443,19 +363,25 @@ function HowItWorksStep({
   );
 }
 
-/**
- * Final call-to-action — pure black slab, single primary action.
- * Mirrors Nike's `/membership` page closer with a centered campaign lockup.
- */
 function FinalCallToAction() {
   return (
-    <section className="relative w-full bg-ink text-on-primary">
-      <div className="mx-auto max-w-[1280px] px-4 md:px-6 py-[64px] md:py-[120px] flex flex-col items-center text-center">
+    <section className="relative w-full bg-ink text-on-primary overflow-hidden">
+      {/* Soft radial glow so the slab doesn't read as a flat rectangle. */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            'radial-gradient(circle at 50% 30%, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0) 60%)',
+        }}
+      />
+      <div className="relative mx-auto max-w-[1280px] px-4 md:px-6 py-[72px] md:py-[140px] flex flex-col items-center text-center">
+        <p className="eyebrow text-canvas mb-4">YOUR MOMENTS DESERVE A FRAME</p>
         <h2 className="display-campaign max-w-[14ch]">START NOW.</h2>
-        <p className="mt-4 body-md text-stone max-w-[40ch]">
-          당신의 사진, 작품으로.
+        <p className="mt-4 body-md text-stone max-w-[42ch]">
+          단 1분이면 미리보고, 영업일 3일 안에 받습니다.
         </p>
-        <div className="mt-8">
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link
             href="/catalog/basic-frame"
             className={cn(
@@ -465,6 +391,16 @@ function FinalCallToAction() {
             )}
           >
             지금 시작하기
+          </Link>
+          <Link
+            href="/#how-it-works"
+            className={cn(
+              'inline-flex items-center justify-center',
+              'h-12 px-6 rounded-[30px] body-strong tap-collapse',
+              'border border-canvas/60 text-canvas hover:bg-canvas/10 transition-colors',
+            )}
+          >
+            제작 과정 보기
           </Link>
         </div>
       </div>
@@ -486,37 +422,6 @@ const SIZE_CARDS: Array<{
   { code: '5x7', label: '5×7 (13×18cm)', href: '/catalog/basic-frame?size=5x7', ratio: [5, 7] },
   { code: '8x10', label: '8×10 (20×25cm)', href: '/catalog/basic-frame?size=8x10', ratio: [8, 10] },
   { code: '11x14', label: '11×14 (28×36cm)', href: '/catalog/basic-frame?size=11x14', ratio: [11, 14] },
-];
-
-type MemberBenefit = {
-  headline: string;
-  eyebrow: string;
-  body: string;
-  cta: { label: string; href: string };
-  // imageUrl/imageAlt optional — when absent, fallback card renders.
-  imageUrl?: string;
-  imageAlt?: string;
-};
-
-const MEMBER_BENEFITS: MemberBenefit[] = [
-  {
-    headline: 'FREE SHIPPING',
-    eyebrow: '무료 배송',
-    body: '30,000원 이상 구매 시 전국 무료 배송.',
-    cta: { label: '회원가입', href: '/login' },
-  },
-  {
-    headline: 'FAST CRAFT',
-    eyebrow: '빠른 제작',
-    body: '주문 후 영업일 3일 내 제작 완료.',
-    cta: { label: '제작 과정 보기', href: '/catalog/basic-frame' },
-  },
-  {
-    headline: 'PERFECT PROOF',
-    eyebrow: '미리보기 보장',
-    body: '100% 시각 미리보기로 받기 전 결과 확인.',
-    cta: { label: '지금 미리보기', href: '/catalog/basic-frame' },
-  },
 ];
 
 const HOW_IT_WORKS = [

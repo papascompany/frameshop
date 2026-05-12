@@ -22,12 +22,12 @@ import {
   mapProductImage,
   mapVariant,
 } from './mappers';
-import { getServerSupabase } from '../supabase/server';
+import { getAnonSupabase } from '../supabase/anon';
 
 export async function getProductDetail(
   id: ProductId,
 ): Promise<ProductDetail | null> {
-  const supabase = await getServerSupabase();
+  const supabase = getAnonSupabase();
 
   // P2-06 fix: join `categories.is_active` so direct-URL access to a product
   // whose parent category was deactivated returns null (404). Without this,
@@ -97,7 +97,7 @@ export async function getProductDetail(
 }
 
 export async function getProductOptions(id: ProductId): Promise<OptionMatrix> {
-  const supabase = await getServerSupabase();
+  const supabase = getAnonSupabase();
 
   const [{ data: variantRows }, { data: frameRows }] = await Promise.all([
     supabase

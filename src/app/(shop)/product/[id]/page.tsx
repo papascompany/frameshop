@@ -8,6 +8,16 @@ import type { ProductId } from '@/types/common';
 import { StartEditorButton } from './StartEditorButton';
 import Image from 'next/image';
 
+/**
+ * Product detail — ISR cached for 5 minutes.
+ *
+ * Hot product pages benefit from a warm cache on Vercel's edge: the
+ * Supabase query that joins images + variants is the heaviest path in
+ * the catalog flow. 5 minutes is enough latency for admins to see edits
+ * while keeping `/product/[id]` near-instant for repeat shoppers.
+ */
+export const revalidate = 300;
+
 export default async function ProductPage({
   params,
 }: {

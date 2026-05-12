@@ -19,12 +19,12 @@ import type {
   ProductListResult,
 } from '@/types/product';
 import { mapCategory, mapProductListItem } from './mappers';
-import { getServerSupabase } from '../supabase/server';
+import { getAnonSupabase } from '../supabase/anon';
 
 // ---------- Categories ----------
 
 export async function getCategories(): Promise<CategoryTreeNode[]> {
-  const supabase = await getServerSupabase();
+  const supabase = getAnonSupabase();
   const { data, error } = await supabase
     .from('categories')
     .select('id, slug, name, parent_id, sort_order, is_active')
@@ -72,7 +72,7 @@ export async function getProductsByCategory(
     MAX_PAGE_SIZE,
   );
 
-  const supabase = await getServerSupabase();
+  const supabase = getAnonSupabase();
 
   const { data: cat } = await supabase
     .from('categories')
@@ -165,7 +165,7 @@ export async function searchProducts(query: string): Promise<ProductListItem[]> 
   if (trimmed.length === 0) return [];
 
   const escaped = trimmed.replace(/([%_])/g, '\\$1');
-  const supabase = await getServerSupabase();
+  const supabase = getAnonSupabase();
 
   const { data, error } = await supabase
     .from('products')
@@ -212,7 +212,7 @@ export async function getRepresentativeProducts(
   categoryIds: readonly CategoryId[],
 ): Promise<Record<string, ProductListItem | null>> {
   if (categoryIds.length === 0) return {};
-  const supabase = await getServerSupabase();
+  const supabase = getAnonSupabase();
 
   const { data, error } = await supabase
     .from('products')
