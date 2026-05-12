@@ -65,7 +65,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const { data: variants, error: vErr } = await supabase
     .from('product_variants')
     .select(
-      'id, is_active, price, product_id, size_label, color_label, products(name)',
+      'id, is_active, price, product_id, size_label, color_label, color_code, products(name)',
     )
     .in('id', variantIds);
   if (vErr) {
@@ -78,6 +78,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     product_id: string;
     size_label: string;
     color_label: string;
+    color_code: string;
     products: { name: string } | { name: string }[] | null;
   };
   const variantById = new Map(
@@ -149,6 +150,26 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const order = mapOrder(orderRow);
 
+  // Look up the frame_asset that matches each cart item's (product, color)
+  // so the render pipeline (frame_skills §5) can resolve it deterministically
+  // even if admins later add/remove colors. Single round trip across all
+  // distinct products in the cart.
+  const productIds = Array.from(
+    new Set(
+      input.cartItems
+        .map((i) => variantById.get(i.variantId as string)?.product_id)
+        .filter((p): p is string => typeof p === 'string'),
+    ),
+  );
+  const { data: frameRows } = await supabase
+    .from('frame_assets')
+    .select('id, product_id, color_code')
+    .in('product_id', productIds);
+  const frameByKey = new Map<string, string>();
+  for (const f of (frameRows ?? []) as Array<{ id: string; product_id: string; color_code: string }>) {
+    frameByKey.set(`${f.product_id}|${f.color_code}`, f.id);
+  }
+
   // order_items snapshot insert. All authoritative fields come from DB so
   // the snapshot survives later price/label edits in admin.
   const itemRows = input.cartItems.map((item) => {
@@ -166,12 +187,19 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       colorLabel: v.color_label,
       unitPrice: v.price,
     };
+    const frameAssetId = frameByKey.get(`${v.product_id}|${v.color_code}`) ?? null;
     return {
       order_id: order.id as string,
       variant_snapshot: snapshot,
       photo_url: item.photoUrl,
       crop_transform: item.cropTransform,
       print_file_url: null,
+      // Render-pipeline meta (migration 015). `stage_size` is not part of the
+      // frozen CartItem contract yet — left NULL; the pipeline derives a
+      // fallback from variant aspect ratio. `frame_asset_id` is resolved from
+      // (product, color) above.
+      frame_asset_id: frameAssetId,
+      stage_size: null,
       quantity: item.quantity,
       price: v.price,
     };
