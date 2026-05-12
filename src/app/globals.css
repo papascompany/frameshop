@@ -1,87 +1,191 @@
 @import "tailwindcss";
 
 /* ────────────────────────────────────────────────────────────────────────
- * Design tokens (ZZIXX-inspired)
+ * Design tokens — Nike-inspired (photography-first commerce)
  *
- *  - Dark header (#2A2A2A)
- *  - White body
- *  - Red accent for prices / CTAs (#E74C3C)
- *  - Subtle gray borders (#E5E5E5)
- *  - Pretendard primary, system fallback
- *  - 4px spacing base, 8px default radius (12px for cards, 0 for buttons)
+ *  Source of truth: DESIGN-nike.md (alpha)
+ *  Principle: "photography speaks, the chrome doesn't"
  *
- * Phase 1: light theme only. Dark mode is Phase 2.
+ *  - Pure black/white/single-gray UI palette
+ *  - Pill geometry (rounded.lg = 30px) for every CTA
+ *  - Zero-radius product cards on soft-cloud background
+ *  - 8px base spacing with 48px section rhythm
+ *  - Zero drop shadows; hairline dividers only
+ *
+ *  DEPRECATED (ZZIXX era — DO NOT USE):
+ *    - --color-header: #2A2A2A   → Nike header is canvas (#ffffff)
+ *    - --color-accent: #E74C3C   → Nike "accent" = sale text color only
+ *    - --color-border: #E5E5E5   → Replaced by --color-hairline (#cacacb)
+ *    - --radius-card: 12px       → Nike cards are radius 0
+ *    - --radius-button: 0px      → Nike buttons are pills (30px)
+ *
+ *  Phase 1: light theme only. Dark mode = Phase 2.
  * ──────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Brand surfaces */
-  --color-background: #ffffff;
-  --color-foreground: #1a1a1a;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f7f7f7;
-  --color-header: #2a2a2a;
-  --color-header-fg: #ffffff;
-  --color-border: #e5e5e5;
-  --color-border-strong: #cccccc;
-  --color-muted-fg: #6b6b6b;
+  /* ── Brand ─────────────────────────────────────────────────────────── */
+  --color-ink: #111111;                /* Nike Black — universal primary */
+  --color-canvas: #ffffff;
+  --color-on-primary: #ffffff;
 
-  /* Accent */
-  --color-accent: #e74c3c;
-  --color-accent-hover: #d83a2a;
-  --color-accent-fg: #ffffff;
+  /* ── Surface ───────────────────────────────────────────────────────── */
+  --color-soft-cloud: #f5f5f5;         /* photo stage, secondary CTA, search pill */
+  --color-hairline: #cacacb;           /* 1px dividers */
+  --color-hairline-soft: #e5e5e5;      /* inset bottom-line under sticky bars */
 
-  /* Status */
-  --color-success: #16a34a;
+  /* ── Text ──────────────────────────────────────────────────────────── */
+  --color-charcoal: #39393b;
+  --color-ash: #4b4b4d;
+  --color-mute: #707072;
+  --color-stone: #9e9ea0;
+
+  /* ── Semantic ──────────────────────────────────────────────────────── */
+  --color-sale: #d30005;
+  --color-sale-deep: #780700;
+  --color-success: #007d48;
+  --color-success-bright: #1eaa52;
+  --color-info: #1151ff;
+  --color-info-deep: #0034e3;
+
+  /* ── Editorial accents (chips, swatch dots, editorial tiles only) ──── */
+  --color-accent-pink: #ed1aa0;
+  --color-accent-pink-soft: #ffb0dd;
+  --color-accent-purple-soft: #beaffd;
+  --color-accent-purple-pale: #d6d1ff;
+  --color-accent-teal: #0a7281;
+  --color-accent-pink-deep: #4c012d;
+
+  /* ── Backwards-compat semantic aliases ─────────────────────────────── */
+  /* Maps the prior ZZIXX semantic names onto Nike tokens so existing
+   * components (Input/Select/Tabs/Card/Badge/Dialog) absorb the new look
+   * without prop churn. */
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-ink);
+  --color-surface: var(--color-canvas);
+  --color-surface-muted: var(--color-soft-cloud);
+  --color-border: var(--color-hairline);
+  --color-border-strong: var(--color-charcoal);
+  --color-muted-fg: var(--color-mute);
+
+  /* "accent" preserved only as price/sale text signal — NEVER chrome bg */
+  --color-accent: var(--color-sale);
+  --color-accent-hover: var(--color-sale-deep);
+  --color-accent-fg: var(--color-canvas);
+
+  /* "header" is now the canvas-toned primary-nav, not the dark bar */
+  --color-header: var(--color-canvas);
+  --color-header-fg: var(--color-ink);
+
+  /* Status legacy aliases */
   --color-warning: #f59e0b;
-  --color-danger: #dc2626;
+  --color-danger: var(--color-sale);
 
-  /* Typography */
-  --font-sans: 'Pretendard Variable', 'Pretendard', 'Spoqa Han Sans Neo',
-    -apple-system, BlinkMacSystemFont, system-ui, 'Apple SD Gothic Neo',
-    'Malgun Gothic', sans-serif;
+  /* ── Typography ────────────────────────────────────────────────────── */
+  /* Display tier: Bebas Neue (Google Fonts) — the open-source substitute
+   * recommended in DESIGN-nike.md for Nike Futura ND at 96px/0.9 uppercase.
+   * UI tier: Pretendard Variable for Korean optical quality. */
+  --font-display: 'Bebas Neue', 'Inter', 'Pretendard Variable', system-ui,
+    sans-serif;
+  --font-sans: 'Pretendard Variable', 'Pretendard', 'Inter',
+    'Spoqa Han Sans Neo', -apple-system, BlinkMacSystemFont, system-ui,
+    'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 
-  /* Spacing scale extension (4px base — Tailwind already uses 0.25rem). */
-  --radius-card: 12px;
-  --radius-button: 0px;
-  --radius-input: 8px;
+  /* ── Radius (pill vocabulary) ──────────────────────────────────────── */
+  --radius-none: 0px;
+  --radius-sm: 18px;
+  --radius-md: 24px;     /* search pill */
+  --radius-lg: 30px;     /* every CTA pill */
+  --radius-full: 9999px;
 
-  /* Motion */
+  /* Backwards-compat: cards are now FLAT (0); buttons are PILLS (30). */
+  --radius-card: 0px;
+  --radius-button: 30px;
+  --radius-input: 24px;
+
+  /* ── Spacing rhythm ────────────────────────────────────────────────── */
+  --spacing-section: 48px;
+
+  /* ── Motion ────────────────────────────────────────────────────────── */
   --easing-out: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 150ms;
   --duration-base: 220ms;
 }
 
 /*
- * Tailwind v4 @theme inline: expose tokens to utility generation so we can
- * write e.g. `bg-accent`, `text-header-fg`, `border-border`.
+ * Tailwind v4 @theme inline — expose tokens to utility generation so we can
+ * write e.g. `bg-ink`, `text-canvas`, `border-hairline`, `rounded-lg` (=30px),
+ * `bg-soft-cloud`, `text-mute`, etc.
  */
 @theme inline {
+  /* Brand */
+  --color-ink: var(--color-ink);
+  --color-canvas: var(--color-canvas);
+  --color-on-primary: var(--color-on-primary);
+
+  /* Surface */
+  --color-soft-cloud: var(--color-soft-cloud);
+  --color-hairline: var(--color-hairline);
+  --color-hairline-soft: var(--color-hairline-soft);
+
+  /* Text */
+  --color-charcoal: var(--color-charcoal);
+  --color-ash: var(--color-ash);
+  --color-mute: var(--color-mute);
+  --color-stone: var(--color-stone);
+
+  /* Semantic */
+  --color-sale: var(--color-sale);
+  --color-sale-deep: var(--color-sale-deep);
+  --color-success: var(--color-success);
+  --color-success-bright: var(--color-success-bright);
+  --color-info: var(--color-info);
+  --color-info-deep: var(--color-info-deep);
+
+  /* Editorial accents */
+  --color-accent-pink: var(--color-accent-pink);
+  --color-accent-pink-soft: var(--color-accent-pink-soft);
+  --color-accent-purple-soft: var(--color-accent-purple-soft);
+  --color-accent-purple-pale: var(--color-accent-purple-pale);
+  --color-accent-teal: var(--color-accent-teal);
+  --color-accent-pink-deep: var(--color-accent-pink-deep);
+
+  /* Backwards-compat aliases */
   --color-background: var(--color-background);
   --color-foreground: var(--color-foreground);
   --color-surface: var(--color-surface);
   --color-surface-muted: var(--color-surface-muted);
-  --color-header: var(--color-header);
-  --color-header-fg: var(--color-header-fg);
   --color-border: var(--color-border);
   --color-border-strong: var(--color-border-strong);
   --color-muted-fg: var(--color-muted-fg);
-
   --color-accent: var(--color-accent);
   --color-accent-hover: var(--color-accent-hover);
   --color-accent-fg: var(--color-accent-fg);
-
-  --color-success: var(--color-success);
+  --color-header: var(--color-header);
+  --color-header-fg: var(--color-header-fg);
   --color-warning: var(--color-warning);
   --color-danger: var(--color-danger);
 
+  /* Fonts */
+  --font-display: var(--font-display);
   --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 
+  /* Radius */
+  --radius-none: var(--radius-none);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-full: var(--radius-full);
   --radius-card: var(--radius-card);
   --radius-button: var(--radius-button);
   --radius-input: var(--radius-input);
+
+  /* Spacing extension */
+  --spacing-section: var(--spacing-section);
 }
 
-/* Pretendard self-hosted via CDN (Phase 1 expedient; Phase 2 host locally). */
+/* ── Pretendard self-hosted via CDN (Phase 1 expedient) ──────────────── */
 @font-face {
   font-family: 'Pretendard Variable';
   font-weight: 45 920;
@@ -91,17 +195,21 @@
     format('woff2-variations');
 }
 
-/* ── Global resets / typography ──────────────────────────────────────── */
+/* Bebas Neue loaded via <link> tag in layout.tsx (Google Fonts CDN). */
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Global resets / typography
+ * ──────────────────────────────────────────────────────────────────────── */
 html {
   -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
+  background: var(--color-canvas);
+  color: var(--color-ink);
   font-family: var(--font-sans);
   font-feature-settings: 'tnum' 1, 'ss03' 1;
-  /* Korean rendering rules from designer.md */
+  /* Korean rendering rules */
   word-break: keep-all;
   line-height: 1.6;
   text-rendering: optimizeLegibility;
@@ -111,8 +219,9 @@ button {
   font-family: inherit;
 }
 
+/* Visible focus — uses ink (true black) instead of red sale color. */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-ink);
   outline-offset: 2px;
 }
 
@@ -124,4 +233,107 @@ button {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Editorial typography utilities
+ *
+ *  - `.display-campaign` — 96px uppercase Bebas Neue (campaign hero ONLY)
+ *  - `.editorial-headline-ko` — Korean equivalent at Pretendard 900
+ *  - `.heading-xl/lg/md` — section / card / row headings
+ *  - `.caption-md/sm` — meta text in product cards & filters
+ *  - `.utility-xs` — 9px legal copy
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.display-campaign {
+  font-family: var(--font-display);
+  font-size: clamp(48px, 8vw, 96px);
+  font-weight: 500;
+  line-height: 0.9;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.editorial-headline-ko {
+  font-family: var(--font-sans);
+  font-size: clamp(40px, 7vw, 80px);
+  font-weight: 900;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+}
+
+.heading-xl {
+  font-family: var(--font-sans);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.heading-lg {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.heading-md {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.75;
+  letter-spacing: 0;
+}
+
+.body-md {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.body-strong {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.caption-md {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.caption-sm {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.utility-xs {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.75;
+}
+
+/* "Tap collapse" — Nike's signature pressed-state feedback, toned down to
+ * 0.98 scale (true 0.5 is too aggressive for a frame e-commerce surface). */
+.tap-collapse {
+  transition: transform var(--duration-fast) var(--easing-out),
+    opacity var(--duration-fast) var(--easing-out);
+}
+.tap-collapse:active {
+  transform: scale(0.98);
+  opacity: 0.9;
+}
+
+/* Inset hairline-soft bottom line — the only "shadow" the system allows.
+ * Used by sticky primary-nav and tab strips. */
+.inset-hairline-bottom {
+  box-shadow: inset 0 -1px 0 var(--color-hairline-soft);
 }
