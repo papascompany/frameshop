@@ -160,6 +160,11 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 - 2026-05-12: typecheck + build 모두 통과.
 - 2026-05-12: Phase 4 Frontend Dev 완료 — (shop) layout + 9개 페이지 + admin 5개 페이지 + Zustand editor store + FrameCanvas(Konva dynamic). 빌드 산출물 20개 라우트.
 - 2026-05-12: Phase 1 MVP 완료 — 사용자 검수 대기 (STOP).
+- 2026-05-12: PR #1 + #3 main 머지 완료, GitHub `papascompany/frameshop` public repo.
+- 2026-05-12: Vercel 연결 — production env 7개 + preview env 7개 + development env 7개 (sensitive 분리 적용).
+- 2026-05-12: Vercel Node 버전 24.x → 22.x로 변경 (frameshop 단일 프로젝트만 영향, Konva 호환성 안전).
+- 2026-05-12: Supabase Auth site_url을 `https://frameshop-snowy.vercel.app`로 변경 + localhost dev allow list 등록.
+- 2026-05-12: 운영 이슈 정리 — Toss 결제는 issue #2로 연기, Vercel/Supabase CLI minor 업데이트는 사용자 직접 (영향 minimal).
 - 2026-05-12: Phase 5 QC fix (Architect) — P1-04 next.config.ts `images.remotePatterns` + `formats` 추가, P1-07 `httpsUrl()` 헬퍼 신설 후 curation/admin/cart schema에 적용. ADR-016 등록. typecheck/test/build 모두 통과.
 - 2026-05-12: Phase 5 QC fix 통합 — backend(P0-01 createOrder DB 권위화 + P1-01 webhook amount + P1-02 env split + P1-03 .env example + P1-05 sharp magic-bytes/thumb/RL) + frontend(P1-05 client resize + P1-06 Radix Dialog + P1-07 safeHref). 55 passing/19 todo/0 failed. Verdict: GO.
 - 2026-05-12: GitHub PR #1 생성 (papascompany/frameshop, 9 commits, 165 files).
