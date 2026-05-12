@@ -71,13 +71,13 @@
 | ID | 파일 | 요약 | Owner |
 |---|---|---|---|
 | P2-01 | `src/app/api/payment/confirm/route.ts:35-38` | `as unknown as ReturnType<...>` 이중 캐스팅 → `asBrand<OrderNo>(...)` 단순화 | backend-dev |
-| P2-02 | `src/types/editor.ts:36-89`, `src/store/editor.ts:23-33` | `EditorState.productId` non-null vs store nullable vs schema mismatch (ADR-014 drift) | architect |
+| P2-02 | `src/types/editor.ts:36-89`, `src/store/editor.ts:23-33` | `EditorState.productId` non-null vs store nullable vs schema mismatch (ADR-014 drift) — **Resolved 2026-05-12 (architect): `EditorState.productId` 및 `editorStateSchema.productId`를 nullable로 정렬** | architect |
 | P2-03 | `src/store/editor.ts:137-144` | `useCurrentVariantPrice`가 매번 O(N) — variantsByKey 직접 lookup | frontend-dev |
-| P2-04 | `supabase/migrations/006_photos.sql`, `012_rls_policies.sql` | 익명 사진 cleanup/만료 잡 부재 | architect (cron) |
+| P2-04 | `supabase/migrations/006_photos.sql`, `012_rls_policies.sql` | 익명 사진 cleanup/만료 잡 부재 — **Resolved 2026-05-12 (architect): `013_photos_cleanup.sql` 추가, ADR-017로 트랙됨** | architect (cron) |
 | P2-05 | `src/app/api/{orders,cart,photos/upload}/route.ts` | CSRF/Origin 검증 부재. 결제는 amount로 보호되지만 spam 가능 | backend-dev |
 | P2-06 | `src/lib/db/product.ts:32-37` | `getProductDetail`이 category.is_active 미검증. 직접 URL 진입 시 비활성 카테고리 상품 노출 | backend-dev |
-| P2-07 | `src/app/api/photos/upload/route.ts:94-95` | photos 버킷 public — URL 추측 시 접근 가능 (의도된 설계, 문서화 필요) | architect |
-| P2-08 | `src/lib/db/order.ts:42-58` | ADR-013이 약속한 atomic single-statement RETURNING 미구현 — race window 존재 | architect |
+| P2-07 | `src/app/api/photos/upload/route.ts:94-95` | photos 버킷 public — URL 추측 시 접근 가능 (의도된 설계, 문서화 필요) — **Resolved 2026-05-12 (architect): ADR-018로 트랙됨; Phase 3 hardening 옵션 명시** | architect |
+| P2-08 | `src/lib/db/order.ts:42-58` | ADR-013이 약속한 atomic single-statement RETURNING 미구현 — race window 존재 — **Resolved 2026-05-12 (architect): `014_order_no_atomic.sql` 추가, ADR-019로 트랙됨; backend-dev가 `generateOrderNo`에서 `rpc('next_order_no')` 호출로 전환 필요 (TODO 코멘트 마이그레이션에 명시)** | architect |
 | P2-09 | `tests/integration/api/*` | 핵심 보안 검증(AMOUNT_MISMATCH, ALREADY_PAID, valid signature) `it.todo` 상태 | tester |
 
 ---

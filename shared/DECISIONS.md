@@ -173,13 +173,14 @@
 
 ## ADR-013: order_sequences 테이블 + UPSERT 기반 order_no 발급
 **Date:** 2026-05-12
-**Status:** Accepted
+**Status:** Superseded by ADR-019 (2026-05-12)
 **Context:** order.md AC-2: 같은 날 시퀀스가 동시성 안전해야 함. Postgres advisory lock vs sequence table 검토.
 **Decision:** `order_sequences(day date PK, seq int)` 테이블. 발급 시 `INSERT ... ON CONFLICT (day) DO UPDATE SET seq = order_sequences.seq + 1 RETURNING seq` 한 줄로 atomic. KST 기준 day.
 **Consequences:**
 - (+) advisory lock보다 디버그 친화적 (테이블 조회로 진행상황 확인 가능)
 - (+) 트랜잭션 내 한 statement로 race 안전
 - (-) day 자정 경계 정확성은 애플리케이션 layer의 KST 변환에 의존.
+**Postscript (2026-05-12):** Supabase JS 클라이언트가 단일 statement `INSERT ... ON CONFLICT ... RETURNING`을 직접 호출하지 못해, Phase 1 구현(`src/lib/db/order.ts:42-58`)이 SELECT → UPSERT 두 statement로 분리되었고 race window가 남았다 (코드 주석에 명시됨). P2-08에서 SECURITY DEFINER RPC로 해소 → ADR-019.
 
 ## ADR-014: TypeScript 타입 + Zod 스키마 공존 패턴
 **Date:** 2026-05-12
@@ -226,5 +227,92 @@ Supabase Storage가 항상 https를 서빙하므로 admin 입력/사용자 업�
 **Consequences:**
 - (+) 서버 번들에 Konva 포함 방지 + 단위 테스트가 jsdom 없이 가능
 - (-) 핸들러 안에서 Konva 타입을 쓸 때는 동적 import에서 받아오는 번거로움.
+
+---
+
+## ADR-017: 익명 사진 30일 retention + pg_cron 일일 cleanup (P2-04 fix)
+**Date:** 2026-05-12
+**Status:** Accepted (P2-04 fix)
+**Context:** ADR-010이 비회원 사진을 `photos.user_id IS NULL AND session_id IS NOT NULL`로 격리했지만, "Phase 2 cleanup job"이 보류 상태로 남아 익명 행이 영구 누적될 위험이 있었다. Phase 1 QC P2-04가 이를 식별. 익명 사진은 마이페이지 연결이 없으므로 일정 기간 후 삭제해도 사용자 영향이 없다.
+
+**Decision:**
+- **Retention:** `user_id IS NULL` 사진은 `created_at + 30 days` 후 삭제 대상.
+- **실행 메커니즘:** PostgreSQL `pg_cron` 확장 + SECURITY DEFINER 함수.
+  - `public.delete_expired_anonymous_photos()` — 만료된 익명 사진 DELETE, 삭제 행수 RETURN.
+  - 스케줄: 매일 18:00 UTC = 03:00 KST (off-peak).
+  - 이름: `cleanup-anon-photos`.
+- **권한:** `REVOKE ALL FROM PUBLIC`; `GRANT EXECUTE TO service_role`. pg_cron이 superuser 권한으로 실행.
+- **Storage cleanup은 Phase 3로 분리:** `photos` 테이블 DELETE는 Storage 객체(`photos/anon/<sessionId>/...` JPEG 파일)는 건드리지 않는다. Storage는 별도 Edge Function(scheduled)으로 Phase 3에서 정리. SQL 안에서는 Storage API 접근 불가.
+- **마이그레이션:** `supabase/migrations/013_photos_cleanup.sql`.
+- **로깅:** 삭제 수가 0보다 크면 `RAISE NOTICE` (postgres log로 ops가 grep 가능).
+
+**Consequences:**
+- (+) 익명 사진 무한 누적 방지 → DB / 비용 / 백업 사이즈 안정화
+- (+) 회원 사진은 영향 0 (`user_id IS NOT NULL` 가드)
+- (+) 마이그레이션 안에서 함수 + 스케줄 모두 등록 → 재실행 안전
+- (-) Storage 객체는 30일 후에도 남음 — Phase 3 Edge Function 도입 전까지 stale storage cost 잔존
+- (-) `pg_cron`이 활성화되지 않은 환경(저티어 Supabase, self-hosted)에서는 자동 실행 안 됨. 마이그레이션은 NOTICE만 남기고 통과; 운영자는 외부 스케줄러로 함수 직접 호출 가능.
+
+**Alternatives Considered:**
+- Cron job in Vercel (`/api/cron/cleanup-photos`) — 추가 인프라 의존, secret 관리 필요. pg_cron이 더 단순.
+- 만료 컬럼(`expires_at`)을 photos에 추가 → 더 명시적이지만 schema 변경 + 모든 INSERT 경로 수정 필요. retention 정책 변경 시 행 UPDATE 필요. Skipped.
+- RLS 통한 read 차단 (만료 행을 0건처럼 응답) — 디스크/백업 비용은 그대로. Skipped.
+
+---
+
+## ADR-018: photos 버킷 public 정책 (P2-07 문서화)
+**Date:** 2026-05-12
+**Status:** Accepted (P2-07 문서화 결정)
+**Context:** P2-07 QC 지적: Phase 1의 photos Supabase Storage 버킷은 `public = true`로 설정되어 있어, UUID 기반 URL을 확보한 모든 클라이언트(인증 없음)가 객체를 GET할 수 있다. UUID v4가 추측 가능성을 사실상 0에 수렴시키지만, URL이 한 번 노출되면 (예: 사용자 디바이스 캡쳐, 공유, log) 보호 메커니즘이 없다. 추가로 `cart_items.photo_url` / `order_items.photo_url` 스냅샷은 평문 URL로 저장되어 일반 사용자가 자기 cart/order 안에서 항상 자신의 photo URL을 본다 — public 접근이 사실상 요구되는 셈.
+
+**Decision:** Phase 1은 photos 버킷 `public = true`를 유지한다. 이는 의도된 trade-off:
+- (+) **단순함** — 서버 라우트가 signed URL 발급 책임을 지지 않음. Next/Image, `<img src>`, `next/link preview` 등이 추가 처리 없이 동작.
+- (+) **cart/order 스냅샷 호환** — `cart_items.photo_url`, `order_items.photo_url`이 영구 유효한 URL을 보관 가능 (signed URL은 만료되어 과거 주문 조회 시 깨짐).
+- (+) **CDN 캐시** — Supabase CDN이 public 객체만 캐시. signed URL은 캐시 hit률이 낮다.
+- (-) **URL leak = exposure** — URL이 새어나가면 누구나 조회. UUID 난수성에 의존.
+- (-) **사용자별 권한 검증 불가** — 다른 사용자의 photo URL을 직접 부르면 응답함. (별도 row 권한은 RLS가 막지만 Storage object은 무관.)
+
+**Phase 3 hardening 옵션:**
+1. Storage 버킷을 `public = false`로 전환.
+2. signed URL 발급 Edge Function (`/api/photos/signed-url?photoId=...&ttl=3600`) — RLS 검증 후 1시간 TTL 발급.
+3. `cart_items.photo_url` / `order_items.photo_url` 컬럼 의미를 "object path"로 바꾸고, 응답 시 server-side에서 signed URL로 변환.
+4. Next/Image loader를 custom으로 교체.
+
+**감수 사항:**
+- 사용자 사진은 일반적으로 가족/풍경 등 비밀이 아닌 콘텐츠. 의료/개인정보 사진과 달리 leak 임팩트가 제한적.
+- UUID v4 = 122 bits 엔트로피 → 우연 추측 ≈ 0.
+- Phase 1 출시 직후 모니터링: storage 객체 access log를 주기적으로 검토 (anomalous traffic 패턴 감지).
+
+**Alternatives Considered:**
+- Phase 1부터 signed URL — 추가 라우트 + cart/order 스냅샷 의미 재설계 필요 (path vs URL). 출시 일정상 미채택.
+- 버킷 private + service-role proxy 라우트로 streaming — bandwidth가 Vercel을 통과해 cost 증가. Skipped.
+
+---
+
+## ADR-019: order_no 발급 RPC 단일-statement atomicity (P2-08 fix)
+**Date:** 2026-05-12
+**Status:** Accepted (P2-08 fix; supersedes ADR-013 race window)
+**Context:** ADR-013은 `INSERT ... ON CONFLICT DO UPDATE SET seq = seq + 1 RETURNING seq`로 atomic 발급을 약속했지만, Phase 1 구현(`src/lib/db/order.ts:42-58`)이 Supabase JS 한계로 두 statement(`SELECT` → `UPSERT`)로 분리되었고 race window가 남았다 (코드 주석에 "race window is small but real" 명시). 동시 주문 폭주 시 `orders.order_no UNIQUE` 위반 또는 seq skip이 가능.
+
+**Decision:** PostgreSQL SECURITY DEFINER 함수 `public.next_order_no(day_kst date)`로 ADR-013 원안의 단일 statement를 안전하게 노출. RPC 호출 한 번으로 INSERT/UPSERT/RETURNING이 한 statement 안에 묶여 row-level lock으로 serialize됨.
+
+**구현:**
+- 마이그레이션 `supabase/migrations/014_order_no_atomic.sql`.
+- 함수 본문: `INSERT INTO order_sequences (day, seq) VALUES (day_kst, 1) ON CONFLICT (day) DO UPDATE SET seq = order_sequences.seq + 1 RETURNING seq INTO result;`
+- 권한: `REVOKE ALL FROM PUBLIC; GRANT EXECUTE TO authenticated, service_role.`
+- 애플리케이션 변경은 backend-dev follow-up (마이그레이션 내 TODO로 안내): `src/lib/db/order.ts`의 `generateOrderNo`가 `supabase.rpc('next_order_no', { day_kst })`를 호출하도록 수정.
+
+**Consequences:**
+- (+) race 없음 — `RETURNING` 이 row lock 후 평가되므로 동시 호출이 서로 다른 seq를 받는다.
+- (+) ADR-013의 원래 의도(한 statement atomic) 충족.
+- (-) 함수 변경 시 마이그레이션 새로 발행 필요 (Phase 1 immutable migration 원칙).
+- (-) 외부 PostgREST에서 RPC가 호출 가능해지지만 `REVOKE FROM PUBLIC`으로 anon은 차단.
+
+**Alternatives Considered:**
+- Advisory lock (`pg_advisory_xact_lock(hashtext(day_kst::text))`) → upsert → release: 동작하지만 lock contention 추적이 어렵고 디버그 친화도 낮음.
+- `serial` / `bigserial` 컬럼 + day prefix 분리: 시퀀스가 day 경계에서 reset 안 되어 `YYYYMMDD-0001` 포맷이 깨짐.
+- 클라이언트에서 retry on UNIQUE violation: 동작은 하지만 retry 폭주 + 사용자 응답 지연. Skipped.
+
+---
 
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_
