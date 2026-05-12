@@ -22,6 +22,29 @@ describe('POST /api/payment/confirm', () => {
     expect(body.code).toBe('BAD_JSON');
   });
 
+  it('returns 403 BAD_ORIGIN when Origin is cross-site (P2-05)', async () => {
+    const req = new Request('http://localhost/api/payment/confirm', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Production-style origin from an attacker domain. NODE_ENV=test so
+        // the helper only allows same-origin or localhost — `evil.example`
+        // matches neither.
+        Origin: 'https://evil.example',
+        'Sec-Fetch-Site': 'cross-site',
+      },
+      body: JSON.stringify({
+        paymentKey: 'pk-test',
+        orderId: '20260512-0001',
+        amount: 12000,
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('BAD_ORIGIN');
+  });
+
   it('returns 400 BAD_INPUT when schema rejects the payload', async () => {
     const req = new Request('http://localhost/api/payment/confirm', {
       method: 'POST',

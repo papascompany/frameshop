@@ -23,6 +23,7 @@ import { asBrand } from '@/types/common';
 import type { UserId } from '@/types/common';
 import { createOrder } from '@/lib/db/order';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { isSameOrigin } from '@/lib/security/same-origin';
 import { z } from 'zod';
 
 const bodySchema = z.object({
@@ -30,6 +31,13 @@ const bodySchema = z.object({
 }).and(createOrderInputSchema);
 
 export async function POST(request: Request): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json(
+      { ok: false, code: 'BAD_ORIGIN', message: 'Cross-origin request rejected' },
+      { status: 403 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

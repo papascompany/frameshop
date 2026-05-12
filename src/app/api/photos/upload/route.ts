@@ -27,6 +27,7 @@ import { createPhoto } from '@/lib/db/photo';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
 import { checkUploadRate } from '@/lib/upload-ratelimit';
+import { isSameOrigin } from '@/lib/security/same-origin';
 
 const BUCKET = 'photos';
 
@@ -34,6 +35,12 @@ const BUCKET = 'photos';
 const ALLOWED_SHARP_FORMATS = new Set(['jpeg', 'png', 'webp', 'heif']);
 
 export async function POST(request: Request): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json(
+      { ok: false, code: 'BAD_ORIGIN', message: 'Cross-origin request rejected' },
+      { status: 403 },
+    );
+  }
   const form = await request.formData();
   const file = form.get('file');
   const sessionIdRaw = form.get('sessionId');

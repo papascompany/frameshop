@@ -29,9 +29,13 @@ export async function getProductDetail(
 ): Promise<ProductDetail | null> {
   const supabase = await getServerSupabase();
 
+  // P2-06 fix: join `categories.is_active` so direct-URL access to a product
+  // whose parent category was deactivated returns null (404). Without this,
+  // `getProductsByCategory` would hide the product from listings but the
+  // detail page would still render. Keeps consistency across all read paths.
   const { data: productRow, error } = await supabase
     .from('products')
-    .select('*')
+    .select('*, categories!inner(is_active)')
     .eq('id', id as string)
     .eq('is_active', true)
     .maybeSingle();
@@ -40,6 +44,13 @@ export async function getProductDetail(
     throw new Error(`getProductDetail failed: ${error.message}`);
   }
   if (!productRow) return null;
+
+  // The embedded join is typed as `unknown` on the row; narrow before reading.
+  const joinedCategory = (productRow as { categories?: { is_active?: boolean } | null })
+    .categories;
+  if (!joinedCategory || joinedCategory.is_active !== true) {
+    return null;
+  }
 
   const [{ data: imageRows }, { data: frameRows }, { data: variantRows }] =
     await Promise.all([
