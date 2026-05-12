@@ -147,6 +147,8 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 없음.
 
 ## Recent Updates
+- 2026-05-13: **Image seed + admin user (heisenberg)** — Sharp 스크립트로 frame PNG 4종(black/brown/white/natural) 생성 + Supabase Storage 업로드, product_images 7개(thumb/gallery×4/guide×2), frame_assets 4색상, product_variants 16개(4색×4사이즈) 시드. Admin 계정 `yohan73@gmail.com` 비번 `Yohan0817` (role=admin) 설정 + 로그인 검증 완료. 재현 스크립트 `scripts/{generate-frame-assets.mjs, upload-frame-assets.sh, seed-admin-user.sh}` + `supabase/seed/01_phase1_image_seed.sql` 체크인.
+- 2026-05-13: **Landing redesign + ISR 캐싱 (heisenberg)** — HeroShowcase(3-slide carousel) + MasterpieceGallery(6 명화) + LifestyleStudio(split editorial) + CollectionRail(풍경 가로 스크롤) + ProductCard hover 리뉴얼 + Header 5메뉴 + MobileNav 5탭. 폰트 self-host(next/font/local Pretendard + Bebas Neue), `getAnonSupabase()` 신설로 랜딩 ISR(revalidate=600s) 가능, 카탈로그/상품 revalidate=300s, `staleTimes.dynamic=30`. 프로덕션 측정: 랜딩 `x-vercel-cache: HIT` → 0.58s (이전 3s).
 - 2026-05-12: Phase 0 bootstrap 완료 (Node v22, 521 packages 설치, build 통과)
 - 2026-05-12: docs/shared/.claude/agents를 본체에서 워크트리로 복사
 - 2026-05-12: turbopack.root 설정으로 lockfile 경고 해결
