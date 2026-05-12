@@ -124,6 +124,36 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const totalPrice = subtotal + shippingFee;
 
+  // P0-03: Verify photo ownership BEFORE writing any rows.
+  // Prevents User A from referencing User B's photo URL in their order, which
+  // would otherwise expose B's private photo in A's render output.
+  const photoUrls = input.cartItems.map((i) => i.photoUrl).filter(Boolean);
+  if (photoUrls.length > 0) {
+    const { data: ownedPhotos } = await supabase
+      .from('photos')
+      .select('original_url, user_id, session_id')
+      .in('original_url', photoUrls);
+
+    const ownedSet = new Set<string>();
+    for (const p of ownedPhotos ?? []) {
+      const row = p as { original_url: string; user_id: string | null; session_id: string | null };
+      const callerOwns =
+        (input.userId != null && row.user_id === (input.userId as string)) ||
+        (input.userId == null && input.sessionId != null && row.session_id === input.sessionId);
+      if (callerOwns) {
+        ownedSet.add(row.original_url);
+      }
+    }
+
+    const unowned = photoUrls.filter((u) => !ownedSet.has(u));
+    if (unowned.length > 0) {
+      throw new CreateOrderError(
+        'PHOTO_OWNERSHIP',
+        `Photo(s) not owned by caller: ${unowned.join(', ')}`,
+      );
+    }
+  }
+
   const orderNo = await generateOrderNo(new Date());
 
   const { data: orderRow, error: insErr } = await supabase

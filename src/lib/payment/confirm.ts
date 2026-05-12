@@ -16,7 +16,7 @@ import 'server-only';
 import { asBrand } from '@/types/common';
 import type { OrderNo, PaymentKey } from '@/types/common';
 import type { ConfirmPaymentInput, ConfirmResult } from '@/types/payment';
-import { tossClient, TossApiError } from './toss';
+import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionTo } from '../db/order';
 import { enqueuePrintRender } from '../render/enqueue';
 
@@ -45,8 +45,9 @@ export async function confirmPayment(
   }
 
   // Call Toss confirm.
+  let tossResp: TossConfirmResponse;
   try {
-    await tossClient.confirm({
+    tossResp = await tossClient.confirm({
       paymentKey: input.paymentKey,
       orderId: input.orderId as string,
       amount: input.amount,
@@ -59,6 +60,44 @@ export async function confirmPayment(
       ok: false,
       code: 'INTERNAL',
       message: err instanceof Error ? err.message : 'unknown',
+    };
+  }
+
+  // P0-01: Validate every field in the Toss response against our stored order.
+  // Prevents paymentKey-swap attacks where a paymentKey from a cheap order is
+  // replayed against an expensive order. Toss returns its own view of the
+  // transaction — if it disagrees with what we sent, something is wrong.
+  if (
+    tossResp.orderId !== (input.orderId as string) ||
+    tossResp.totalAmount !== input.amount ||
+    tossResp.status !== 'DONE'
+  ) {
+    // Best-effort cancel — Toss may reject if the payment is already in a
+    // non-cancellable state, but we must never mark the order as PAID.
+    try {
+      await tossClient.cancel({
+        paymentKey: input.paymentKey,
+        cancelReason: 'Payment response mismatch — internal security check',
+      });
+    } catch {
+      // Cancellation failure is logged at Toss's end; we still refuse to confirm.
+    }
+    console.error(
+      JSON.stringify({
+        event: 'payment_response_mismatch',
+        orderId: input.orderId,
+        expected: { orderId: input.orderId, amount: input.amount, status: 'DONE' },
+        received: {
+          orderId: tossResp.orderId,
+          amount: tossResp.totalAmount,
+          status: tossResp.status,
+        },
+      }),
+    );
+    return {
+      ok: false,
+      code: 'TOSS_REJECTED',
+      message: 'Payment response mismatch',
     };
   }
 

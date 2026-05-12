@@ -31,14 +31,17 @@ type VariantRow = {
   products: { name: string };
 };
 
+type PhotoRow = { original_url: string; user_id: string | null; session_id: string | null };
+
 type FakeState = {
   variants: VariantRow[];
   frameAssets: Array<{ id: string; product_id: string; color_code: string }>;
+  photos: PhotoRow[];
   insertedOrder?: Record<string, unknown>;
   insertedItems?: Array<Record<string, unknown>>;
 };
 
-const state: FakeState = { variants: [], frameAssets: [] };
+const state: FakeState = { variants: [], frameAssets: [], photos: [] };
 
 function makeChain(table: string) {
   // Minimal Supabase query-builder mock — supports the exact call shapes
@@ -107,6 +110,17 @@ function makeChain(table: string) {
       }),
     };
   }
+  if (table === 'photos') {
+    return {
+      select: (_cols: string) => ({
+        in: (_col: string, urls: string[]) =>
+          Promise.resolve({
+            data: state.photos.filter((p) => urls.includes(p.original_url)),
+            error: null,
+          }),
+      }),
+    };
+  }
   if (table === 'shipping_methods') {
     return {
       select: () => ({
@@ -169,7 +183,7 @@ const VARIANT_ID = '11111111-1111-1111-1111-111111111111';
 const PRODUCT_ID = '22222222-2222-2222-2222-222222222222';
 const PHOTO_ID = '33333333-3333-3333-3333-333333333333';
 
-function makeCartItem(price: number): CartItem {
+function makeCartItem(price: number, photoUrl = OWNED_PHOTO_URL): CartItem {
   return {
     localId: asBrand<LocalId>('44444444-4444-4444-4444-444444444444'),
     userId: null,
@@ -177,7 +191,7 @@ function makeCartItem(price: number): CartItem {
     variantId: asBrand<ProductVariantId>(VARIANT_ID),
     photoId: asBrand<PhotoId>(PHOTO_ID),
     options: { sizeCode: 'A4', colorCode: 'BLACK', matteCode: 'none', paperCode: 'glossy' },
-    photoUrl: 'https://example.com/photo.jpg',
+    photoUrl,
     cropTransform: { x: 0, y: 0, scale: 1, rotation: 0 },
     previewUrl: 'https://example.com/preview.jpg',
     price,
@@ -204,6 +218,8 @@ function makeInput(price: number): CreateOrderInput {
   };
 }
 
+const OWNED_PHOTO_URL = 'https://example.supabase.co/photo.jpg';
+
 beforeEach(() => {
   state.variants = [
     {
@@ -219,6 +235,10 @@ beforeEach(() => {
   ];
   state.frameAssets = [
     { id: 'frame-uuid-1', product_id: PRODUCT_ID, color_code: 'BLACK' },
+  ];
+  // Default: one photo owned by user-1 (P0-03 ownership checks).
+  state.photos = [
+    { original_url: OWNED_PHOTO_URL, user_id: 'user-1', session_id: null },
   ];
   delete state.insertedOrder;
   delete state.insertedItems;
@@ -266,5 +286,50 @@ describe('createOrder — P0-01 (price tampering)', () => {
     expect(snapshot.unitPrice).toBe(30000);
     // The order_items.price column is also the DB value, not the client's.
     expect(state.insertedItems?.[0]?.price).toBe(30000);
+  });
+});
+
+describe('createOrder — P0-03 (photo ownership)', () => {
+  it('throws PHOTO_OWNERSHIP when photo belongs to a different user', async () => {
+    const createOrder = await importCreateOrder();
+    // Photo URL exists in DB but is owned by user-2, not user-1.
+    const foreignUrl = 'https://example.supabase.co/other-user-photo.jpg';
+    state.photos = [
+      { original_url: foreignUrl, user_id: 'user-2', session_id: null },
+    ];
+    const input = { ...makeInput(30000), cartItems: [makeCartItem(30000, foreignUrl)] };
+    await expect(createOrder(input)).rejects.toMatchObject({ code: 'PHOTO_OWNERSHIP' });
+    await expect(createOrder(input)).rejects.toBeInstanceOf(CreateOrderError);
+    // Order must NOT have been written to DB.
+    expect(state.insertedOrder).toBeUndefined();
+  });
+
+  it('throws PHOTO_OWNERSHIP when photo is not in photos table at all', async () => {
+    const createOrder = await importCreateOrder();
+    state.photos = []; // empty — no photos in DB
+    const input = { ...makeInput(30000), cartItems: [makeCartItem(30000, 'https://example.supabase.co/unknown.jpg')] };
+    await expect(createOrder(input)).rejects.toMatchObject({ code: 'PHOTO_OWNERSHIP' });
+  });
+
+  it('accepts when photo is owned by the calling user', async () => {
+    const createOrder = await importCreateOrder();
+    // Default state.photos has OWNED_PHOTO_URL → user-1, and input has userId: 'user-1'.
+    const order = await createOrder(makeInput(30000));
+    expect(order.totalPrice).toBe(33000);
+    expect(state.insertedItems?.[0]?.photo_url).toBe(OWNED_PHOTO_URL);
+  });
+
+  it('accepts anonymous photo when session_id matches', async () => {
+    const createOrder = await importCreateOrder();
+    const anonUrl = 'https://example.supabase.co/anon-photo.jpg';
+    state.photos = [{ original_url: anonUrl, user_id: null, session_id: 'sess-abc' }];
+    const input: CreateOrderInput = {
+      ...makeInput(30000),
+      userId: null,
+      sessionId: 'sess-abc',
+      cartItems: [makeCartItem(30000, anonUrl)],
+    };
+    const order = await createOrder(input);
+    expect(order.totalPrice).toBe(33000);
   });
 });

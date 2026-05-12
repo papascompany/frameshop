@@ -19,6 +19,7 @@
  */
 
 import 'server-only';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { asBrand } from '@/types/common';
@@ -86,8 +87,8 @@ async function isAuthorisedCaller(request: Request): Promise<boolean> {
   const auth = request.headers.get('authorization') ?? '';
   if (auth.startsWith('Bearer ')) {
     const token = auth.slice('Bearer '.length).trim();
-    // Constant-time string compare to avoid timing attacks on the key.
-    if (timingSafeEqualStr(token, env.supabaseServiceRoleKey())) {
+    // Constant-time compare (HMAC-based) to prevent timing attacks on the key.
+    if (constantTimeEqualStr(token, env.supabaseServiceRoleKey())) {
       return true;
     }
   }
@@ -104,11 +105,22 @@ async function isAuthorisedCaller(request: Request): Promise<boolean> {
   }
 }
 
-function timingSafeEqualStr(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
+/**
+ * P0-04: Constant-time string equality using HMAC-SHA256.
+ *
+ * Why HMAC instead of a direct `crypto.timingSafeEqual`?
+ *   `timingSafeEqual` requires equal-length Buffers and throws otherwise,
+ *   meaning a naive wrapper must branch on length — leaking whether the
+ *   supplied token has the right byte count. Hashing both values with a
+ *   random per-call key normalises them to 32 bytes regardless of input
+ *   length, so the subsequent `timingSafeEqual` call is truly constant-time.
+ *
+ * The random key is single-use (not a secret), ensuring the approach works
+ * even if an attacker knows the HMAC key.
+ */
+function constantTimeEqualStr(a: string, b: string): boolean {
+  const k = randomBytes(32);
+  const ha = createHmac('sha256', k).update(a, 'utf8').digest();
+  const hb = createHmac('sha256', k).update(b, 'utf8').digest();
+  return timingSafeEqual(ha, hb);
 }

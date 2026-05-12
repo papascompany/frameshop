@@ -21,6 +21,7 @@ import 'server-only';
 import type { OrderItemId } from '@/types/common';
 import { getServiceRoleSupabase } from '../supabase/service';
 import { renderPrintFile, type InnerRectNorm } from './print';
+import { envPublic } from '../env-public';
 
 // Same fallback used by the editor when a frame_asset has a malformed inner_rect.
 const DEFAULT_INNER_RECT: InnerRectNorm = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
@@ -255,7 +256,51 @@ export async function renderOrderItemPrint(
 
 // ---------- helpers ----------
 
+/**
+ * P0-02 SSRF allowlist.
+ *
+ * Only HTTPS URLs pointing to known-safe image hosts may be fetched by the
+ * render pipeline. This prevents an attacker-controlled `photo_url` or
+ * `frame.png_url` from being used to probe cloud-metadata endpoints
+ * (e.g. 169.254.169.254) or internal services.
+ *
+ * Allowed hosts:
+ *   - Our own Supabase project host (NEXT_PUBLIC_SUPABASE_URL hostname)
+ *   - Any *.supabase.co (covers region-specific storage CDN subdomains)
+ *   - Unsplash image CDN (images.unsplash.com, plus.unsplash.com)
+ */
+function isAllowedImageHost(rawUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false; // reject non-parseable or relative URLs
+  }
+  if (parsed.protocol !== 'https:') return false;
+  const { hostname } = parsed;
+
+  // Supabase project host.
+  try {
+    const supabaseHost = new URL(envPublic.supabaseUrl()).hostname;
+    if (hostname === supabaseHost) return true;
+  } catch {
+    // envPublic misconfigured — fall through to wildcard check.
+  }
+  // Supabase Storage CDN (wildcard).
+  if (hostname.endsWith('.supabase.co')) return true;
+  // Unsplash image CDN.
+  if (hostname === 'images.unsplash.com' || hostname === 'plus.unsplash.com') return true;
+
+  return false;
+}
+
 async function fetchAsBuffer(url: string): Promise<Buffer> {
+  // P0-02: Guard against SSRF before making any outbound request.
+  if (!isAllowedImageHost(url)) {
+    let host = '(invalid URL)';
+    try { host = new URL(url).hostname; } catch { /* ignore */ }
+    throw new Error(`SSRF guard: host "${host}" is not in the image allowlist`);
+  }
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`fetch ${url} failed: ${res.status}`);

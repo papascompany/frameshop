@@ -70,6 +70,8 @@ export async function POST(request: Request): Promise<Response> {
       : parsed.data.userId
         ? asBrand<UserId>(parsed.data.userId)
         : null,
+    // P0-03: Forward sessionId for anonymous photo-ownership verification.
+    sessionId: parsed.data.sessionId ?? null,
   };
 
   try {
@@ -82,6 +84,7 @@ export async function POST(request: Request): Promise<Response> {
         : err.code === 'INVALID_SHIPPING_METHOD' ? 422
         : err.code === 'SHIPPING_FEE_MISMATCH' ? 422
         : err.code === 'PRICE_MISMATCH' ? 422
+        : err.code === 'PHOTO_OWNERSHIP' ? 403
         : 500;
       return NextResponse.json(
         { ok: false, code: err.code, message: err.message },
