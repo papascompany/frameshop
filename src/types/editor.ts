@@ -33,8 +33,18 @@ export type CropTransform = {
 
 // ---------- Editor state (Zustand store) ----------
 
+/**
+ * Editor state shape shared between the Zustand store and IO boundaries.
+ *
+ * P2-02 fix (2026-05-12, ADR-014 drift resolution): `productId` is nullable
+ * to represent the pre-init state ("before product selection / hydration").
+ * Once `init({ productId, ... })` is called the value is non-null for the
+ * lifetime of the editor session. Callers that need a non-null product can
+ * narrow with a runtime guard.
+ */
 export type EditorState = {
-  productId: ProductId;
+  /** null = before product selection (store initial state). */
+  productId: ProductId | null;
   photoId: PhotoId | null;
   selectedOptions: SelectedOptions;
   selectedVariantId: ProductVariantId | null;
@@ -79,7 +89,10 @@ export const cropTransformSchema = z.object({
 });
 
 export const editorStateSchema = z.object({
-  productId: z.string().min(1),
+  // P2-02 fix: aligned with `EditorState.productId: ProductId | null`.
+  // `null` = before product selection. After `init()` runs the store
+  // sets a real ProductId.
+  productId: z.string().min(1).nullable(),
   photoId: z.string().min(1).nullable(),
   selectedOptions: selectedOptionsSchema,
   selectedVariantId: z.string().min(1).nullable(),
