@@ -119,19 +119,29 @@
 ---
 
 ## Current Bottleneck
-**STOP 조건 도달: Phase 1 MVP 완료** (PLAN.md §9 정의).
-오케스트레이터 지시 §9에 따라 멈춤 — 사용자 검수 요청.
+**Phase 1 MVP 실제 연결까지 완료** (DB + dev 서버 동작 확인).
 
-핵심 주문 플로우 E2E 표면 완성:
-landing → catalog → product → studio → cart → checkout (배송 방법 ADR-008) → payment(test) → order success.
+핵심 주문 플로우 E2E 표면:
+landing → catalog → product → studio → cart → checkout (배송 방법 ADR-008) → [Toss 결제는 issue #2로 연기] → order success.
 
-남은 사용자 작업:
-1. Supabase 프로젝트 생성 + .env.local 채우기 (URL/anon/service-role)
-2. Toss test 시크릿/클라이언트 키 발급 + .env.local 채우기
-3. `supabase db push` 또는 마이그레이션 직접 실행 (001~012)
-4. Storage buckets 생성: `photos` (public), `previews` (public)
-5. 시드 데이터: 카테고리 1 + 상품 1 + 변형 몇 개 + frame_assets 1
-6. (옵션) admin 사용자에게 `app_metadata.role='admin'` 부여
+### ✅ 환경 연결 완료
+- Supabase 프로젝트 `acxsxjmqgvkceqahwkpz` 연결
+- 마이그레이션 12개 적용 (002 pg_trgm 순서 fix 포함)
+- Storage buckets `photos`, `previews` 생성 + RLS
+- 시드: 카테고리 1 + 상품 1 + variants 4 + shipping_methods 3
+- `.env.local`: URL/anon/service_role 채움
+- `npm run dev` (port 3001): 핵심 8개 라우트 200 OK
+
+### 📅 사용자 결정으로 연기된 작업
+- **Toss 결제 연동**: GitHub Issue #2로 등록, Phase 1 마지막 단계
+
+### 📋 남은 선택 작업 (사용자 선택 필요)
+1. 이미지 업로드 + `product_images` / `frame_assets` 시드 (실제 카드 이미지)
+2. Admin 계정 생성 + `app_metadata.role='admin'` 부여 → `/admin` 검증
+3. PR #1 main 머지 (Phase 1 MVP를 main에 안전 보존)
+4. Phase 2 확장 (admin/frames, admin/options, admin/curation 누락 페이지)
+5. P2 9건 일부 선제 처리 (order_no atomic, photos cleanup cron)
+6. Issue #2 토스 결제 연동 (마지막)
 
 ## Open Blockers
 없음.
@@ -151,3 +161,8 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 - 2026-05-12: Phase 4 Frontend Dev 완료 — (shop) layout + 9개 페이지 + admin 5개 페이지 + Zustand editor store + FrameCanvas(Konva dynamic). 빌드 산출물 20개 라우트.
 - 2026-05-12: Phase 1 MVP 완료 — 사용자 검수 대기 (STOP).
 - 2026-05-12: Phase 5 QC fix (Architect) — P1-04 next.config.ts `images.remotePatterns` + `formats` 추가, P1-07 `httpsUrl()` 헬퍼 신설 후 curation/admin/cart schema에 적용. ADR-016 등록. typecheck/test/build 모두 통과.
+- 2026-05-12: Phase 5 QC fix 통합 — backend(P0-01 createOrder DB 권위화 + P1-01 webhook amount + P1-02 env split + P1-03 .env example + P1-05 sharp magic-bytes/thumb/RL) + frontend(P1-05 client resize + P1-06 Radix Dialog + P1-07 safeHref). 55 passing/19 todo/0 failed. Verdict: GO.
+- 2026-05-12: GitHub PR #1 생성 (papascompany/frameshop, 9 commits, 165 files).
+- 2026-05-12: Supabase 연결 — access token으로 `acxsxjmqgvkceqahwkpz` link, db push 12개 마이그레이션 적용 (002 pg_trgm 순서 fix 포함), storage buckets + 시드 데이터 적용 (categories 1 / products 1 / variants 4 / shipping_methods 3 / buckets 2).
+- 2026-05-12: `.env.local`에 SUPABASE_URL/anon/service_role 채움. `npm run dev` (port 3001) 8개 라우트 모두 200 OK.
+- 2026-05-12: Toss 결제 연동은 사용자 결정으로 Phase 1 마지막으로 연기 → GitHub Issue #2 등록.
