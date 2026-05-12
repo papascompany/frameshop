@@ -18,6 +18,7 @@ import type { OrderNo, PaymentKey } from '@/types/common';
 import type { ConfirmPaymentInput, ConfirmResult } from '@/types/payment';
 import { tossClient, TossApiError } from './toss';
 import { getOrder, transitionTo } from '../db/order';
+import { enqueuePrintRender } from '../render/enqueue';
 
 export async function confirmPayment(
   input: ConfirmPaymentInput,
@@ -62,6 +63,13 @@ export async function confirmPayment(
   }
 
   await transitionTo(order.id, 'PAID', { paymentKey: input.paymentKey });
+
+  // ADR-005: kick off 300dpi print renders as soon as the order is paid.
+  // Fire-and-forget — failures here must not bubble back to the buyer.
+  // The full order (with items) was loaded above; reuse its items.
+  for (const item of order.items) {
+    enqueuePrintRender(item.id);
+  }
 
   return {
     ok: true,
@@ -134,6 +142,15 @@ export async function handleWebhook(event: WebhookEvent): Promise<void> {
     await transitionTo(order.id, target, {
       paymentKey: event.data.paymentKey as PaymentKey,
     });
+    // Mirror confirmPayment's fire-and-forget render enqueue on PAID. The
+    // webhook arrives independently from the confirm route, so we re-enqueue
+    // here too; renderOrderItemPrint is idempotent (no-op if already
+    // rendered).
+    if (target === 'PAID') {
+      for (const item of order.items) {
+        enqueuePrintRender(item.id);
+      }
+    }
   } catch {
     // CANCELLED → PAID etc. are invalid; we already logged the raw payload.
   }

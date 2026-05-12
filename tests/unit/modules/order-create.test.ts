@@ -27,16 +27,18 @@ type VariantRow = {
   product_id: string;
   size_label: string;
   color_label: string;
+  color_code: string;
   products: { name: string };
 };
 
 type FakeState = {
   variants: VariantRow[];
+  frameAssets: Array<{ id: string; product_id: string; color_code: string }>;
   insertedOrder?: Record<string, unknown>;
   insertedItems?: Array<Record<string, unknown>>;
 };
 
-const state: FakeState = { variants: [] };
+const state: FakeState = { variants: [], frameAssets: [] };
 
 function makeChain(table: string) {
   // Minimal Supabase query-builder mock — supports the exact call shapes
@@ -92,6 +94,17 @@ function makeChain(table: string) {
         state.insertedItems = rows;
         return Promise.resolve({ error: null });
       },
+    };
+  }
+  if (table === 'frame_assets') {
+    return {
+      select: () => ({
+        in: (_col: string, _ids: string[]) =>
+          Promise.resolve({
+            data: state.frameAssets,
+            error: null,
+          }),
+      }),
     };
   }
   if (table === 'shipping_methods') {
@@ -200,8 +213,12 @@ beforeEach(() => {
       product_id: PRODUCT_ID,
       size_label: 'A4',
       color_label: 'Black',
+      color_code: 'BLACK',
       products: { name: 'Frame A' },
     },
+  ];
+  state.frameAssets = [
+    { id: 'frame-uuid-1', product_id: PRODUCT_ID, color_code: 'BLACK' },
   ];
   delete state.insertedOrder;
   delete state.insertedItems;
