@@ -6,9 +6,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen flex flex-col">
       <header className="bg-header text-header-fg px-4 py-3 flex items-center gap-4">
         <Link href="/admin" className="font-semibold">FrameShop · Admin</Link>
-        <nav className="ml-auto flex gap-4 text-sm">
+        <nav className="ml-auto flex flex-wrap gap-x-4 gap-y-1 text-sm">
           <Link href="/admin/products">상품</Link>
+          <Link href="/admin/frames">프레임</Link>
+          <Link href="/admin/options">옵션</Link>
           <Link href="/admin/orders">주문</Link>
+          <Link href="/admin/curation">큐레이션</Link>
           <Link href="/admin/shipping">배송 설정</Link>
         </nav>
       </header>
