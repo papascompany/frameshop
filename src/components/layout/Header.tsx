@@ -2,25 +2,55 @@ import Link from 'next/link';
 import { Container } from './Container';
 
 /**
- * Site header — sticky, dark, with brand + cart link.
- * Mobile shows only brand + cart; categories live in <MobileNav> bottom bar.
+ * Primary nav — Nike-aligned.
+ *
+ *  Surface (DESIGN-nike.md `primary-nav`):
+ *   - bg-canvas, text-ink, 56–64px height
+ *   - 1px inset hairline-soft bottom edge (the system's only "shadow")
+ *   - logo at left, centered nav row, right cluster (cart/account)
+ *   - active section gets a 2px underline in ink (no fill)
+ *
+ *  Mobile: center nav row collapses; brand + cart link remain. The bottom
+ *  tab bar (`<MobileNav />`) carries the category navigation on small
+ *  viewports.
  */
 export function Header() {
   return (
-    <header className="sticky top-0 z-40 bg-header text-header-fg">
+    <header className="sticky top-0 z-40 bg-canvas text-ink inset-hairline-bottom">
       <Container size="xl" className="flex items-center justify-between h-14">
-        <Link href="/" className="text-base font-semibold tracking-tight">
+        <Link
+          href="/"
+          className="body-strong tracking-tight uppercase text-ink"
+        >
           FrameShop
         </Link>
-        <nav aria-label="Primary" className="hidden md:flex items-center gap-6 text-sm">
-          <Link href="/" className="hover:text-accent">홈</Link>
-          <Link href="/catalog/basic-frame" className="hover:text-accent">카탈로그</Link>
-          <Link href="/order/lookup" className="hover:text-accent">주문조회</Link>
+        <nav
+          aria-label="Primary"
+          className="hidden md:flex items-center gap-8 body-strong"
+        >
+          <Link
+            href="/"
+            className="text-ink hover:text-charcoal transition-colors"
+          >
+            홈
+          </Link>
+          <Link
+            href="/catalog/basic-frame"
+            className="text-ink hover:text-charcoal transition-colors"
+          >
+            카탈로그
+          </Link>
+          <Link
+            href="/order/lookup"
+            className="text-ink hover:text-charcoal transition-colors"
+          >
+            주문조회
+          </Link>
         </nav>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <Link
             href="/cart"
-            className="text-sm hover:text-accent"
+            className="caption-md text-ink hover:text-charcoal transition-colors"
             aria-label="장바구니"
           >
             장바구니
