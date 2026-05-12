@@ -24,7 +24,7 @@ import { calculateShippingFee } from '../shipping/calc';
 import { getShippingMethods } from './shipping';
 import { getServiceRoleSupabase } from '../supabase/service';
 
-// ---------- generateOrderNo (atomic UPSERT) ----------
+// ---------- generateOrderNo (atomic RPC) ----------
 
 export async function generateOrderNo(today: Date): Promise<OrderNo> {
   const supabase = getServiceRoleSupabase();
@@ -33,26 +33,20 @@ export async function generateOrderNo(today: Date): Promise<OrderNo> {
   const kst = new Date(today.getTime() + 9 * 60 * 60 * 1000);
   const day = kst.toISOString().slice(0, 10);
 
-  // Atomic: INSERT ... ON CONFLICT DO UPDATE returning incremented seq.
-  // Supabase JS doesn't expose ON CONFLICT directly, so we use rpc-less SQL
-  // through .from().upsert() — but we need RETURNING the new seq.
-  // Workaround: call a SECURITY DEFINER function in DB (see migration 013).
-  // For now, optimistic UPSERT then SELECT — race window is small but real;
-  // a real Phase 2 migration adds a Postgres function.
-  const { data: existing } = await supabase
-    .from('order_sequences')
-    .select('seq')
-    .eq('day', day)
-    .maybeSingle();
+  // Atomic via SECURITY DEFINER function `next_order_no` (migration 014).
+  // The function wraps INSERT ... ON CONFLICT DO UPDATE ... RETURNING seq
+  // in a single statement, so concurrent calls cannot collide on the
+  // same (day, seq) — race window eliminated. See ADR-019.
+  const { data: nextSeq, error: rpcErr } = await supabase.rpc(
+    'next_order_no',
+    { day_kst: day },
+  );
 
-  const nextSeq = (existing?.seq ?? 0) + 1;
-
-  const { error: upsertErr } = await supabase
-    .from('order_sequences')
-    .upsert({ day, seq: nextSeq }, { onConflict: 'day' });
-
-  if (upsertErr) {
-    throw new CreateOrderError('SEQUENCE_FAILED', upsertErr.message);
+  if (rpcErr || typeof nextSeq !== 'number') {
+    throw new CreateOrderError(
+      'SEQUENCE_FAILED',
+      rpcErr?.message ?? 'next_order_no returned non-numeric result',
+    );
   }
   return asBrand<OrderNo>(formatOrderNo(today, nextSeq));
 }
