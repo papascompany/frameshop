@@ -12,6 +12,7 @@ import type { UserId } from '@/types/common';
 import type { CartItem } from '@/types/cart';
 import { listCartForUser, upsertCartItem } from '@/lib/db/cart';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { isSameOrigin } from '@/lib/security/same-origin';
 
 async function getUserId(): Promise<UserId | null> {
   const supabase = await getServerSupabase();
@@ -32,6 +33,12 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json(
+      { ok: false, code: 'BAD_ORIGIN', message: 'Cross-origin request rejected' },
+      { status: 403 },
+    );
+  }
   const userId = await getUserId();
   if (!userId) {
     return NextResponse.json(

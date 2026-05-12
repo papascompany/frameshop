@@ -5,6 +5,7 @@ import type { LocalId, UserId } from '@/types/common';
 import { CART_QUANTITY_MAX, CART_QUANTITY_MIN } from '@/types/cart';
 import { removeCartItem, updateCartQuantity } from '@/lib/db/cart';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { isSameOrigin } from '@/lib/security/same-origin';
 
 async function getUserId(): Promise<UserId | null> {
   const supabase = await getServerSupabase();
@@ -16,6 +17,12 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ localId: string }> },
 ): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json(
+      { ok: false, code: 'BAD_ORIGIN', message: 'Cross-origin request rejected' },
+      { status: 403 },
+    );
+  }
   const userId = await getUserId();
   if (!userId) {
     return NextResponse.json({ ok: false, code: 'UNAUTHENTICATED' }, { status: 401 });
@@ -36,9 +43,15 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ localId: string }> },
 ): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return NextResponse.json(
+      { ok: false, code: 'BAD_ORIGIN', message: 'Cross-origin request rejected' },
+      { status: 403 },
+    );
+  }
   const userId = await getUserId();
   if (!userId) {
     return NextResponse.json({ ok: false, code: 'UNAUTHENTICATED' }, { status: 401 });
