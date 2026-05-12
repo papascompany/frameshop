@@ -216,7 +216,10 @@ export default async function LandingPage() {
       </section>
 
       {/* ── 7. FAQ ─────────────────────────────────────────────────────────── */}
-      <section className="bg-canvas py-[48px] md:py-[72px] border-t border-hairline-soft">
+      <section
+        id="faq"
+        className="bg-canvas py-[48px] md:py-[72px] border-t border-hairline-soft scroll-mt-24"
+      >
         <Container size="md">
           <SectionHeader title="FAQ" eyebrow="자주 묻는 질문" />
           <div>
