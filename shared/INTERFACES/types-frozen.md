@@ -68,7 +68,8 @@ Zod: `innerRectSchema`, `matteCodeSchema`, `paperCodeSchema`, `productImageTypeS
 ## Editor (src/types/editor.ts)
 
 - `CropTransform = { x, y, scale, rotation }`
-- `EditorState`, `EditorConfirmPayload`
+- `EditorState` — note `productId: ProductId | null` (null before init; ADR-014 drift resolved 2026-05-12 / P2-02)
+- `EditorConfirmPayload`
 - Constants: `CROP_SCALE_MIN = 0.5`, `CROP_SCALE_MAX = 3.0`, `CROP_ROTATION_MIN_DEG = -45`, `CROP_ROTATION_MAX_DEG = 45`, `PREVIEW_PIXEL_RATIO = 2`, `DEFAULT_INNER_RECT_FALLBACK = {x:0.1,y:0.1,w:0.8,h:0.8}`
 
 This file is **Konva-free** and importable on both server and client. The
