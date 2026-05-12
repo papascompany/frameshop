@@ -137,8 +137,6 @@ export const useEditorStore = create<State & Actions>((set) => ({
 export function useCurrentVariantPrice(): number {
   return useEditorStore((s) => {
     if (!s.options || !s.selectedVariantId) return 0;
-    return Object.values(s.options.variantsByKey).find(
-      (v) => v.id === s.selectedVariantId,
-    )?.price ?? 0;
+    return s.options.variantsByKey[variantKey(s.selectedOptions)]?.price ?? 0;
   });
 }
