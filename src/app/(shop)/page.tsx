@@ -19,9 +19,12 @@ import {
   MASTERPIECE_TILES,
   MEMBER_BENEFIT_TILES,
 } from '@/data/landing-curation';
+import type { HeroSlide, LandscapeTile } from '@/data/landing-curation';
 import { getProductsByCategory } from '@/lib/db/catalog';
+import { getActiveCurations, getCurationProducts } from '@/lib/db/curation';
 import { cn } from '@/lib/cn';
 import type { ProductListItem } from '@/types';
+import type { BannerPayload, CollectionPayload, FeaturePayload, Curation } from '@/types/curation';
 
 export const metadata: Metadata = {
   title: 'FrameShop — 사진을 작품으로',
@@ -57,9 +60,76 @@ export const metadata: Metadata = {
  *    9. FAQ                    — accordion
  *   10. FINAL CTA              — black slab
  */
-export const revalidate = 600; // 10 minutes ISR
+export const revalidate = 60; // 1분 ISR (Task 3: DB 연동으로 단축)
+
+// ── DB 큐레이션 어댑터 ──────────────────────────────────────────────────────────
+
+/** BannerPayload → HeroSlide 변환 */
+function bannerToHeroSlide(c: Curation): HeroSlide | null {
+  const p = c.payload as BannerPayload | null;
+  if (!p?.imageUrl) return null;
+  return {
+    imageUrl: p.imageUrl,
+    thumbnailUrl: p.imageUrl,
+    imageAlt: p.title ?? c.title ?? '배너 이미지',
+    eyebrow: 'NEW',
+    headlineTop: p.title ?? '',
+    headlineBottom: '',
+    subhead: p.subtitle ?? '',
+    cta: p.link
+      ? { label: '자세히 보기', href: p.link }
+      : { label: '지금 시작하기', href: '/catalog/basic-frame' },
+    tone: 'light',
+  };
+}
+
+/** CollectionPayload 상품 → LandscapeTile 변환 */
+function productToLandscapeTile(product: ProductListItem): LandscapeTile {
+  return {
+    imageUrl: product.thumbnail ?? '',
+    imageAlt: product.name,
+    title: product.name.toUpperCase(),
+    caption: product.tagline,
+    href: `/product/${product.id as string}`,
+  };
+}
 
 export default async function LandingPage() {
+  // ── DB 큐레이션 로드 (fallback: static 데이터) ──────────────────────────────
+  let dbHeroSlides: HeroSlide[] = [];
+  let dbCollectionTiles: LandscapeTile[] = [];
+  let dbCollectionSubtitle: string | undefined;
+
+  try {
+    const curations = await getActiveCurations('all');
+
+    // banner → HeroShowcase
+    const bannerCurations = curations.filter((c) => c.type === 'banner');
+    if (bannerCurations.length > 0) {
+      const slides = bannerCurations.flatMap((c) => {
+        const slide = bannerToHeroSlide(c);
+        return slide ? [slide] : [];
+      });
+      if (slides.length > 0) dbHeroSlides = slides;
+    }
+
+    // collection → CollectionRail (첫 번째 collection 큐레이션만 사용)
+    const collectionCuration = curations.find((c) => c.type === 'collection');
+    if (collectionCuration) {
+      const p = collectionCuration.payload as CollectionPayload | null;
+      if (p?.productIds && p.productIds.length > 0) {
+        const products = await getCurationProducts(p.productIds as string[]);
+        dbCollectionTiles = products.map(productToLandscapeTile);
+        dbCollectionSubtitle = p.subtitle;
+      }
+    }
+  } catch (err) {
+    console.warn('Landing: 큐레이션 로드 실패, static 데이터로 fallback:', err);
+  }
+
+  const heroSlides = dbHeroSlides.length > 0 ? dbHeroSlides : HERO_SLIDES;
+  const collectionTiles = dbCollectionTiles.length > 0 ? dbCollectionTiles : LANDSCAPE_TILES;
+
   let featuredProducts: ProductListItem[] = [];
   try {
     const result = await getProductsByCategory('basic-frame', { pageSize: 3 });
@@ -90,7 +160,7 @@ export default async function LandingPage() {
   return (
     <>
       {/* ── 1. Hero showcase ───────────────────────────────────────────── */}
-      <HeroShowcase slides={HERO_SLIDES} />
+      <HeroShowcase slides={heroSlides} />
 
       {/* ── 2. Featured Frames (DB-backed) ─────────────────────────────── */}
       <Container size="xl" className="py-[48px] md:py-[80px]">
@@ -185,7 +255,10 @@ export default async function LandingPage() {
             linkLabel="컬렉션 전체"
             linkHref="/catalog/basic-frame?theme=landscape"
           />
-          <CollectionRail tiles={LANDSCAPE_TILES} />
+          {dbCollectionSubtitle && (
+            <p className="text-sm text-muted-fg mb-4">{dbCollectionSubtitle}</p>
+          )}
+          <CollectionRail tiles={collectionTiles} />
         </Container>
       </section>
 

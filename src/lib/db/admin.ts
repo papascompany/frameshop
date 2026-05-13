@@ -171,3 +171,13 @@ export async function upsertCuration(
   }
   return mapCuration(result.data);
 }
+
+export async function deleteCuration(id: CurationId): Promise<void> {
+  await requireAdmin();
+  const supabase = getServiceRoleSupabase();
+  const { error } = await supabase
+    .from('curations')
+    .delete()
+    .eq('id', id as string);
+  if (error) throw new Error(`deleteCuration: ${error.message}`);
+}

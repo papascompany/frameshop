@@ -18,7 +18,7 @@ import {
 } from '@/types/curation';
 import type { CurationInput } from '@/types/admin';
 import { curationInputSchema } from '@/types/admin';
-import { requireAdmin, upsertCuration } from '@/lib/db/admin';
+import { requireAdmin, upsertCuration, deleteCuration } from '@/lib/db/admin';
 
 export type CurationActionResult =
   | { ok: true }
@@ -35,6 +35,25 @@ type RawCurationFormPayload = {
   isActive: boolean;
   sortOrder: number;
 };
+
+export async function deleteCurationAction(
+  id: string,
+): Promise<CurationActionResult> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: '관리자 권한이 필요합니다.' };
+  }
+
+  try {
+    await deleteCuration(asBrand<CurationId>(id));
+    revalidatePath('/admin/curation');
+    revalidatePath('/');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'unknown' };
+  }
+}
 
 export async function upsertCurationAction(
   raw: RawCurationFormPayload,
