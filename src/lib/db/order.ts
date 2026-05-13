@@ -327,6 +327,50 @@ export async function findOrderByGuest(
   return result;
 }
 
+// ---------- getOrdersByUser ----------
+
+/**
+ * 로그인 사용자의 주문 목록 조회 (최근 50건, created_at DESC).
+ * order_items를 조인하여 OrderWithItems 배열 반환.
+ */
+export async function getOrdersByUser(userId: UserId): Promise<OrderWithItems[]> {
+  const supabase = getServiceRoleSupabase();
+
+  const { data: orderRows, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('user_id', userId as string)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error) throw new Error(`getOrdersByUser: ${error.message}`);
+  if (!orderRows || orderRows.length === 0) return [];
+
+  const orderIds = orderRows.map((r) => (r as { id: string }).id);
+
+  const { data: itemRows, error: itemErr } = await supabase
+    .from('order_items')
+    .select('*')
+    .in('order_id', orderIds);
+
+  if (itemErr) throw new Error(`getOrdersByUser items: ${itemErr.message}`);
+
+  const itemsByOrderId = new Map<string, OrderItem[]>();
+  for (const row of itemRows ?? []) {
+    const r = row as { order_id: string };
+    const existing = itemsByOrderId.get(r.order_id) ?? [];
+    existing.push(mapOrderItem(row));
+    itemsByOrderId.set(r.order_id, existing);
+  }
+
+  return orderRows.map((row) => {
+    const r = row as { id: string };
+    const order = mapOrder(row);
+    const items = itemsByOrderId.get(r.id) ?? [];
+    return { ...order, items };
+  });
+}
+
 // ---------- attach paymentKey (used by confirm route) ----------
 
 export async function attachPaymentKey(

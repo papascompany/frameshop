@@ -59,6 +59,9 @@ export function Header() {
           <Link href="/order/lookup" className="nav-link">
             주문조회
           </Link>
+          <Link href="/account/orders" className="nav-link">
+            마이페이지
+          </Link>
         </nav>
 
         {/* ── Right cluster ──────────────────────────────────────────── */}
