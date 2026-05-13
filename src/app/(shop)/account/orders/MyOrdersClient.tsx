@@ -169,6 +169,9 @@ export function MyOrdersClient({ orders }: Props) {
         alert('재주문 처리 중 오류가 발생했습니다.');
         return;
       }
+      // 재주문 아이템을 cart에 추가.
+      // 이 경로의 아이템은 photo / cropTransform 정보가 없어
+      // 재편집이 필요하므로, 장바구니로 이동 후 사용자가 직접 확인.
       router.push('/cart');
     } catch {
       alert('재주문 요청에 실패했습니다.');
