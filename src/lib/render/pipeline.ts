@@ -229,19 +229,33 @@ export async function renderOrderItemPrint(
     };
   }
 
-  const publicUrl = supabase.storage.from(PREVIEWS_BUCKET).getPublicUrl(path).data
-    .publicUrl;
+  // P1-01: Generate a signed URL (7-day TTL) instead of a public URL.
+  // The `previews` bucket is private — only service-role can upload; the
+  // signed URL is the only access path. After 7 days the URL must be
+  // regenerated (re-triggering the render resets it).
+  const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+  const signed = await supabase.storage
+    .from(PREVIEWS_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (signed.error || !signed.data?.signedUrl) {
+    return {
+      ok: false,
+      code: 'UPLOAD_FAILED',
+      message: signed.error?.message ?? 'createSignedUrl returned no URL',
+    };
+  }
+  const printFileUrl = signed.data.signedUrl;
 
   // 10. Persist URL.
   const { error: updErr } = await supabase
     .from('order_items')
-    .update({ print_file_url: publicUrl })
+    .update({ print_file_url: printFileUrl })
     .eq('id', item.id);
   if (updErr) {
     return { ok: false, code: 'DB_UPDATE_FAILED', message: updErr.message };
   }
 
-  console.log(
+  console.info(
     JSON.stringify({
       event: 'print_render_complete',
       orderItemId: item.id,
@@ -251,7 +265,7 @@ export async function renderOrderItemPrint(
     }),
   );
 
-  return { ok: true, printFileUrl: publicUrl };
+  return { ok: true, printFileUrl };
 }
 
 // ---------- helpers ----------
