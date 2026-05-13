@@ -30,11 +30,8 @@ const nextConfig: NextConfig = {
         hostname: '*.supabase.co',
         pathname: '/storage/v1/object/public/**',
       },
-      {
-        protocol: 'https',
-        hostname: 'images.unsplash.com',
-        pathname: '/photo-*',
-      },
+      // Unsplash entry removed — all editorial photos are now mirrored to
+      // Supabase Storage (marketing bucket) via scripts/mirror-unsplash.mjs (P1-07).
     ],
     formats: ['image/avif', 'image/webp'],
     // Pre-generate srcSet for the breakpoints we actually use:
