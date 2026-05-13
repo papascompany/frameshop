@@ -49,7 +49,7 @@ export type ConfirmErrorCode =
   | 'INTERNAL';
 
 export type ConfirmResult =
-  | { ok: true; orderNo: OrderNo; paymentKey: PaymentKey }
+  | { ok: true; orderNo: OrderNo; paymentKey: PaymentKey; alreadyPaid?: boolean }
   | { ok: false; code: ConfirmErrorCode; message: string };
 
 // ---------- Webhook ----------

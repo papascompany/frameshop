@@ -8,15 +8,31 @@
  * Threat: an attacker spamming `/api/photos/upload` to inflate Storage egress
  * or DoS the service-role connection pool. We cap each session/user at
  * `UPLOAD_RATE_PER_MIN` requests per 60s.
+ *
+ * P2-02 fix: periodic TTL eviction prevents unbounded Map growth when an
+ * attacker rotates sessionIds.
  */
 
 import 'server-only';
 
 export const UPLOAD_RATE_PER_MIN = 10;
 const WINDOW_MS = 60_000;
+const PRUNE_INTERVAL_MS = 5 * 60_000; // prune stale entries every 5 min
 
 type Bucket = { count: number; windowStart: number };
 const buckets = new Map<string, Bucket>();
+
+let lastPrune = Date.now();
+
+/** Remove expired buckets. Called lazily from checkUploadRate. */
+function maybePrune(): void {
+  const now = Date.now();
+  if (now - lastPrune < PRUNE_INTERVAL_MS) return;
+  lastPrune = now;
+  for (const [key, b] of buckets) {
+    if (now - b.windowStart >= WINDOW_MS) buckets.delete(key);
+  }
+}
 
 export type RateLimitResult =
   | { ok: true; remaining: number }
@@ -27,6 +43,7 @@ export type RateLimitResult =
  * Uses fixed-window per minute (simple + bounded memory).
  */
 export function checkUploadRate(key: string): RateLimitResult {
+  maybePrune();
   const now = Date.now();
   const bucket = buckets.get(key);
 

@@ -21,6 +21,7 @@ import 'server-only';
 import type { OrderItemId } from '@/types/common';
 import { getServiceRoleSupabase } from '../supabase/service';
 import { renderPrintFile, type InnerRectNorm } from './print';
+import { envPublic } from '../env-public';
 
 // Same fallback used by the editor when a frame_asset has a malformed inner_rect.
 const DEFAULT_INNER_RECT: InnerRectNorm = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
@@ -228,19 +229,33 @@ export async function renderOrderItemPrint(
     };
   }
 
-  const publicUrl = supabase.storage.from(PREVIEWS_BUCKET).getPublicUrl(path).data
-    .publicUrl;
+  // P1-01: Generate a signed URL (7-day TTL) instead of a public URL.
+  // The `previews` bucket is private — only service-role can upload; the
+  // signed URL is the only access path. After 7 days the URL must be
+  // regenerated (re-triggering the render resets it).
+  const SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+  const signed = await supabase.storage
+    .from(PREVIEWS_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (signed.error || !signed.data?.signedUrl) {
+    return {
+      ok: false,
+      code: 'UPLOAD_FAILED',
+      message: signed.error?.message ?? 'createSignedUrl returned no URL',
+    };
+  }
+  const printFileUrl = signed.data.signedUrl;
 
   // 10. Persist URL.
   const { error: updErr } = await supabase
     .from('order_items')
-    .update({ print_file_url: publicUrl })
+    .update({ print_file_url: printFileUrl })
     .eq('id', item.id);
   if (updErr) {
     return { ok: false, code: 'DB_UPDATE_FAILED', message: updErr.message };
   }
 
-  console.log(
+  console.info(
     JSON.stringify({
       event: 'print_render_complete',
       orderItemId: item.id,
@@ -250,12 +265,56 @@ export async function renderOrderItemPrint(
     }),
   );
 
-  return { ok: true, printFileUrl: publicUrl };
+  return { ok: true, printFileUrl };
 }
 
 // ---------- helpers ----------
 
+/**
+ * P0-02 SSRF allowlist.
+ *
+ * Only HTTPS URLs pointing to known-safe image hosts may be fetched by the
+ * render pipeline. This prevents an attacker-controlled `photo_url` or
+ * `frame.png_url` from being used to probe cloud-metadata endpoints
+ * (e.g. 169.254.169.254) or internal services.
+ *
+ * Allowed hosts:
+ *   - Our own Supabase project host (NEXT_PUBLIC_SUPABASE_URL hostname)
+ *   - Any *.supabase.co (covers region-specific storage CDN subdomains)
+ *   - Unsplash image CDN (images.unsplash.com, plus.unsplash.com)
+ */
+function isAllowedImageHost(rawUrl: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false; // reject non-parseable or relative URLs
+  }
+  if (parsed.protocol !== 'https:') return false;
+  const { hostname } = parsed;
+
+  // Supabase project host.
+  try {
+    const supabaseHost = new URL(envPublic.supabaseUrl()).hostname;
+    if (hostname === supabaseHost) return true;
+  } catch {
+    // envPublic misconfigured — fall through to wildcard check.
+  }
+  // Supabase Storage CDN (wildcard).
+  if (hostname.endsWith('.supabase.co')) return true;
+  // Unsplash image CDN.
+  if (hostname === 'images.unsplash.com' || hostname === 'plus.unsplash.com') return true;
+
+  return false;
+}
+
 async function fetchAsBuffer(url: string): Promise<Buffer> {
+  // P0-02: Guard against SSRF before making any outbound request.
+  if (!isAllowedImageHost(url)) {
+    let host = '(invalid URL)';
+    try { host = new URL(url).hostname; } catch { /* ignore */ }
+    throw new Error(`SSRF guard: host "${host}" is not in the image allowlist`);
+  }
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`fetch ${url} failed: ${res.status}`);

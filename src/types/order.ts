@@ -161,6 +161,12 @@ export type CreateOrderInput = {
   /** Client-computed fee (display value, server re-computes for trust). */
   clientShippingFee?: number;
   userId?: UserId | null;
+  /**
+   * Anonymous session identifier — required when userId is null so the server
+   * can verify photo ownership (P0-03). Treated like a bearer token: whoever
+   * knows the sessionId "owns" photos in that session.
+   */
+  sessionId?: string | null;
 };
 
 export type CreateOrderErrorCode =
@@ -169,7 +175,9 @@ export type CreateOrderErrorCode =
   | 'SEQUENCE_FAILED'
   | 'INVALID_SHIPPING_METHOD'
   | 'SHIPPING_FEE_MISMATCH'
-  | 'PRICE_MISMATCH';
+  | 'PRICE_MISMATCH'
+  /** One or more photos in the cart don't belong to the calling user/session. */
+  | 'PHOTO_OWNERSHIP';
 
 export class CreateOrderError extends Error {
   public readonly code: CreateOrderErrorCode;
@@ -228,6 +236,8 @@ export const createOrderInputSchema = z.object({
   shippingMethod: z.enum(SHIPPING_METHODS),
   clientShippingFee: z.number().int().nonnegative().optional(),
   userId: z.string().min(1).nullable().optional(),
+  /** Required for anonymous checkout (userId null) to enable photo-ownership check. */
+  sessionId: z.string().min(1).max(128).nullable().optional(),
 });
 
 export const transitionMetaSchema = z.object({

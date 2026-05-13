@@ -1,40 +1,10 @@
 /**
- * Landing curation — editorial assets and copy used by the redesigned home.
- *
- *  Why a static module instead of the `curations` DB table?
- *  ────────────────────────────────────────────────────────
- *  The DB-backed curation system (ADR-007) is designed for time-bound
- *  campaigns that the admin team toggles on/off. The landing's evergreen
- *  spine — hero showcase, masterpiece gallery, lifestyle studio,
- *  landscape collections — is artistic direction that ships with code,
- *  changes via PR, and benefits from ISR caching.
- *
- *  When the admin team starts running seasonal campaigns we'll overlay
- *  them on top of these via the `/admin/curation` UI (see PRD §1.2 +
- *  ADR-007). For now this module gives the redesign immediate
- *  photographic richness without waiting on Storage uploads.
- *
- *  Image rights
- *  ────────────
- *  All photographs are sourced from Unsplash under the Unsplash License
- *  (https://unsplash.com/license) which permits commercial use without
- *  attribution. We still keep `credit` fields so we can surface a
- *  `<small>` byline if the brand team prefers.
- *
- *  Stable Unsplash CDN URL pattern:
- *    https://images.unsplash.com/photo-{ID}?{width|quality|format params}
- *
- *  The `images.unsplash.com` host is whitelisted in `next.config.ts`, so
- *  every `<Image>` here gets Next's AVIF/WebP transform + edge cache.
+ * P1-07: Returns the Supabase Storage public URL for an Unsplash photo
+ * that has been mirrored to the `marketing` bucket via scripts/mirror-unsplash.mjs.
+ * All landing-page images now resolve from our own CDN — no Unsplash hot-link risk.
  */
-
-/** Build a stable Unsplash CDN URL from the photo ID. */
-export function unsplash(
-  id: string,
-  opts: { w?: number; q?: number; fit?: 'crop' | 'cover' } = {},
-): string {
-  const { w = 1600, q = 80, fit = 'crop' } = opts;
-  return `https://images.unsplash.com/photo-${id}?w=${w}&q=${q}&auto=format&fit=${fit}`;
+export function mirrored(id: string): string {
+  return `https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/${id}.jpg`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,8 +28,8 @@ export type HeroSlide = {
 
 export const HERO_SLIDES: HeroSlide[] = [
   {
-    imageUrl: unsplash('1513519245088-0e12902e5a38', { w: 1920 }),
-    thumbnailUrl: unsplash('1513519245088-0e12902e5a38', { w: 240 }),
+    imageUrl: mirrored('1513519245088-0e12902e5a38'),
+    thumbnailUrl: mirrored('1513519245088-0e12902e5a38'),
     imageAlt: '거실 벽에 걸린 액자 갤러리 — 따뜻한 햇살 아래의 가족 사진',
     eyebrow: 'NEW SEASON 2026',
     headlineTop: 'YOUR MEMORIES,',
@@ -69,8 +39,8 @@ export const HERO_SLIDES: HeroSlide[] = [
     tone: 'light',
   },
   {
-    imageUrl: unsplash('1577083552431-6e5fd01988ec', { w: 1920 }),
-    thumbnailUrl: unsplash('1577083552431-6e5fd01988ec', { w: 240 }),
+    imageUrl: mirrored('1607082348824-0a96f2a4b9da'),
+    thumbnailUrl: mirrored('1607082348824-0a96f2a4b9da'),
     imageAlt: '미술관 갤러리 벽면에 정렬된 명화 액자',
     eyebrow: 'MASTERPIECE EDITION',
     headlineTop: 'GALLERY AT',
@@ -80,8 +50,8 @@ export const HERO_SLIDES: HeroSlide[] = [
     tone: 'light',
   },
   {
-    imageUrl: unsplash('1506905925346-21bda4d32df4', { w: 1920 }),
-    thumbnailUrl: unsplash('1506905925346-21bda4d32df4', { w: 240 }),
+    imageUrl: mirrored('1506905925346-21bda4d32df4'),
+    thumbnailUrl: mirrored('1506905925346-21bda4d32df4'),
     imageAlt: '안개에 잠긴 산맥 풍경 — 새벽의 알펜글로',
     eyebrow: 'LANDSCAPE PRINTS',
     headlineTop: 'NATURE,',
@@ -115,7 +85,7 @@ export type MasterpieceTile = {
  */
 export const MASTERPIECE_TILES: MasterpieceTile[] = [
   {
-    imageUrl: unsplash('1582738411706-bfc8e691d1c2', { w: 1080 }),
+    imageUrl: mirrored('1582738411706-bfc8e691d1c2'),
     imageAlt: '인테리어에 걸린 인상주의 명화 액자',
     title: 'Water Lilies, 1916',
     artist: 'Claude Monet',
@@ -125,7 +95,7 @@ export const MASTERPIECE_TILES: MasterpieceTile[] = [
     href: '/catalog/basic-frame?size=8x10',
   },
   {
-    imageUrl: unsplash('1554188248-986adbb73be4', { w: 1080 }),
+    imageUrl: mirrored('1554188248-986adbb73be4'),
     imageAlt: '갤러리 화이트 월에 걸린 추상화',
     title: 'Composition VIII',
     artist: 'Wassily Kandinsky',
@@ -135,7 +105,7 @@ export const MASTERPIECE_TILES: MasterpieceTile[] = [
     href: '/catalog/basic-frame?size=11x14',
   },
   {
-    imageUrl: unsplash('1565195972571-edec74b0bef8', { w: 1080 }),
+    imageUrl: mirrored('1452860606245-08befc0ff44b'),
     imageAlt: '우드 프레임에 담긴 풍경 사진',
     title: 'Starry Night Sky',
     artist: 'Vincent van Gogh',
@@ -145,7 +115,7 @@ export const MASTERPIECE_TILES: MasterpieceTile[] = [
     href: '/catalog/basic-frame?size=5x7',
   },
   {
-    imageUrl: unsplash('1577720580479-7d839d829c73', { w: 1080 }),
+    imageUrl: mirrored('1577720580479-7d839d829c73'),
     imageAlt: '벽에 정렬된 흑백 사진 액자',
     title: 'Girl with a Pearl Earring',
     artist: 'Johannes Vermeer',
@@ -155,7 +125,7 @@ export const MASTERPIECE_TILES: MasterpieceTile[] = [
     href: '/catalog/basic-frame?size=8x10',
   },
   {
-    imageUrl: unsplash('1545987796-200677ee1011', { w: 1080 }),
+    imageUrl: mirrored('1545987796-200677ee1011'),
     imageAlt: '인테리어에 걸린 풍경 사진 액자',
     title: 'The Great Wave',
     artist: 'Katsushika Hokusai',
@@ -165,7 +135,7 @@ export const MASTERPIECE_TILES: MasterpieceTile[] = [
     href: '/catalog/basic-frame?size=11x14',
   },
   {
-    imageUrl: unsplash('1518998053901-5348d3961a04', { w: 1080 }),
+    imageUrl: mirrored('1518998053901-5348d3961a04'),
     imageAlt: '가구 위에 진열된 액자',
     title: 'The Birth of Venus',
     artist: 'Sandro Botticelli',
@@ -190,35 +160,35 @@ export type LandscapeTile = {
 
 export const LANDSCAPE_TILES: LandscapeTile[] = [
   {
-    imageUrl: unsplash('1506905925346-21bda4d32df4', { w: 1080 }),
+    imageUrl: mirrored('1506905925346-21bda4d32df4'),
     imageAlt: '새벽 안개에 잠긴 산맥',
     title: 'ALPINE GLOW',
     caption: '새벽의 산맥, 알펜글로 시리즈',
     href: '/catalog/basic-frame?theme=landscape',
   },
   {
-    imageUrl: unsplash('1470071459604-3b5ec3a7fe05', { w: 1080 }),
+    imageUrl: mirrored('1470071459604-3b5ec3a7fe05'),
     imageAlt: '안개 낀 숲',
     title: 'FOREST CALM',
     caption: '북유럽 침엽수림의 정적',
     href: '/catalog/basic-frame?theme=landscape',
   },
   {
-    imageUrl: unsplash('1501785888041-af3ef285b470', { w: 1080 }),
+    imageUrl: mirrored('1501785888041-af3ef285b470'),
     imageAlt: '해안 절벽과 바다',
     title: 'OCEAN BREATH',
     caption: '제주 바다, 한 호흡의 풍경',
     href: '/catalog/basic-frame?theme=landscape',
   },
   {
-    imageUrl: unsplash('1469474968028-56623f02e42e', { w: 1080 }),
+    imageUrl: mirrored('1469474968028-56623f02e42e'),
     imageAlt: '강과 산',
     title: 'RIVER LINES',
     caption: '비가 갠 후의 강 풍경',
     href: '/catalog/basic-frame?theme=landscape',
   },
   {
-    imageUrl: unsplash('1418065460487-3e41a6c84dc5', { w: 1080 }),
+    imageUrl: mirrored('1418065460487-3e41a6c84dc5'),
     imageAlt: '들판 위 일몰',
     title: 'GOLDEN HOUR',
     caption: '황금 시간대의 들판',
@@ -242,7 +212,7 @@ export type LifestyleBlock = {
 
 export const LIFESTYLE_BLOCKS: LifestyleBlock[] = [
   {
-    imageUrl: unsplash('1597423498219-04418210827d', { w: 1600 }),
+    imageUrl: mirrored('1597423498219-04418210827d'),
     imageAlt: '거실에 정돈된 갤러리 월 — 다양한 사이즈의 액자 6점',
     eyebrow: 'GALLERY WALL',
     headline: '한 벽으로 완성되는\n나만의 갤러리',
@@ -262,21 +232,21 @@ export const LIFESTYLE_BLOCKS: LifestyleBlock[] = [
 
 export const MEMBER_BENEFIT_TILES = [
   {
-    imageUrl: unsplash('1607082348824-0a96f2a4b9da', { w: 1080 }),
+    imageUrl: mirrored('1607082348824-0a96f2a4b9da'),
     imageAlt: '택배 박스를 받는 따뜻한 손 — 무료 배송 컨셉',
     eyebrow: '무료 배송',
     headline: 'FREE SHIPPING',
     cta: { label: '회원가입', href: '/login' },
   },
   {
-    imageUrl: unsplash('1452860606245-08befc0ff44b', { w: 1080 }),
+    imageUrl: mirrored('1452860606245-08befc0ff44b'),
     imageAlt: '작업실에서 액자를 제작하는 모습',
     eyebrow: '빠른 제작',
     headline: '3-DAY CRAFT',
     cta: { label: '제작 과정', href: '/catalog/basic-frame' },
   },
   {
-    imageUrl: unsplash('1556015048-4d3aa10df74c', { w: 1080 }),
+    imageUrl: mirrored('1556015048-4d3aa10df74c'),
     imageAlt: '편집기 미리보기 — 사용자가 사진을 액자에 맞춰보는 장면',
     eyebrow: '미리보기 보장',
     headline: 'PERFECT PROOF',

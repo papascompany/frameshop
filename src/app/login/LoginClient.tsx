@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
-import { getBrowserSupabase } from '@/lib/supabase/client';
 import { cn } from '@/lib/cn';
 
 type Props = {
@@ -14,23 +13,19 @@ type Props = {
 /**
  * Email/password sign-in form.
  *
- *  Why a plain client form instead of a server action?
- *  ─────────────────────────────────────────────────
- *  `signInWithPassword` on the browser client writes the session
- *  cookies via `@supabase/ssr`'s `createBrowserClient`, which is the
- *  cleanest path to keep the middleware in sync. Using a server action
- *  here would require manually plumbing `set-cookie` headers back
- *  through Next 16's response handling.
+ *  Why POST /api/auth/login instead of the browser Supabase client?
+ *  ─────────────────────────────────────────────────────────────────
+ *  Routing through a server-side Route Handler lets us apply per-email rate
+ *  limiting (P1-05) before touching Supabase auth, without exposing the
+ *  rate-limiter state to the client bundle. The Route Handler calls
+ *  `supabase.auth.signInWithPassword` via `createServerClient` so the
+ *  session cookies are written server-side and the middleware stays in sync.
  *
  *  Defense-in-depth:
  *   - `redirectTo` is sanitized client-side to a same-origin pathname
  *     (no `http://evil.com/...` open-redirect).
- *   - `router.refresh()` after success forces the RSC tree to re-evaluate
- *     `cookies()` so the admin layout immediately renders authenticated.
- *
- *  Error surface: we surface Supabase's `error.message` literally — the
- *  copy ("Invalid login credentials") is already adequate for the Phase 1
- *  admin team. Phase 2 will Korean-localize.
+ *   - Hard-navigate via `window.location.assign` so the middleware
+ *     re-reads the freshly-set session cookies on the very next request.
  */
 export function LoginClient({ redirectTo }: Props) {
   const [email, setEmail] = useState('');
@@ -43,22 +38,18 @@ export function LoginClient({ redirectTo }: Props) {
     setError(null);
     setSubmitting(true);
     try {
-      const supabase = getBrowserSupabase();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
       });
-      if (signInError) {
-        setError(signInError.message);
+      const json = await res.json() as { ok: boolean; code?: string; message?: string };
+      if (!json.ok) {
+        setError(json.message ?? '로그인에 실패했습니다.');
         setSubmitting(false);
         return;
       }
-      // Same-origin pathname guard — never honor an off-site URL even if
-      // it was somehow injected via the search param.
       const safeTarget = isSameOriginPath(redirectTo) ? redirectTo : '/admin';
-      // Hard-navigate so the middleware re-reads the freshly-set session
-      // cookies on the very next request. `router.push` + `router.refresh`
-      // also works but a full assignment is more reliable across edge runtimes.
       window.location.assign(safeTarget);
     } catch (err) {
       setError(err instanceof Error ? err.message : '로그인에 실패했습니다.');
