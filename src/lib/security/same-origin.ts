@@ -62,6 +62,11 @@ export function isSameOrigin(req: Request): boolean {
   // Tests and server-to-server callers commonly omit both headers; allowing
   // them in non-production keeps the existing route tests green without
   // weakening prod safety.
+  //
+  // P2-03 verification: Vercel sets NODE_ENV=production for BOTH production
+  // AND preview deployments (see vercel.com/docs/projects/environment-variables
+  // /system-environment-variables). This bypass therefore ONLY fires in true
+  // local development (`next dev`). Preview URLs are fully guarded. ✓
   if (process.env.NODE_ENV !== 'production' && !secFetchSite) {
     return true;
   }

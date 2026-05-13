@@ -156,6 +156,14 @@ function clipToCanvas(
  *
  * Returns a self-contained `RenderOutput`. Side-effect free.
  */
+// P2-04: Memory budget note.
+// The pipeline allocates ~5 large Sharp buffers sequentially:
+//   photoOut, clippedPhotoLayer, innerCanvas, innerComposite, withBleed.
+// For a 4000×4000 source photo on an 11×14 print (≈3307×4205 px at 300dpi),
+// each RGBA buffer ≈ 4000×4200×4B ≈ 67MB. Peak heap ≈ 3–4 live buffers ≈ 200MB.
+// Vercel Pro Node functions cap at 1024MB — safe with current single-tenant cron.
+// Action required before enabling concurrent renders: load-test at ≥5 simultaneous
+// 11×14 jobs and validate memory stays below 750MB (75% headroom).
 export async function renderPrintFile(input: RenderInput): Promise<RenderOutput> {
   const { variant, stageSize, cropTransform, innerRect, photoBuffer, frameBuffer } = input;
 
