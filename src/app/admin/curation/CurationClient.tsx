@@ -28,7 +28,7 @@ import type {
   FeaturePayload,
 } from '@/types/curation';
 import type { Product } from '@/types/product';
-import { upsertCurationAction } from './actions';
+import { upsertCurationAction, deleteCurationAction } from './actions';
 
 type FormState = {
   id?: string;
@@ -264,9 +264,28 @@ export function CurationClient({
                     {renderPayloadSummary(c)}
                   </p>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>
-                  편집
-                </Button>
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>
+                    편집
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => {
+                      if (!confirm(`"${c.title ?? '(제목 없음)'}" 큐레이션을 삭제하시겠습니까?`)) return;
+                      startTransition(async () => {
+                        const result = await deleteCurationAction(c.id as string);
+                        if (!result.ok) {
+                          alert(`삭제 실패: ${result.error}`);
+                          return;
+                        }
+                        router.refresh();
+                      });
+                    }}
+                  >
+                    삭제
+                  </Button>
+                </div>
               </div>
               <dl className="text-xs text-muted-fg grid grid-cols-2 gap-x-3">
                 <div>
