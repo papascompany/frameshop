@@ -5,7 +5,8 @@
  * render pipeline for each, up to MAX_ATTEMPTS per job.
  *
  * Invocation: Vercel Cron (vercel.json `crons`) fires a GET request to this
- * route every 5 minutes. Vercel automatically adds the
+ * route once daily at 01:00 UTC (Hobby plan limit). Pro plan: change to
+ * "*/5 * * * *" for 5-minute retries. Vercel automatically adds the
  * `Authorization: Bearer <CRON_SECRET>` header when `CRON_SECRET` env var is
  * configured on the project.
  *

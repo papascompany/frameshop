@@ -227,12 +227,38 @@ Phase 2 (예정): 매트 토글 시 사진 영역을 inner_rect의 안쪽으로 
 - 화면: sRGB (Konva, 브라우저 기본)
 - 인쇄: ICC profile (운영사가 결정 — CMYK 또는 Adobe RGB로 변환). Phase 1은 sRGB 유지 + 면책 고지. Phase 2 ICC 적용 ADR 추가 예정.
 
-### 5.4 트리거 시점
+### 5.4 트리거 시점 및 재시도 큐 (P1-06)
+
+**현재 구현 (Phase 2 완료):**
 
 - **PAID 전이 시점**에 자동 enqueue (`payment/confirm.ts`에서 `handleWebhook` 또는 `confirmPayment` 성공 후)
-- Edge Function이 비동기로 처리 → `order_items.print_file_url` 채움
-- Admin은 `/admin/orders` 상세에서 다운로드 (이미 ProductCard에 placeholder text "준비 중"으로 표시)
-- 렌더 실패 시 retry 3회 + 실패 알림(`shared/BLOCKERS.md`)
+- `enqueuePrintRender(orderItemId)` 호출 → **`print_render_jobs` 테이블에 PENDING 행 INSERT** 후 in-process 렌더 시도
+- 렌더 성공 시 → `order_items.print_file_url` 채움 + 잡 상태 DONE
+- 렌더 실패 시 → 잡 상태 PENDING 복귀 (최대 5회 시도 후 FAILED 확정)
+
+**재시도 cron (`/api/cron/render-retry`):**
+
+- Vercel Cron이 하루 1회 (01:00 UTC) 자동 호출
+- PENDING / FAILED 잡을 최대 20건씩 처리, 최대 5회 재시도
+- 5회 소진 시 FAILED 확정 → 어드민이 `print_render_jobs` 테이블에서 직접 확인 후 수동 재처리 필요
+
+> ⚠️ **Vercel Hobby 플랜 제약:**  
+> Hobby 계정은 cron 실행 빈도를 **하루 1회**로 제한합니다.  
+> 따라서 렌더 실패 시 **최대 24시간 후** 재시도가 이루어집니다.  
+> 운영 트래픽이 증가하면 **Pro 플랜으로 업그레이드 후** `vercel.json`의 `schedule`을 `"*/5 * * * *"`으로 변경하세요.  
+> Pro 플랜에서는 5분마다 재시도가 가능합니다.
+
+**잡 상태 머신:**
+
+```
+INSERT → PENDING
+         ↓ (in-process 첫 시도)
+       RUNNING
+         ↓ 성공       ↓ 실패 (attempts < 5)   ↓ 실패 (attempts ≥ 5)
+        DONE        PENDING (재시도 대기)         FAILED (수동 처리)
+```
+
+**Admin은** `/admin/orders` 상세 또는 Supabase Dashboard `print_render_jobs` 테이블에서 FAILED 잡을 확인하고, 필요 시 `status='PENDING', attempts=0` 으로 리셋 후 cron을 수동 호출할 수 있습니다.
 
 ---
 
@@ -250,6 +276,12 @@ Phase 2 (예정): 매트 토글 시 사진 영역을 inner_rect의 안쪽으로 
 - **클라이언트 1600px 리사이즈 강제** (`src/lib/image/resize-client.ts` 이미 구현, P1-05 fix). 원본 50MB가 모바일 메모리 OOM 유발
 - Konva Stage `width × height`는 **최대 1080px**로 제한 (모바일 GPU 한계). variant가 큰 사이즈(11×14, 28×36cm)라도 base scale로 600~900 사이.
 - `useImageBitmap` 훅의 이미지 객체는 컴포넌트 unmount 시 정리해야 메모리 누수 방지 (`img.onload = null`, `img.src = ''`)
+
+**서버 렌더 메모리 (P2-04):**
+- Sharp 파이프라인은 `photoOut → clippedPhotoLayer → innerCanvas → innerComposite → withBleed` 순서로 최대 5개의 대형 버퍼를 동시 보유
+- 4000×4000 원본 + 11×14 인쇄(≈3307×4205 px @300dpi) 기준 피크 약 **200MB**
+- Vercel Pro Node 함수 상한 1024MB — 현재 단일 직렬 cron 기준 안전
+- ⚠️ **동시 렌더 5건 이상 활성화 전 부하 테스트 필수**: 동시 실행 시 피크 ×N이 될 수 있음. 750MB(상한 75%) 초과 여부 확인 후 maxDuration·메모리 설정 조정
 
 ### 6.3 좌표계 동기화 (어긋남이 가장 흔한 버그)
 
