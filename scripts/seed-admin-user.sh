@@ -10,17 +10,16 @@
 #
 # Usage:
 #   set -a; source .env.local; set +a
-#   bash scripts/seed-admin-user.sh
+#   ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=secret bash scripts/seed-admin-user.sh
 #
-# Override email/password via env if needed:
-#   ADMIN_EMAIL=other@example.com ADMIN_PASSWORD='whatever' bash scripts/seed-admin-user.sh
+# Both ADMIN_EMAIL and ADMIN_PASSWORD are required — no defaults are provided.
 #
 set -euo pipefail
 
 URL="${NEXT_PUBLIC_SUPABASE_URL:?NEXT_PUBLIC_SUPABASE_URL not set}"
 KEY="${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY not set}"
-EMAIL="${ADMIN_EMAIL:-yohan73@gmail.com}"
-PASSWORD="${ADMIN_PASSWORD:-Yohan0817}"
+EMAIL="${ADMIN_EMAIL:?Error: ADMIN_EMAIL is required. Usage: ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=secret bash scripts/seed-admin-user.sh}"
+PASSWORD="${ADMIN_PASSWORD:?Error: ADMIN_PASSWORD is required. Minimum 8 chars recommended.}"
 
 # Look up existing user by email
 LOOKUP=$(curl -fsS "$URL/auth/v1/admin/users?email=${EMAIL}" \

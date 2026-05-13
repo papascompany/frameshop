@@ -33,7 +33,7 @@ const nextConfig: NextConfig = {
       {
         protocol: 'https',
         hostname: 'images.unsplash.com',
-        pathname: '/**',
+        pathname: '/photo-*',
       },
     ],
     formats: ['image/avif', 'image/webp'],

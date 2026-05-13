@@ -35,6 +35,7 @@ export async function confirmPayment(
       ok: true,
       orderNo: order.orderNo,
       paymentKey: order.paymentId ?? input.paymentKey,
+      alreadyPaid: true, // distinguishes idempotent re-confirm from fresh PAID
     };
   }
 
