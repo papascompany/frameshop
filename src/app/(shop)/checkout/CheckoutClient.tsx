@@ -21,6 +21,7 @@ import type {
 } from '@/types/shipping';
 import type { Order } from '@/types/order';
 import { envPublic } from '@/lib/env-public';
+import { PostcodeButton } from '@/components/PostcodeButton';
 
 type Props = {
   shippingMethods: ShippingMethodConfig[];
@@ -271,23 +272,32 @@ export function CheckoutClient({ shippingMethods }: Props) {
               error={errors['shipping.phone']}
               autoComplete="tel"
             />
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-end">
               <Input
                 label="우편번호"
                 value={form.shipping.zip}
-                onChange={(e) => setShipping('zip', e.target.value)}
+                readOnly
                 error={errors['shipping.zip']}
                 inputMode="numeric"
                 autoComplete="postal-code"
                 className="max-w-[140px]"
+                placeholder="검색 후 자동입력"
+              />
+              <PostcodeButton
+                onComplete={(zip, addr1) => {
+                  setShipping('zip', zip);
+                  setShipping('addr1', addr1);
+                }}
+                className="shrink-0 mb-0.5"
               />
             </div>
             <Input
               label="주소"
               value={form.shipping.addr1}
-              onChange={(e) => setShipping('addr1', e.target.value)}
+              readOnly
               error={errors['shipping.addr1']}
               autoComplete="address-line1"
+              placeholder="우편번호 검색 후 자동입력"
             />
             <Input
               label="상세 주소"
