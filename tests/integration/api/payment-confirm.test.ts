@@ -34,12 +34,30 @@ const mockState: {
     amount: number;
   }>;
   tossShouldThrow: boolean;
+  paymentEventsInsertError: { message: string; code: string } | null;
 } = {
   order: null,
   transitionCalls: [],
   tossConfirmCalls: [],
   tossShouldThrow: false,
+  // null → insert succeeds (P1-03 lock acquired); non-null → UNIQUE conflict
+  paymentEventsInsertError: null,
 };
+
+// Mock service-role Supabase used by confirmPayment for P1-03 atomic lock.
+vi.mock('@/lib/supabase/service', () => ({
+  getServiceRoleSupabase: () => ({
+    from: (table: string) => {
+      if (table === 'payment_events') {
+        return {
+          insert: () =>
+            Promise.resolve({ error: mockState.paymentEventsInsertError }),
+        };
+      }
+      throw new Error(`Unmocked service-role table: ${table}`);
+    },
+  }),
+}));
 
 vi.mock('@/lib/db/order', () => ({
   getOrder: async (orderNoOrId: string) => {
@@ -136,6 +154,7 @@ beforeEach(() => {
   mockState.transitionCalls = [];
   mockState.tossConfirmCalls = [];
   mockState.tossShouldThrow = false;
+  mockState.paymentEventsInsertError = null;
 });
 
 afterEach(() => {

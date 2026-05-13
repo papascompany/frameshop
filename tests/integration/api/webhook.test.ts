@@ -9,10 +9,12 @@ import { createHmac } from 'node:crypto';
 
 const SECRET = process.env.TOSS_WEBHOOK_SECRET ?? 'whsec-test';
 
-function makeEvent(totalAmount: number) {
+function makeEvent(totalAmount: number, createdAt?: string) {
   return {
     eventType: 'PAYMENT_STATUS_CHANGED',
-    createdAt: '2026-05-12T03:00:00.000Z',
+    // Default to a fresh timestamp so P1-02 age check does not reject events
+    // in these tests. Pass an explicit value to test the age-check itself.
+    createdAt: createdAt ?? new Date().toISOString(),
     data: {
       paymentKey: 'pk-test-amount-mismatch',
       orderId: '20260512-0001',
@@ -50,13 +52,15 @@ vi.mock('@/lib/supabase/service', () => ({
     from: (table: string) => {
       if (table === 'payment_events') {
         return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({ data: mockState.existingEvent, error: null }),
-            }),
-          }),
           insert: (row: Record<string, unknown>) => {
+            // Simulate UNIQUE constraint violation (P1-03 atomic lock) when an
+            // existing event is present — mirrors how the DB rejects a duplicate
+            // payment_key insert.
+            if (mockState.existingEvent) {
+              return Promise.resolve({
+                error: { message: 'duplicate key value', code: '23505' },
+              });
+            }
             mockState.insertedEvents.push(row);
             return Promise.resolve({ error: null });
           },

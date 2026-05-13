@@ -15,10 +15,12 @@
 import 'server-only';
 import { asBrand } from '@/types/common';
 import type { OrderNo, PaymentKey } from '@/types/common';
-import type { ConfirmPaymentInput, ConfirmResult } from '@/types/payment';
+import type { ConfirmPaymentInput, ConfirmResult, WebhookEvent } from '@/types/payment';
+import { TOSS_STATUS_TO_ORDER_STATUS } from '@/types/payment';
 import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionTo } from '../db/order';
 import { enqueuePrintRender } from '../render/enqueue';
+import { getServiceRoleSupabase } from '../supabase/service';
 
 export async function confirmPayment(
   input: ConfirmPaymentInput,
@@ -101,6 +103,31 @@ export async function confirmPayment(
     };
   }
 
+  // P1-03: Insert payment_events BEFORE transitioning order status.
+  // Both confirmPayment and handleWebhook use payment_events.payment_key UNIQUE
+  // as an atomic lock — whichever path inserts first proceeds with the transition;
+  // the other path gets a UNIQUE conflict and short-circuits. Eliminates the
+  // confirm↔webhook race and double-render.
+  const supabaseSvc = getServiceRoleSupabase();
+  const { error: peErr } = await supabaseSvc.from('payment_events').insert({
+    payment_key: input.paymentKey as string,
+    order_id: order.id as string,
+    order_no: input.orderId as string,
+    status: 'DONE',
+    raw_payload: tossResp as unknown as Record<string, unknown>,
+  });
+
+  if (peErr) {
+    // UNIQUE conflict: handleWebhook already processed this paymentKey.
+    // Re-fetch current order state and return idempotent success.
+    const current = await getOrder(input.orderId as string);
+    return {
+      ok: true,
+      orderNo: current?.orderNo ?? order.orderNo,
+      paymentKey: input.paymentKey,
+    };
+  }
+
   await transitionTo(order.id, 'PAID', { paymentKey: input.paymentKey });
 
   // ADR-005: kick off 300dpi print renders as soon as the order is paid.
@@ -119,22 +146,14 @@ export async function confirmPayment(
 
 // ---------- Webhook handler ----------
 
-import { getServiceRoleSupabase } from '../supabase/service';
-import type { WebhookEvent } from '@/types/payment';
-import { TOSS_STATUS_TO_ORDER_STATUS } from '@/types/payment';
-
 export async function handleWebhook(event: WebhookEvent): Promise<void> {
   const supabase = getServiceRoleSupabase();
 
-  // Dedup on paymentKey UNIQUE.
-  const { data: existing } = await supabase
-    .from('payment_events')
-    .select('id')
-    .eq('payment_key', event.data.paymentKey)
-    .maybeSingle();
-
-  if (existing) {
-    return; // already processed
+  // P1-02: Reject replayed webhook events older than 10 minutes.
+  const ageMs = Date.now() - new Date(event.createdAt).getTime();
+  if (ageMs > 10 * 60_000) {
+    console.warn(JSON.stringify({ event: 'webhook_too_old', ageMs, paymentKey: event.data.paymentKey }));
+    return; // accept HTTP 200 to Toss but do nothing
   }
 
   const order = await getOrder(event.data.orderId as string);
@@ -145,9 +164,10 @@ export async function handleWebhook(event: WebhookEvent): Promise<void> {
   const amountMatches =
     order != null && event.data.totalAmount === order.totalPrice;
 
-  // payment_events.status is constrained to TossPaymentStatus values, so we
-  // record the raw status here and surface the mismatch only in raw_payload.
-  await supabase.from('payment_events').insert({
+  // P1-03: Insert payment_events atomically — UNIQUE(payment_key) is the lock.
+  // If confirmPayment already inserted this paymentKey, this insert returns an
+  // error → we short-circuit without transitioning order status or enqueuing renders.
+  const { error: peErr } = await supabase.from('payment_events').insert({
     payment_key: event.data.paymentKey,
     order_id: order?.id ?? null,
     order_no: event.data.orderId,
@@ -156,6 +176,11 @@ export async function handleWebhook(event: WebhookEvent): Promise<void> {
       ? { ...event, _frameshop: { amountMismatch: true, expected: order.totalPrice } }
       : event,
   });
+
+  if (peErr) {
+    // UNIQUE conflict: confirmPayment already processed this payment. No-op.
+    return;
+  }
 
   if (!order) return;
 
