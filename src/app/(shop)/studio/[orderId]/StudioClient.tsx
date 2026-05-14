@@ -7,6 +7,8 @@ import { Container } from '@/components/layout/Container';
 import { OptionTabs } from '@/components/OptionTabs';
 import { Button } from '@/components/ui/Button';
 import { PriceTag } from '@/components/PriceTag';
+import { ArtworkPicker } from '@/components/ArtworkPicker';
+import { GooglePhotosPicker } from '@/components/GooglePhotosPicker';
 import {
   useCurrentVariantPrice,
   useEditorStore,
@@ -19,6 +21,7 @@ import type { PhotoId, ProductId, SessionId } from '@/types/common';
 import { LONG_EDGE_RESIZE_PX } from '@/types/photo';
 import type { OptionMatrix, ProductDetail } from '@/types/product';
 import type { Photo } from '@/types/photo';
+import type { StockPhoto } from '@/lib/db/stock-photos';
 import type { FrameCanvasHandle } from './FrameCanvas';
 
 const FrameCanvas = dynamic(() => import('./FrameCanvas'), {
@@ -34,15 +37,27 @@ type Props = {
   sessionId: string;
   productDetail: ProductDetail;
   options: OptionMatrix;
+  artworks?: StockPhoto[];
+  googlePhotosEnabled?: boolean;
 };
 
-export function StudioClient({ sessionId, productDetail, options }: Props) {
+// 사진 소스 탭 타입
+type PhotoSourceTab = 'upload' | 'artwork' | 'google';
+
+export function StudioClient({
+  sessionId,
+  productDetail,
+  options,
+  artworks = [],
+  googlePhotosEnabled = false,
+}: Props) {
   const router = useRouter();
   const init = useEditorStore((s) => s.init);
   const setPhoto = useEditorStore((s) => s.setPhoto);
   const setColor = useEditorStore((s) => s.setColor);
   const setSize = useEditorStore((s) => s.setSize);
   const setMatte = useEditorStore((s) => s.setMatte);
+  const setPaper = useEditorStore((s) => s.setPaper);
   const photo = useEditorStore((s) => s.photo);
   const selected = useEditorStore((s) => s.selectedOptions);
   const variantId = useEditorStore((s) => s.selectedVariantId);
@@ -52,6 +67,7 @@ export function StudioClient({ sessionId, productDetail, options }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [photoSourceTab, setPhotoSourceTab] = useState<PhotoSourceTab>('upload');
   const canvasRef = useRef<FrameCanvasHandle | null>(null);
 
   useEffect(() => {
@@ -70,7 +86,6 @@ export function StudioClient({ sessionId, productDetail, options }: Props) {
       let filename: string;
       try {
         payload = await resizeImageToMax(file, LONG_EDGE_RESIZE_PX);
-        // After resize the output is always JPEG, so swap the extension.
         filename = file.name.replace(/\.[^.]+$/, '') + '.jpg';
       } catch (err) {
         if (err instanceof ImageResizeError) {
@@ -100,13 +115,69 @@ export function StudioClient({ sessionId, productDetail, options }: Props) {
   }
 
   /**
-   * Capture the live Konva preview to a PNG and upload it to the `previews`
-   * Storage bucket. Returns the public URL on success or `null` on failure
-   * (caller falls back to the photo thumbnail).
-   *
-   * frame_skills.md §4 + editor.md AC-9: previewUrl saved on the cart item
-   * is the composed (photo + frame) snapshot, not just the bare photo.
+   * 명화 선택 — Stock Photo URL을 Photo 형태로 변환해서 setPhoto.
    */
+  async function handleArtworkSelect(artwork: StockPhoto) {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      // Stock Photo는 이미 Storage에 있으므로 업로드 없이 API를 통해 Photo 레코드 생성
+      const form = new FormData();
+      form.append('sessionId', sessionId);
+      form.append('imageUrl', artwork.imageUrl);
+      form.append('thumbUrl', artwork.thumbUrl);
+      form.append('widthPx', String(artwork.widthPx));
+      form.append('heightPx', String(artwork.heightPx));
+      form.append('source', 'artwork');
+
+      const res = await fetch('/api/photos/upload', {
+        method: 'POST',
+        body: form,
+      });
+      const body = (await res.json()) as { ok: boolean; photo?: Photo };
+      if (body.ok && body.photo) {
+        setPhoto(body.photo);
+      } else {
+        // fallback: URL 직접 사용 (API가 artwork source를 지원하지 않는 경우)
+        setUploadError(null);
+        const mockPhoto: Photo = {
+          id: asBrand<PhotoId>(artwork.id),
+          userId: null,
+          sessionId: sessionId as unknown as import('@/types/common').SessionId,
+          originalUrl: artwork.imageUrl,
+          thumbUrl: artwork.thumbUrl,
+          widthPx: artwork.widthPx,
+          heightPx: artwork.heightPx,
+          exif: null,
+          createdAt: artwork.createdAt as unknown as import('@/types/common').IsoTimestamp,
+        };
+        setPhoto(mockPhoto);
+      }
+    } catch {
+      setUploadError('명화를 불러오는 중 오류가 발생했습니다.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  /**
+   * Google Photos 선택 — URL + 크기 정보로 mock Photo 생성.
+   */
+  function handleGooglePhotoSelect(photoUrl: string, width: number, height: number) {
+    const mockPhoto: Photo = {
+      id: asBrand<PhotoId>(crypto.randomUUID()),
+      userId: null,
+      sessionId: sessionId as unknown as import('@/types/common').SessionId,
+      originalUrl: photoUrl,
+      thumbUrl: photoUrl + '=w400-h400',
+      widthPx: width,
+      heightPx: height,
+      exif: null,
+      createdAt: new Date().toISOString() as unknown as import('@/types/common').IsoTimestamp,
+    };
+    setPhoto(mockPhoto);
+  }
+
   async function uploadPreviewSnapshot(): Promise<string | null> {
     const dataUrl = canvasRef.current?.toDataURL({ pixelRatio: 2, mimeType: 'image/png' });
     if (!dataUrl) return null;
@@ -137,8 +208,6 @@ export function StudioClient({ sessionId, productDetail, options }: Props) {
     setConfirming(true);
     try {
       const composedPreview = await uploadPreviewSnapshot();
-      // cartItemSchema requires previewUrl to be https — fall back to the
-      // server-issued photo thumbnail when Storage upload fails (still https).
       const previewUrl = composedPreview ?? photo.thumbUrl;
       await addToCart({
         userId: null,
@@ -158,73 +227,184 @@ export function StudioClient({ sessionId, productDetail, options }: Props) {
     }
   }
 
+  // 매트 라벨 매핑
+  const matteLabels: Record<string, string> = { none: '없음', with: '있음' };
+  // 인화지 라벨 매핑
+  const paperLabels: Record<string, string> = {
+    glossy: '유광',
+    matte: '무광',
+    fineart: '파인아트',
+  };
+
   return (
     <Container size="lg" className="py-6 md:py-10">
-      <h1 className="text-xl font-bold mb-4">{productDetail.product.name}</h1>
+      {/* PC: 2컬럼 레이아웃 */}
+      <div className="md:grid md:grid-cols-[1fr_380px] md:gap-8">
+        {/* 좌측: 캔버스 */}
+        <div>
+          <h1 className="text-xl font-bold mb-4">{productDetail.product.name}</h1>
 
-      {!photo ? (
-        <PhotoSourceStep onFile={handleFile} uploading={uploading} error={uploadError} />
-      ) : (
-        <FrameCanvas
-          ref={canvasRef}
-          photo={photo}
-          productDetail={productDetail}
-          options={options}
-        />
-      )}
+          {!photo ? (
+            <PhotoSourceStep
+              tab={photoSourceTab}
+              onTabChange={setPhotoSourceTab}
+              onFile={handleFile}
+              uploading={uploading}
+              error={uploadError}
+              artworks={artworks}
+              onArtworkSelect={(a) => void handleArtworkSelect(a)}
+              googlePhotosEnabled={googlePhotosEnabled}
+              onGooglePhotoSelect={handleGooglePhotoSelect}
+            />
+          ) : (
+            <FrameCanvas
+              ref={canvasRef}
+              photo={photo}
+              productDetail={productDetail}
+              options={options}
+            />
+          )}
+        </div>
 
-      <div className="mt-6 flex flex-col gap-5">
-        <OptionTabs
-          label="사이즈"
-          value={selected.sizeCode}
-          onChange={setSize}
-          options={options.sizes.map((s) => ({ value: s.code, label: s.label }))}
-        />
-        <OptionTabs
-          label="액자 색상"
-          value={selected.colorCode}
-          onChange={setColor}
-          options={options.colors.map((c) => ({ value: c.code, label: c.label }))}
-        />
-        <OptionTabs
-          label="매트"
-          value={selected.matteCode}
-          onChange={(v) => setMatte(v as 'none' | 'with')}
-          options={options.mattes.map((m) => ({ value: m.code, label: m.label }))}
-        />
+        {/* 우측: 옵션 패널 */}
+        <div className="mt-6 md:mt-0 flex flex-col gap-5">
+          <OptionTabs
+            label="사이즈"
+            value={selected.sizeCode}
+            onChange={setSize}
+            options={options.sizes.map((s) => ({ value: s.code, label: s.label }))}
+          />
+          <OptionTabs
+            label="액자 색상"
+            value={selected.colorCode}
+            onChange={setColor}
+            options={options.colors.map((c) => ({ value: c.code, label: c.label }))}
+          />
+          {options.mattes.length > 0 ? (
+            <OptionTabs
+              label="매트"
+              value={selected.matteCode}
+              onChange={(v) => setMatte(v as 'none' | 'with')}
+              options={options.mattes.map((m) => ({
+                value: m.code,
+                label: matteLabels[m.code] ?? m.label,
+              }))}
+            />
+          ) : null}
+          {options.papers.length > 0 ? (
+            <OptionTabs
+              label="인화지"
+              value={selected.paperCode}
+              onChange={(v) => setPaper(v as 'glossy' | 'matte' | 'fineart')}
+              options={options.papers.map((p) => ({
+                value: p.code,
+                label: paperLabels[p.code] ?? p.label,
+              }))}
+            />
+          ) : null}
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <PriceTag amount={price} variant="large" />
+            <Button
+              variant="primary"
+              size="lg"
+              disabled={!photo || !variantId || confirming}
+              onClick={() => void addCurrentToCart()}
+            >
+              {confirming ? '담는 중…' : '장바구니 담기'}
+            </Button>
+          </div>
+
+          <p className="text-xs text-muted-fg">
+            ※ 미리보기는 화면 색공간 기준이며 실제 인쇄 결과와 차이가 있을 수 있습니다.
+          </p>
+        </div>
       </div>
 
-      <div className="mt-8 flex items-center justify-between gap-3">
-        <PriceTag amount={price} variant="large" />
-        <Button
-          variant="primary"
-          size="lg"
-          disabled={!photo || !variantId || confirming}
-          onClick={addCurrentToCart}
-        >
-          {confirming ? '담는 중…' : '장바구니 담기'}
-        </Button>
-      </div>
-
-      <p className="mt-2 text-xs text-muted-fg">
-        ※ 미리보기는 화면 색공간 기준이며 실제 인쇄 결과와 차이가 있을 수 있습니다.
-      </p>
-
-      {/* sessionId is part of /studio/[id] path — keep here for testability */}
       <input type="hidden" data-testid="session-id" value={sessionId as unknown as SessionId} />
       <input type="hidden" data-testid="product-id" value={productDetail.product.id as unknown as ProductId} />
     </Container>
   );
 }
 
-/**
- * Empty-state for the studio: invites the user to upload a photo.
- *
- * Nike-aligned (DESIGN-nike.md): left-aligned typography on a 1px hairline
- * surface, no decorative chrome, pill CTA. The pre-upload tip wording mirrors
- * frame_skills.md §4.3 — fit-cover happens automatically on load.
- */
+// ── 사진 소스 선택 단계 ────────────────────────────────────────────────────────
+
+type PhotoSourceStepProps = {
+  tab: PhotoSourceTab;
+  onTabChange: (tab: PhotoSourceTab) => void;
+  onFile: (file: File) => void;
+  uploading: boolean;
+  error: string | null;
+  artworks: StockPhoto[];
+  onArtworkSelect: (artwork: StockPhoto) => void;
+  googlePhotosEnabled: boolean;
+  onGooglePhotoSelect: (photoUrl: string, width: number, height: number) => void;
+};
+
 function PhotoSourceStep({
+  tab,
+  onTabChange,
+  onFile,
+  uploading,
+  error,
+  artworks,
+  onArtworkSelect,
+  googlePhotosEnabled,
+  onGooglePhotoSelect,
+}: PhotoSourceStepProps) {
+  const tabs: { id: PhotoSourceTab; label: string }[] = [
+    { id: 'upload', label: '내 사진' },
+    { id: 'artwork', label: '명화 선택' },
+    ...(googlePhotosEnabled ? [{ id: 'google' as PhotoSourceTab, label: 'Google Photos' }] : []),
+  ];
+
+  return (
+    <div className="border border-hairline">
+      {/* 탭 헤더 */}
+      <div className="flex border-b border-hairline">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onTabChange(t.id)}
+            className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+              tab === t.id
+                ? 'bg-ink text-on-primary'
+                : 'text-mute hover:text-foreground'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="p-5">
+        {tab === 'upload' ? (
+          <UploadTab onFile={onFile} uploading={uploading} error={error} />
+        ) : tab === 'artwork' ? (
+          <div className="space-y-3">
+            <p className="caption-md text-mute">
+              명화를 선택하면 바로 액자에 넣어볼 수 있습니다.
+            </p>
+            <ArtworkPicker artworks={artworks} onSelect={onArtworkSelect} />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="caption-md text-mute">
+              Google 계정에 연결하여 보관함 사진을 사용할 수 있습니다.
+            </p>
+            <GooglePhotosPicker
+              isEnabled={googlePhotosEnabled}
+              onSelect={onGooglePhotoSelect}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UploadTab({
   onFile,
   uploading,
   error,
@@ -234,7 +414,7 @@ function PhotoSourceStep({
   error: string | null;
 }) {
   return (
-    <div className="border border-hairline p-6 md:p-8 flex flex-col gap-3 items-start">
+    <div className="flex flex-col gap-3 items-start">
       <p className="heading-md text-ink">사진 가져오기</p>
       <p className="caption-md text-mute">
         JPG, PNG, HEIC, WEBP (최대 50MB)

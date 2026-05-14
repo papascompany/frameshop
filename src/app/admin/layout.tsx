@@ -12,6 +12,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <Link href="/admin/options">옵션</Link>
           <Link href="/admin/orders">주문</Link>
           <Link href="/admin/curation">큐레이션</Link>
+          <Link href="/admin/artworks">명화</Link>
           <Link href="/admin/shipping">배송 설정</Link>
           <Link href="/admin/settings">설정</Link>
         </nav>
