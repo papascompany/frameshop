@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation';
-import { Container } from '@/components/layout/Container';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getOrdersByUser } from '@/lib/db/order';
 import { asBrand } from '@/types/common';
@@ -20,9 +19,9 @@ export default async function MyOrdersPage() {
   const orders = await getOrdersByUser(userId);
 
   return (
-    <Container size="md" className="py-10">
+    <>
       <h1 className="text-xl font-bold mb-6">주문 내역</h1>
       <MyOrdersClient orders={orders} />
-    </Container>
+    </>
   );
 }

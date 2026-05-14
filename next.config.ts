@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { withSentryConfig } from '@sentry/nextjs';
 
 /**
  * Next.js 16 config (App Router).
@@ -29,6 +30,11 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: '*.supabase.co',
         pathname: '/storage/v1/object/public/**',
+      },
+      // Google Photos base URLs (picker에서 직접 표시할 때 필요)
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
       },
       // Unsplash entry removed — all editorial photos are now mirrored to
       // Supabase Storage (marketing bucket) via scripts/mirror-unsplash.mjs (P1-07).
@@ -70,4 +76,19 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry 래핑 — DSN 없으면 no-op (빌드 타임에 SENTRY_AUTH_TOKEN 불필요)
+export default withSentryConfig(nextConfig, {
+  // Sentry Organization + Project는 환경변수에서 읽음 (선택사항)
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  // 소스맵 업로드는 인증 토큰이 있을 때만 (없으면 skip)
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  // 소스맵 설정 — 프로덕션 번들에서 소스맵 제거
+  sourcemaps: {
+    disable: !process.env.SENTRY_AUTH_TOKEN,
+  },
+  // Sentry 관련 로그 최소화
+  silent: true,
+  // 텔레메트리 비활성 (불필요한 트래픽 방지)
+  telemetry: false,
+});

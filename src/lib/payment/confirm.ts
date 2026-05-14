@@ -21,6 +21,7 @@ import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionTo } from '../db/order';
 import { enqueuePrintRender } from '../render/enqueue';
 import { getServiceRoleSupabase } from '../supabase/service';
+import { notifyNewOrder } from '../notify';
 
 export async function confirmPayment(
   input: ConfirmPaymentInput,
@@ -138,6 +139,11 @@ export async function confirmPayment(
     enqueuePrintRender(item.id);
   }
 
+  // 관리자 알림 (이메일 + Slack) — fire-and-forget, 실패해도 주문 플로우 무관.
+  notifyNewOrder(order).catch((e: unknown) => {
+    console.warn('[notify] notifyNewOrder 예외:', e);
+  });
+
   return {
     ok: true,
     orderNo: asBrand<OrderNo>(input.orderId as string),
@@ -215,6 +221,10 @@ export async function handleWebhook(event: WebhookEvent): Promise<void> {
       for (const item of order.items) {
         enqueuePrintRender(item.id);
       }
+      // 관리자 알림 — fire-and-forget.
+      notifyNewOrder(order).catch((e: unknown) => {
+        console.warn('[notify] webhook notifyNewOrder 예외:', e);
+      });
     }
   } catch {
     // CANCELLED → PAID etc. are invalid; we already logged the raw payload.

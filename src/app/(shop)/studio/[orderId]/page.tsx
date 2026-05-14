@@ -1,5 +1,7 @@
 import { Container } from '@/components/layout/Container';
 import { getProductDetail, getProductOptions } from '@/lib/db/product';
+import { getActiveStockPhotos } from '@/lib/db/stock-photos';
+import { getSetting } from '@/lib/db/settings';
 import { asBrand } from '@/types/common';
 import type { ProductId } from '@/types/common';
 import { StudioClient } from './StudioClient';
@@ -42,11 +44,21 @@ export default async function StudioPage({
     );
   }
 
+  // 명화 갤러리 + Google Photos 활성화 여부 (병렬 fetch)
+  const [artworks, googleClientId] = await Promise.all([
+    getActiveStockPhotos().catch(() => []),
+    getSetting('google_client_id').catch(() => null),
+  ]);
+  const googlePhotosEnabled =
+    !!(process.env.GOOGLE_CLIENT_ID ?? googleClientId);
+
   return (
     <StudioClient
       sessionId={orderId}
       productDetail={detail}
       options={options}
+      artworks={artworks}
+      googlePhotosEnabled={googlePhotosEnabled}
     />
   );
 }
