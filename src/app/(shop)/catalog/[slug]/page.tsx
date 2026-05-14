@@ -1,8 +1,14 @@
+import type { Metadata } from 'next';
 import { Container } from '@/components/layout/Container';
 import { ProductCard } from '@/components/ProductCard';
 import { SectionHeader } from '@/components/marketing/SectionHeader';
 import { getProductsByCategory } from '@/lib/db/catalog';
 import type { ProductListResult } from '@/types';
+import {
+  buildCatalogMeta,
+  buildBreadcrumbJsonLd,
+  SITE_URL,
+} from '@/lib/seo/metadata';
 
 /**
  * Catalog by category — ISR cached.
@@ -22,6 +28,23 @@ const SLUG_LABELS: Record<string, { title: string; eyebrow: string }> = {
   'premium-frame': { title: 'PREMIUM FRAMES', eyebrow: '프리미엄 액자' },
   canvas: { title: 'CANVAS PRINTS', eyebrow: '캔버스 프린트' },
 };
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const label = SLUG_LABELS[slug] ?? {
+    title: slug.toUpperCase(),
+    eyebrow: slug,
+  };
+  return buildCatalogMeta({
+    slug,
+    title: label.title,
+    eyebrow: label.eyebrow,
+  });
+}
 
 export default async function CatalogPage({
   params,
@@ -55,32 +78,43 @@ export default async function CatalogPage({
         : sp.theme
     : null;
 
+  const breadcrumbJsonLd = buildBreadcrumbJsonLd([
+    { name: '홈', url: SITE_URL },
+    { name: label.eyebrow, url: `${SITE_URL}/catalog/${slug}` },
+  ]);
+
   return (
-    <Container size="xl" className="py-8 md:py-12">
-      <SectionHeader
-        title={label.title}
-        eyebrow={themeLabel ? `${label.eyebrow} · ${themeLabel}` : label.eyebrow}
+    <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
-      {result.items.length === 0 ? (
-        <div className="py-16 text-center">
-          <p className="heading-lg text-ink mb-2">곧 새로운 상품이 등록됩니다</p>
-          <p className="caption-md text-mute">
-            관리자가 상품을 등록하면 자동으로 노출됩니다 (캐시 갱신 5분).
-          </p>
-        </div>
-      ) : (
-        <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
-          {result.items.map((p, i) => (
-            <li key={p.id}>
-              <ProductCard
-                product={p}
-                lazyImage={i > 3}
-                badge={i === 0 ? 'BEST' : undefined}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </Container>
+      <Container size="xl" className="py-8 md:py-12">
+        <SectionHeader
+          title={label.title}
+          eyebrow={themeLabel ? `${label.eyebrow} · ${themeLabel}` : label.eyebrow}
+        />
+        {result.items.length === 0 ? (
+          <div className="py-16 text-center">
+            <p className="heading-lg text-ink mb-2">곧 새로운 상품이 등록됩니다</p>
+            <p className="caption-md text-mute">
+              관리자가 상품을 등록하면 자동으로 노출됩니다 (캐시 갱신 5분).
+            </p>
+          </div>
+        ) : (
+          <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
+            {result.items.map((p, i) => (
+              <li key={p.id}>
+                <ProductCard
+                  product={p}
+                  lazyImage={i > 3}
+                  badge={i === 0 ? 'BEST' : undefined}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Container>
+    </>
   );
 }
