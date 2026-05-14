@@ -2,7 +2,8 @@
   "crons": [
     {
       "path": "/api/cron/render-retry",
-      "schedule": "0 1 * * *"
+<<<<<<< HEAD
+      "schedule": "*/5 * * * *"
     }
   ]
 }

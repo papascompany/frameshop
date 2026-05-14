@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
+import createNextIntlPlugin from 'next-intl/plugin';
 
 /**
  * Next.js 16 config (App Router).
@@ -76,8 +77,12 @@ const nextConfig: NextConfig = {
   },
 };
 
+// next-intl 플러그인 — i18n/request.ts를 자동 연결.
+// URL 변경 없음(쿠키 기반 locale 감지).
+const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
+
 // Sentry 래핑 — DSN 없으면 no-op (빌드 타임에 SENTRY_AUTH_TOKEN 불필요)
-export default withSentryConfig(nextConfig, {
+export default withSentryConfig(withNextIntl(nextConfig), {
   // Sentry Organization + Project는 환경변수에서 읽음 (선택사항)
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
