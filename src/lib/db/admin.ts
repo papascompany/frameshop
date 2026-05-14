@@ -44,6 +44,55 @@ export async function requireAdmin(): Promise<AdminUser> {
 
 // ---------- Products ----------
 
+/** Admin-only: all products regardless of is_active, with thumbnail join. */
+export async function getAllProductsAdmin(): Promise<(Product & { thumbnail: string | null })[]> {
+  await requireAdmin();
+  const supabase = getServiceRoleSupabase();
+  const { data, error } = await supabase
+    .from('products')
+    .select(
+      'id, category_id, name, tagline, description, base_price, has_frame, is_active, sort_order, created_at, product_images!left(image_url, type, sort_order)',
+    )
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(`getAllProductsAdmin: ${error.message}`);
+
+  type ProductWithImages = {
+    id: string;
+    category_id: string;
+    name: string;
+    tagline: string;
+    description: string;
+    base_price: number;
+    has_frame: boolean;
+    is_active: boolean;
+    sort_order: number;
+    created_at: string;
+    product_images?: Array<{ image_url: string; type: string; sort_order: number }>;
+  };
+
+  return ((data ?? []) as ProductWithImages[]).map((row) => {
+    const thumb = (row.product_images ?? [])
+      .filter((img) => img.type === 'thumbnail')
+      .sort((a, b) => a.sort_order - b.sort_order)[0];
+    return {
+      ...mapProduct(row),
+      thumbnail: thumb?.image_url ?? null,
+    };
+  });
+}
+
+export async function deleteProduct(id: ProductId): Promise<void> {
+  await requireAdmin();
+  const supabase = getServiceRoleSupabase();
+  const { error } = await supabase
+    .from('products')
+    .delete()
+    .eq('id', id as string);
+  if (error) throw new Error(`deleteProduct: ${error.message}`);
+}
+
 export async function upsertProduct(input: ProductFormInput & { id?: ProductId }): Promise<Product> {
   await requireAdmin();
   const supabase = getServiceRoleSupabase();
