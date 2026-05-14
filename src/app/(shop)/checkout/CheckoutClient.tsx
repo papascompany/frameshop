@@ -90,6 +90,21 @@ export function CheckoutClient({ shippingMethods }: Props) {
     }));
   }
 
+  /** Read `fs-guest-sid` cookie value (HttpOnly → readable only server-side,
+   *  but the middleware writes it before the page renders so the browser
+   *  will carry it in the POST automatically via fetch's credentials:include).
+   *  We still read it here for explicit inclusion in the JSON body so the
+   *  API route can use it for photo-ownership verification without relying on
+   *  cookie parsing at the edge. */
+  function getGuestSessionId(): string | null {
+    if (typeof document === 'undefined') return null;
+    // HttpOnly cookies are NOT accessible via document.cookie. The sessionId
+    // travels automatically via the Set-Cookie header and is read server-side
+    // from request.cookies in the API route. We send null here; the API route
+    // reads it from cookies directly.
+    return null;
+  }
+
   async function submit() {
     const validation = validateCheckoutForm(form);
     if (!validation.ok) {
@@ -101,6 +116,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
     try {
       const res = await fetch('/api/orders', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cartItems: items,
@@ -115,6 +131,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
           },
           shippingMethod: form.shippingMethod,
           clientShippingFee: shippingFee,
+          sessionId: getGuestSessionId(),
         }),
       });
       const body = (await res.json()) as { ok: boolean; order?: Order; message?: string };
