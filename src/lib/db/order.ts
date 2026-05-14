@@ -371,6 +371,49 @@ export async function getOrdersByUser(userId: UserId): Promise<OrderWithItems[]>
   });
 }
 
+// ---------- getAllOrders (admin) ----------
+
+/**
+ * 전체 주문 목록 (관리자용). created_at DESC, 최대 limit건.
+ * order_items를 조인하여 OrderWithItems 배열 반환.
+ */
+export async function getAllOrders(limit = 100): Promise<OrderWithItems[]> {
+  const supabase = getServiceRoleSupabase();
+
+  const { data: orderRows, error } = await supabase
+    .from('orders')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`getAllOrders: ${error.message}`);
+  if (!orderRows || orderRows.length === 0) return [];
+
+  const orderIds = orderRows.map((r) => (r as { id: string }).id);
+
+  const { data: itemRows, error: itemErr } = await supabase
+    .from('order_items')
+    .select('*')
+    .in('order_id', orderIds);
+
+  if (itemErr) throw new Error(`getAllOrders items: ${itemErr.message}`);
+
+  const itemsByOrderId = new Map<string, OrderItem[]>();
+  for (const row of itemRows ?? []) {
+    const r = row as { order_id: string };
+    const existing = itemsByOrderId.get(r.order_id) ?? [];
+    existing.push(mapOrderItem(row));
+    itemsByOrderId.set(r.order_id, existing);
+  }
+
+  return orderRows.map((row) => {
+    const r = row as { id: string };
+    const order = mapOrder(row);
+    const items = itemsByOrderId.get(r.id) ?? [];
+    return { ...order, items };
+  });
+}
+
 // ---------- attach paymentKey (used by confirm route) ----------
 
 export async function attachPaymentKey(
