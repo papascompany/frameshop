@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getLocale } from 'next-intl/server';
+import { getLocale, getTranslations } from 'next-intl/server';
 import { Container } from './Container';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { cn } from '@/lib/cn';
@@ -24,6 +24,7 @@ import type { Locale } from '@/i18n/routing';
  */
 export async function Header() {
   const locale = (await getLocale()) as Locale;
+  const t = await getTranslations('header');
 
   return (
     <header className="sticky top-0 z-40 bg-canvas text-ink inset-hairline-bottom">
@@ -33,7 +34,7 @@ export async function Header() {
           href="/"
           className="display-campaign text-ink shrink-0"
           style={{ fontSize: '22px', letterSpacing: '0.02em', lineHeight: 1 }}
-          aria-label="FrameShop 홈"
+          aria-label={t('logo')}
         >
           FRAMESHOP
         </Link>
@@ -44,28 +45,28 @@ export async function Header() {
           className="hidden md:flex items-center gap-6 body-strong"
         >
           <Link href="/catalog/basic-frame" className="nav-link">
-            액자
+            {t('frames')}
           </Link>
           <Link
             href="/catalog/basic-frame?theme=masterpiece"
             className="nav-link"
           >
-            명화
+            {t('masterpiece')}
           </Link>
           <Link
             href="/catalog/basic-frame?theme=landscape"
             className="nav-link"
           >
-            풍경
+            {t('landscape')}
           </Link>
           <Link href="/#how-it-works" className="nav-link">
-            제작과정
+            {t('howItWorks')}
           </Link>
           <Link href="/order/lookup" className="nav-link">
-            주문조회
+            {t('orderLookup')}
           </Link>
           <Link href="/account/orders" className="nav-link">
-            마이페이지
+            {t('myPage')}
           </Link>
         </nav>
 
@@ -83,7 +84,7 @@ export async function Header() {
               'cursor-not-allowed select-none',
             )}
             aria-disabled="true"
-            title="검색 기능은 Phase 2에서 출시됩니다."
+            title={t('searchComingSoon')}
           >
             <svg
               width="16"
@@ -106,7 +107,7 @@ export async function Header() {
                 strokeLinecap="round"
               />
             </svg>
-            <span>검색</span>
+            <span>{t('search')}</span>
           </span>
 
           <Link
@@ -115,7 +116,7 @@ export async function Header() {
               'inline-flex items-center gap-2 px-3 h-10 rounded-[24px]',
               'caption-md text-ink hover:bg-soft-cloud transition-colors',
             )}
-            aria-label="장바구니"
+            aria-label={t('cart')}
           >
             <svg
               width="18"
@@ -134,7 +135,7 @@ export async function Header() {
               <circle cx="8.5" cy="17.5" r="1.2" fill="currentColor" />
               <circle cx="15.5" cy="17.5" r="1.2" fill="currentColor" />
             </svg>
-            <span className="hidden sm:inline">장바구니</span>
+            <span className="hidden sm:inline">{t('cart')}</span>
           </Link>
         </div>
       </Container>

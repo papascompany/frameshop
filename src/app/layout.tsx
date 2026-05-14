@@ -8,6 +8,8 @@ import {
   buildOrganizationJsonLd,
   buildWebSiteJsonLd,
 } from '@/lib/seo/metadata';
+import { NextIntlClientProvider } from 'next-intl';
+import { getLocale, getMessages } from 'next-intl/server';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -74,21 +76,25 @@ export const metadata: Metadata = {
  *  Both font CSS variables are exposed on `<html>` so Tailwind utilities
  *  resolve them through globals.css `@theme inline`.
  */
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   const orgJsonLd = buildOrganizationJsonLd();
   const siteJsonLd = buildWebSiteJsonLd();
+  const locale = await getLocale();
+  const messages = await getMessages();
 
   return (
     <html
-      lang="ko"
+      lang={locale}
       className={`h-full antialiased ${fontDisplay.variable} ${fontSans.variable}`}
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink">
-        {children}
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          {children}
+        </NextIntlClientProvider>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }}

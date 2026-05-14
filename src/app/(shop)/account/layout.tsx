@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Container } from '@/components/layout/Container';
+import { getTranslations } from 'next-intl/server';
 
 /**
  * 마이페이지 레이아웃.
@@ -8,20 +9,22 @@ import { Container } from '@/components/layout/Container';
  * 모바일: 단일 컬럼 (사이드바 위에 표시)
  */
 
-const NAV_ITEMS = [
-  { href: '/account/orders', label: '주문 내역' },
-];
+export default async function AccountLayout({ children }: { children: ReactNode }) {
+  const t = await getTranslations('account');
 
-export default function AccountLayout({ children }: { children: ReactNode }) {
+  const NAV_ITEMS = [
+    { href: '/account/orders', label: t('orders') },
+  ];
+
   return (
     <Container size="lg" className="py-8 md:py-12">
       <div className="md:grid md:grid-cols-[200px_1fr] md:gap-10">
         {/* 사이드바 */}
         <aside className="mb-6 md:mb-0">
           <h2 className="text-xs font-semibold text-muted-fg uppercase tracking-wider mb-3">
-            마이페이지
+            {t('title')}
           </h2>
-          <nav aria-label="마이페이지 네비게이션">
+          <nav aria-label={t('title')}>
             <ul className="flex md:flex-col gap-2 flex-wrap">
               {NAV_ITEMS.map((item) => (
                 <li key={item.href}>
