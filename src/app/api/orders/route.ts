@@ -13,6 +13,7 @@
 
 import 'server-only';
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { cartItemSchema } from '@/types/cart';
 import {
   createOrderInputSchema,
@@ -25,6 +26,8 @@ import { createOrder } from '@/lib/db/order';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { isSameOrigin } from '@/lib/security/same-origin';
 import { z } from 'zod';
+
+const GUEST_COOKIE_NAME = 'fs-guest-sid';
 
 const bodySchema = z.object({
   cartItems: z.array(cartItemSchema).min(1),
@@ -59,6 +62,12 @@ export async function POST(request: Request): Promise<Response> {
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id ?? null;
 
+  // Read the HttpOnly guest session cookie (set by middleware for anon users).
+  // Falls back to sessionId in the request body (for clients that send it explicitly).
+  const cookieStore = await cookies();
+  const guestSidFromCookie = cookieStore.get(GUEST_COOKIE_NAME)?.value ?? null;
+  const sessionId = guestSidFromCookie ?? parsed.data.sessionId ?? null;
+
   const input: CreateOrderInput = {
     cartItems: parsed.data.cartItems as unknown as CreateOrderInput['cartItems'],
     orderer: parsed.data.orderer,
@@ -71,7 +80,8 @@ export async function POST(request: Request): Promise<Response> {
         ? asBrand<UserId>(parsed.data.userId)
         : null,
     // P0-03: Forward sessionId for anonymous photo-ownership verification.
-    sessionId: parsed.data.sessionId ?? null,
+    // Prefer the HttpOnly cookie value (tamper-proof) over the body value.
+    sessionId,
   };
 
   try {
