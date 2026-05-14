@@ -47,7 +47,32 @@
       "step1": { "title": "Choose a Photo", "desc": "Upload your treasured photo" },
       "step2": { "title": "Pick a Frame", "desc": "Select from various sizes and colors" },
       "step3": { "title": "Delivery", "desc": "Receive gallery art at your door" }
-    }
+    },
+    "featuredFrames": "FEATURED FRAMES",
+    "featuredFramesEyebrow": "Featured Frames",
+    "viewAll": "View All",
+    "masterpieceGallery": "MASTERPIECE GALLERY",
+    "masterpieceEyebrow": "Masterpiece Collection",
+    "viewMasterpieces": "All Masterpieces",
+    "shopBySize": "SHOP BY SIZE",
+    "shopBySizeEyebrow": "Find by Size",
+    "landscapePrints": "LANDSCAPE PRINTS",
+    "landscapeEyebrow": "Landscape Collection",
+    "viewLandscape": "View Collection",
+    "memberBenefits": "MEMBER BENEFITS",
+    "memberBenefitsEyebrow": "Member Perks",
+    "howItWorksTitle": "HOW IT WORKS",
+    "howItWorksEyebrow": "3 minutes is all it takes",
+    "faqTitle": "FAQ",
+    "faqEyebrow": "Frequently Asked Questions",
+    "comingSoon": "Coming Soon",
+    "upcomingBadge": "Coming Soon",
+    "preparingLabel": "Preparing",
+    "finalCtaEyebrow": "YOUR MOMENTS DESERVE A FRAME",
+    "finalCtaHeadline": "START NOW.",
+    "finalCtaBody": "Preview in 1 minute, delivered in 3 business days.",
+    "finalCtaStart": "Start Now",
+    "finalCtaHow": "How It Works"
   },
   "catalog": {
     "title": "Browse Frames",
@@ -61,17 +86,27 @@
     "color": "Color",
     "price": "Price",
     "outOfStock": "Out of Stock",
-    "startEditor": "Open in Editor"
+    "startEditor": "Open in Editor",
+    "productionGuide": "Production Guide",
+    "imagePrepairing": "Image Preparing",
+    "optionPrepairing": "Options Preparing"
   },
   "cart": {
     "title": "Cart",
     "empty": "Your cart is empty.",
+    "emptyAlt": "Your cart is empty.",
     "continueShopping": "Continue Shopping",
+    "goToCatalog": "Go to Catalog",
     "checkout": "Checkout",
     "total": "Total",
+    "totalAmount": "Total",
     "items": "{count} items",
     "remove": "Remove",
-    "quantity": "Quantity"
+    "quantity": "Quantity",
+    "subtotal": "Subtotal",
+    "shippingFee": "Shipping",
+    "shippingNextStep": "Calculated at next step",
+    "loading": "Loading..."
   },
   "checkout": {
     "title": "Order Form",
@@ -98,7 +133,8 @@
     "totalAmount": "Total",
     "pay": "Pay Now",
     "noShippingMethods": "No shipping methods available. Please contact the operator.",
-    "orderFailed": "Failed to create order"
+    "orderFailed": "Failed to create order",
+    "loading": "Loading..."
   },
   "order": {
     "success": {

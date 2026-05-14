@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Container } from '@/components/layout/Container';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -16,6 +17,7 @@ import type { CartItem } from '@/types/cart';
 import type { LocalId } from '@/types/common';
 
 export function CartClient() {
+  const t = useTranslations('cart');
   const [items, setItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,15 +44,15 @@ export function CartClient() {
 
   return (
     <Container size="md" className="py-6 md:py-10">
-      <h1 className="text-xl md:text-2xl font-bold mb-4">장바구니</h1>
+      <h1 className="text-xl md:text-2xl font-bold mb-4">{t('title')}</h1>
 
       {loading ? (
-        <p className="text-sm text-muted-fg">불러오는 중...</p>
+        <p className="text-sm text-muted-fg">{t('loading')}</p>
       ) : items.length === 0 ? (
         <Card padding="lg" className="text-center">
-          <p className="text-sm text-muted-fg mb-4">장바구니가 비어있습니다.</p>
+          <p className="text-sm text-muted-fg mb-4">{t('emptyAlt')}</p>
           <Link href="/" className="text-sm font-semibold underline">
-            카탈로그로 이동
+            {t('goToCatalog')}
           </Link>
         </Card>
       ) : (
@@ -106,7 +108,7 @@ export function CartClient() {
                       onClick={() => remove(item.localId)}
                       className="text-xs text-muted-fg underline"
                     >
-                      삭제
+                      {t('remove')}
                     </button>
                   </div>
                 </Card>
@@ -116,16 +118,16 @@ export function CartClient() {
 
           <Card padding="md" className="mt-6 flex flex-col gap-2">
             <div className="flex justify-between text-sm">
-              <span>상품 합계</span>
+              <span>{t('subtotal')}</span>
               <span className="tabular-nums">{summary.subtotal.toLocaleString('ko-KR')}원</span>
             </div>
             <div className="flex justify-between text-sm text-muted-fg">
-              <span>배송비</span>
-              <span>다음 단계에서 계산</span>
+              <span>{t('shippingFee')}</span>
+              <span>{t('shippingNextStep')}</span>
             </div>
             <hr className="my-2 border-border" />
             <div className="flex items-center justify-between">
-              <span className="font-semibold">총 금액</span>
+              <span className="font-semibold">{t('totalAmount')}</span>
               <PriceTag amount={summary.subtotal} variant="large" />
             </div>
           </Card>
@@ -133,7 +135,7 @@ export function CartClient() {
           <div className="mt-4">
             <Link href="/checkout">
               <Button variant="primary" size="lg" fullWidth>
-                결제하기
+                {t('checkout')}
               </Button>
             </Link>
           </div>

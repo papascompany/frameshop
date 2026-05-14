@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -29,6 +30,7 @@ type Props = {
 
 export function CheckoutClient({ shippingMethods }: Props) {
   const router = useRouter();
+  const t = useTranslations('checkout');
   const [items, setItems] = useState<CartItem[]>([]);
   const [loadingCart, setLoadingCart] = useState(true);
 
@@ -162,7 +164,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
   }
 
   if (loadingCart) {
-    return <p className="text-sm text-muted-fg">불러오는 중...</p>;
+    return <p className="text-sm text-muted-fg">{t('loading')}</p>;
   }
 
   return (
@@ -178,17 +180,17 @@ export function CheckoutClient({ shippingMethods }: Props) {
       <div className="flex flex-col gap-4">
       {/* Orderer */}
       <Card padding="md">
-        <h2 className="font-semibold mb-3">주문인</h2>
+        <h2 className="font-semibold mb-3">{t('orderer')}</h2>
         <div className="flex flex-col gap-3">
           <Input
-            label="이름"
+            label={t('ordererName')}
             value={form.orderer.name}
             onChange={(e) => setOrderer('name', e.target.value)}
             error={errors['orderer.name']}
             autoComplete="name"
           />
           <Input
-            label="전화번호"
+            label={t('ordererPhone')}
             inputMode="tel"
             value={form.orderer.phone}
             onChange={(e) => setOrderer('phone', formatPhone(e.target.value))}
@@ -197,7 +199,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
             autoComplete="tel"
           />
           <Input
-            label="이메일"
+            label={t('ordererEmail')}
             type="email"
             value={form.orderer.email}
             onChange={(e) => setOrderer('email', e.target.value)}
@@ -209,11 +211,11 @@ export function CheckoutClient({ shippingMethods }: Props) {
 
       {/* Shipping method */}
       <Card padding="md">
-        <h2 className="font-semibold mb-3">배송 방법</h2>
+        <h2 className="font-semibold mb-3">{t('shippingMethod')}</h2>
         <ul className="flex flex-col gap-2">
           {shippingMethods.length === 0 ? (
             <li className="text-sm text-muted-fg">
-              현재 이용 가능한 배송 방법이 없습니다. 운영자에게 문의해 주세요.
+              {t('noShippingMethods')}
             </li>
           ) : (
             shippingMethods.map((m) => {
@@ -239,7 +241,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
                       <span className="block text-sm font-medium">{m.label}</span>
                       {m.code === 'STANDARD' && m.freeThreshold !== null ? (
                         <span className="text-xs text-muted-fg">
-                          {m.freeThreshold.toLocaleString('ko-KR')}원 이상 무료
+                          {t('freeAbove', { amount: m.freeThreshold.toLocaleString('ko-KR') })}
                         </span>
                       ) : null}
                       {m.note ? (
@@ -247,7 +249,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
                       ) : null}
                     </span>
                     {isFree ? (
-                      <Badge variant="success">무료배송</Badge>
+                      <Badge variant="success">{t('freeShipping')}</Badge>
                     ) : (
                       <span className="text-sm tabular-nums">
                         {m.fee.toLocaleString('ko-KR')}원
@@ -264,7 +266,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
       {/* Shipping address */}
       {form.shippingMethod !== 'PICKUP' ? (
         <Card padding="md">
-          <h2 className="font-semibold mb-3">배송지</h2>
+          <h2 className="font-semibold mb-3">{t('shippingAddress')}</h2>
           <div className="flex flex-col gap-3">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -272,17 +274,17 @@ export function CheckoutClient({ shippingMethods }: Props) {
                 checked={form.shipping.sameAsOrderer}
                 onChange={(e) => toggleSameAsOrderer(e.target.checked)}
               />
-              주문인과 동일
+              {t('sameAsOrderer')}
             </label>
             <Input
-              label="받는 분"
+              label={t('recipient')}
               value={form.shipping.name}
               onChange={(e) => setShipping('name', e.target.value)}
               error={errors['shipping.name']}
               autoComplete="name"
             />
             <Input
-              label="전화번호"
+              label={t('phone')}
               inputMode="tel"
               value={form.shipping.phone}
               onChange={(e) =>
@@ -293,14 +295,14 @@ export function CheckoutClient({ shippingMethods }: Props) {
             />
             <div className="flex gap-2 items-end">
               <Input
-                label="우편번호"
+                label={t('zipCode')}
                 value={form.shipping.zip}
                 readOnly
                 error={errors['shipping.zip']}
                 inputMode="numeric"
                 autoComplete="postal-code"
                 className="max-w-[140px]"
-                placeholder="검색 후 자동입력"
+                placeholder={t('searchZip')}
               />
               <PostcodeButton
                 onComplete={(zip, addr1) => {
@@ -311,22 +313,22 @@ export function CheckoutClient({ shippingMethods }: Props) {
               />
             </div>
             <Input
-              label="주소"
+              label={t('address')}
               value={form.shipping.addr1}
               readOnly
               error={errors['shipping.addr1']}
               autoComplete="address-line1"
-              placeholder="우편번호 검색 후 자동입력"
+              placeholder={t('searchZip')}
             />
             <Input
-              label="상세 주소"
+              label={t('addressDetail')}
               value={form.shipping.addr2}
               onChange={(e) => setShipping('addr2', e.target.value)}
               error={errors['shipping.addr2']}
               autoComplete="address-line2"
             />
             <Input
-              label="배송 메모"
+              label={t('memo')}
               value={form.shipping.memo}
               onChange={(e) => setShipping('memo', e.target.value)}
               error={errors['shipping.memo']}
@@ -336,7 +338,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
         </Card>
       ) : (
         <Card padding="md">
-          <h2 className="font-semibold mb-3">픽업 안내</h2>
+          <h2 className="font-semibold mb-3">{t('pickupNotice')}</h2>
           <p className="text-sm">
             {activeMethod?.note ?? '매장에서 직접 수령하실 수 있습니다.'}
           </p>
@@ -350,26 +352,26 @@ export function CheckoutClient({ shippingMethods }: Props) {
       {/* Total */}
       <Card padding="md" className="flex flex-col gap-2">
         <div className="flex justify-between text-sm">
-          <span>상품 합계</span>
+          <span>{t('subtotal')}</span>
           <span className="tabular-nums">
             {summary.subtotal.toLocaleString('ko-KR')}원
           </span>
         </div>
         <div className="flex justify-between text-sm">
-          <span>배송비</span>
+          <span>{t('shippingFee')}</span>
           <span className="tabular-nums">
             {shippingFee === 0 ? '0원' : `${shippingFee.toLocaleString('ko-KR')}원`}
           </span>
         </div>
         <hr className="my-2 border-border" />
         <div className="flex items-center justify-between">
-          <span className="font-semibold">총 결제 금액</span>
+          <span className="font-semibold">{t('totalAmount')}</span>
           <PriceTag amount={total} variant="large" />
         </div>
       </Card>
 
       <Button type="submit" variant="primary" size="lg" fullWidth loading={submitting} disabled={submitting || items.length === 0}>
-        결제하기
+        {t('pay')}
       </Button>
       </div>{/* 우측 컬럼 끝 */}
     </form>

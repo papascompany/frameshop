@@ -3,6 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { buildFaqJsonLd, SITE_URL, DEFAULT_OG_IMAGE } from '@/lib/seo/metadata';
+import { getTranslations } from 'next-intl/server';
 
 import { Container } from '@/components/layout/Container';
 import { ProductCard } from '@/components/ProductCard';
@@ -106,6 +107,7 @@ function productToLandscapeTile(product: ProductListItem): LandscapeTile {
 }
 
 export default async function LandingPage() {
+  const t = await getTranslations('landing');
   // ── DB 큐레이션 로드 (fallback: static 데이터) ──────────────────────────────
   let dbHeroSlides: HeroSlide[] = [];
   let dbCollectionTiles: LandscapeTile[] = [];
@@ -206,9 +208,9 @@ export default async function LandingPage() {
       {/* ── 2. Featured Frames (DB-backed) ─────────────────────────────── */}
       <Container size="xl" className="py-[48px] md:py-[80px]">
         <SectionHeader
-          title="FEATURED FRAMES"
-          eyebrow="추천 액자"
-          linkLabel="모두 보기"
+          title={t('featuredFrames')}
+          eyebrow={t('featuredFramesEyebrow')}
+          linkLabel={t('viewAll')}
           linkHref="/catalog/basic-frame"
         />
         <ul className="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3">
@@ -221,7 +223,13 @@ export default async function LandingPage() {
                   lazyImage={i > 0}
                 />
               ) : (
-                <UpcomingProductCard name={slot.name} tagline={slot.tagline} />
+                <UpcomingProductCard
+                  name={slot.name}
+                  tagline={slot.tagline}
+                  badgeLabel={t('upcomingBadge')}
+                  comingSoonLabel={t('comingSoon')}
+                  preparingLabel={t('preparingLabel')}
+                />
               )}
             </li>
           ))}
@@ -232,9 +240,9 @@ export default async function LandingPage() {
       <section className="bg-canvas py-[48px] md:py-[80px] border-t border-hairline-soft">
         <Container size="xl">
           <SectionHeader
-            title="MASTERPIECE GALLERY"
-            eyebrow="명화 컬렉션"
-            linkLabel="명화 전체"
+            title={t('masterpieceGallery')}
+            eyebrow={t('masterpieceEyebrow')}
+            linkLabel={t('viewMasterpieces')}
             linkHref="/catalog/basic-frame?theme=masterpiece"
           />
           <MasterpieceGallery tiles={MASTERPIECE_TILES} />
@@ -247,7 +255,7 @@ export default async function LandingPage() {
       {/* ── 4. Shop by Size ────────────────────────────────────────────── */}
       <section className="bg-soft-cloud py-[48px] md:py-[80px]">
         <Container size="xl">
-          <SectionHeader title="SHOP BY SIZE" eyebrow="사이즈로 찾기" />
+          <SectionHeader title={t('shopBySize')} eyebrow={t('shopBySizeEyebrow')} />
           <div className="hidden md:grid grid-cols-4 gap-6">
             {SIZE_CARDS.map((s) => (
               <CategoryIconCard
@@ -294,9 +302,9 @@ export default async function LandingPage() {
       <section className="bg-canvas py-[48px] md:py-[80px] border-t border-hairline-soft">
         <Container size="xl">
           <SectionHeader
-            title="LANDSCAPE PRINTS"
-            eyebrow="풍경 컬렉션"
-            linkLabel="컬렉션 전체"
+            title={t('landscapePrints')}
+            eyebrow={t('landscapeEyebrow')}
+            linkLabel={t('viewLandscape')}
             linkHref="/catalog/basic-frame?theme=landscape"
           />
           {dbCollectionSubtitle && (
@@ -309,7 +317,7 @@ export default async function LandingPage() {
       {/* ── 7. Member Benefits ─────────────────────────────────────────── */}
       <section className="bg-canvas py-[48px] md:py-[80px] border-t border-hairline-soft">
         <Container size="xl">
-          <SectionHeader title="MEMBER BENEFITS" eyebrow="회원 특별 혜택" />
+          <SectionHeader title={t('memberBenefits')} eyebrow={t('memberBenefitsEyebrow')} />
           <ul className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3">
             {MEMBER_BENEFIT_TILES.map((b) => (
               <li key={b.headline}>
@@ -354,7 +362,7 @@ export default async function LandingPage() {
         className="py-[48px] md:py-[80px] border-t border-hairline-soft scroll-mt-24"
       >
         <Container size="xl">
-          <SectionHeader title="HOW IT WORKS" eyebrow="3분이면 충분합니다" />
+          <SectionHeader title={t('howItWorksTitle')} eyebrow={t('howItWorksEyebrow')} />
           <ol className="grid grid-cols-1 md:grid-cols-4 gap-6 md:gap-3">
             {HOW_IT_WORKS.map((step, i) => (
               <li key={step.title}>
@@ -375,7 +383,7 @@ export default async function LandingPage() {
         className="bg-soft-cloud py-[48px] md:py-[80px] scroll-mt-24"
       >
         <Container size="md">
-          <SectionHeader title="FAQ" eyebrow="자주 묻는 질문" />
+          <SectionHeader title={t('faqTitle')} eyebrow={t('faqEyebrow')} />
           <div>
             {FAQ_ITEMS.map((q, i) => (
               <FaqRow
@@ -391,7 +399,13 @@ export default async function LandingPage() {
       </section>
 
       {/* ── 10. Final CTA ──────────────────────────────────────────────── */}
-      <FinalCallToAction />
+      <FinalCallToAction
+        eyebrow={t('finalCtaEyebrow')}
+        headline={t('finalCtaHeadline')}
+        body={t('finalCtaBody')}
+        startLabel={t('finalCtaStart')}
+        howLabel={t('finalCtaHow')}
+      />
     </>
   );
 }
@@ -400,7 +414,19 @@ export default async function LandingPage() {
 // Inline sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
-function UpcomingProductCard({ name, tagline }: { name: string; tagline: string }) {
+function UpcomingProductCard({
+  name,
+  tagline,
+  badgeLabel,
+  comingSoonLabel,
+  preparingLabel,
+}: {
+  name: string;
+  tagline: string;
+  badgeLabel: string;
+  comingSoonLabel: string;
+  preparingLabel: string;
+}) {
   return (
     <div className="block rounded-none cursor-default" aria-disabled="true">
       <div className="relative aspect-square bg-soft-cloud overflow-hidden">
@@ -412,7 +438,7 @@ function UpcomingProductCard({ name, tagline }: { name: string; tagline: string 
               'rounded-[30px] px-3 py-1',
             )}
           >
-            Coming Soon
+            {badgeLabel}
           </span>
         </div>
         <div
@@ -422,13 +448,13 @@ function UpcomingProductCard({ name, tagline }: { name: string; tagline: string 
               'repeating-linear-gradient(45deg, transparent 0 11px, rgba(0,0,0,0.04) 11px 12px)',
           }}
         >
-          <span className="caption-md text-mute">곧 만나요</span>
+          <span className="caption-md text-mute">{comingSoonLabel}</span>
         </div>
       </div>
       <div className="mt-3 flex flex-col gap-1.5">
         <p className="body-strong text-ink truncate">{name}</p>
         <p className="caption-md text-mute truncate">{tagline}</p>
-        <p className="body-strong text-mute">준비 중</p>
+        <p className="body-strong text-mute">{preparingLabel}</p>
       </div>
     </div>
   );
@@ -480,7 +506,19 @@ function HowItWorksStep({
   );
 }
 
-function FinalCallToAction() {
+function FinalCallToAction({
+  eyebrow,
+  headline,
+  body,
+  startLabel,
+  howLabel,
+}: {
+  eyebrow: string;
+  headline: string;
+  body: string;
+  startLabel: string;
+  howLabel: string;
+}) {
   return (
     <section className="relative w-full bg-ink text-on-primary overflow-hidden">
       {/* Soft radial glow so the slab doesn't read as a flat rectangle. */}
@@ -493,10 +531,10 @@ function FinalCallToAction() {
         }}
       />
       <div className="relative mx-auto max-w-[1280px] px-4 md:px-6 py-[72px] md:py-[140px] flex flex-col items-center text-center">
-        <p className="eyebrow text-canvas mb-4">YOUR MOMENTS DESERVE A FRAME</p>
-        <h2 className="display-campaign max-w-[14ch]">START NOW.</h2>
+        <p className="eyebrow text-canvas mb-4">{eyebrow}</p>
+        <h2 className="display-campaign max-w-[14ch]">{headline}</h2>
         <p className="mt-4 body-md text-stone max-w-[42ch]">
-          단 1분이면 미리보고, 영업일 3일 안에 받습니다.
+          {body}
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link
@@ -507,7 +545,7 @@ function FinalCallToAction() {
               'bg-canvas text-ink hover:bg-soft-cloud transition-colors',
             )}
           >
-            지금 시작하기
+            {startLabel}
           </Link>
           <Link
             href="/#how-it-works"
@@ -517,7 +555,7 @@ function FinalCallToAction() {
               'border border-canvas/60 text-canvas hover:bg-canvas/10 transition-colors',
             )}
           >
-            제작 과정 보기
+            {howLabel}
           </Link>
         </div>
       </div>

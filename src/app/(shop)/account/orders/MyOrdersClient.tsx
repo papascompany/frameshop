@@ -3,13 +3,16 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import Link from 'next/link';
+import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import type { OrderStatus, OrderWithItems } from '@/types/order';
 
-// ── 주문 상태 한국어 매핑 ──────────────────────────────────────────────────────
-
+/**
+ * 주문 상태 → 한국어 레이블 매핑 (순수 함수, 테스트용 export).
+ * 컴포넌트 내부에서는 useTranslations('order.status')로 대체됩니다.
+ */
 export function orderStatusLabel(status: OrderStatus): string {
   const map: Record<OrderStatus, string> = {
     CREATED: '주문접수',
@@ -148,9 +151,19 @@ type Props = {
 
 export function MyOrdersClient({ orders }: Props) {
   const router = useRouter();
+  const t = useTranslations('account');
+  const tStatus = useTranslations('order.status');
   const [reorderingId, setReorderingId] = useState<string | null>(null);
   const [reviewOrderId, setReviewOrderId] = useState<string | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+
+  function getStatusLabel(status: OrderStatus): string {
+    const validKeys: OrderStatus[] = ['CREATED', 'PAID', 'IN_PRODUCTION', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED'];
+    if (validKeys.includes(status)) {
+      return tStatus(status);
+    }
+    return status;
+  }
 
   async function handleReorder(orderId: string) {
     setReorderingId(orderId);
@@ -180,9 +193,9 @@ export function MyOrdersClient({ orders }: Props) {
   if (orders.length === 0) {
     return (
       <div className="text-center py-16 text-muted-fg">
-        <p className="text-sm">주문 내역이 없습니다.</p>
+        <p className="text-sm">{t('noOrders')}</p>
         <Link href="/catalog/basic-frame" className="mt-4 inline-block text-sm underline">
-          쇼핑 시작하기
+          {t('startShopping')}
         </Link>
       </div>
     );
@@ -227,7 +240,7 @@ export function MyOrdersClient({ orders }: Props) {
                     </p>
                   </div>
                   <Badge variant={orderStatusVariant(order.status)}>
-                    {orderStatusLabel(order.status)}
+                    {getStatusLabel(order.status)}
                   </Badge>
                 </div>
 
@@ -260,7 +273,7 @@ export function MyOrdersClient({ orders }: Props) {
                           rel="noopener noreferrer"
                           className="text-xs underline text-foreground hover:text-muted-fg"
                         >
-                          인쇄파일 보기
+                          {t('printFile')}
                         </a>
                       ))}
                   </div>
@@ -274,14 +287,14 @@ export function MyOrdersClient({ orders }: Props) {
                   <div className="flex gap-2">
                     {isDelivered ? (
                       hasReview ? (
-                        <Badge variant="success">리뷰 완료</Badge>
+                        <Badge variant="success">{t('reviewDone')}</Badge>
                       ) : (
                         <Button
                           size="sm"
                           variant="secondary"
                           onClick={() => setReviewOrderId(order.id as string)}
                         >
-                          리뷰 작성
+                          {t('writeReview')}
                         </Button>
                       )
                     ) : null}
@@ -292,7 +305,7 @@ export function MyOrdersClient({ orders }: Props) {
                       disabled={isReordering}
                       onClick={() => void handleReorder(order.id as string)}
                     >
-                      재주문
+                      {t('reorder')}
                     </Button>
                   </div>
                 </div>

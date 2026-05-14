@@ -14,6 +14,7 @@ import {
   buildBreadcrumbJsonLd,
   SITE_URL,
 } from '@/lib/seo/metadata';
+import { getTranslations } from 'next-intl/server';
 
 /**
  * Product detail — ISR cached for 5 minutes.
@@ -85,6 +86,8 @@ export default async function ProductPage({
   }
   if (!detail) notFound();
 
+  const t = await getTranslations('product');
+
   const hero = detail.images.gallery[0] ?? detail.images.thumbnail[0] ?? null;
   const thumbnailUrl =
     detail.images.thumbnail[0]?.imageUrl ??
@@ -131,7 +134,7 @@ export default async function ProductPage({
               />
             ) : (
               <div className="absolute inset-0 grid place-items-center text-sm text-muted-fg">
-                이미지 준비 중
+                {t('imagePrepairing')}
               </div>
             )}
           </div>
@@ -155,7 +158,7 @@ export default async function ProductPage({
               <StartEditorButton productId={detail.product.id} />
             ) : (
               <Button variant="primary" size="lg" fullWidth disabled>
-                옵션 준비 중
+                {t('optionPrepairing')}
               </Button>
             )}
           </div>
@@ -164,7 +167,7 @@ export default async function ProductPage({
         {/* Guide images */}
         {detail.images.guide.length > 0 ? (
           <section className="mt-12">
-            <h2 className="text-lg font-bold mb-4">제작 가이드</h2>
+            <h2 className="text-lg font-bold mb-4">{t('productionGuide')}</h2>
             <div className="flex flex-col gap-4">
               {detail.images.guide.map((g) => (
                 <div key={g.id} className="relative aspect-[4/3] bg-surface-muted">
