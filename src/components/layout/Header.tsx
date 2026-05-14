@@ -1,6 +1,9 @@
 import Link from 'next/link';
+import { getLocale } from 'next-intl/server';
 import { Container } from './Container';
+import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { cn } from '@/lib/cn';
+import type { Locale } from '@/i18n/routing';
 
 /**
  * Primary nav — Nike-aligned, gallery-grade.
@@ -19,7 +22,9 @@ import { cn } from '@/lib/cn';
  *  via `usePathname()` in a thin client wrapper — Phase 1 keeps the file
  *  RSC-only to avoid an extra client-bundle hop on every render.
  */
-export function Header() {
+export async function Header() {
+  const locale = (await getLocale()) as Locale;
+
   return (
     <header className="sticky top-0 z-40 bg-canvas text-ink inset-hairline-bottom">
       <Container size="xl" className="flex items-center justify-between h-14 md:h-16 gap-4">
@@ -66,6 +71,8 @@ export function Header() {
 
         {/* ── Right cluster ──────────────────────────────────────────── */}
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          {/* Language switcher */}
+          <LocaleSwitcher currentLocale={locale} />
           {/* Search pill — visual placeholder on Phase 1 (search route lands
            * in Phase 2). The disabled cursor + title attr signals the
            * "coming soon" state to power users without clutter. */}

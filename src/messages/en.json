@@ -1,0 +1,161 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "retry": "Try again",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Submit",
+    "required": "This field is required",
+    "currencyUnit": "KRW"
+  },
+  "header": {
+    "home": "Home",
+    "frames": "Frames",
+    "masterpiece": "Masterpiece",
+    "landscape": "Landscape",
+    "howItWorks": "How It Works",
+    "orderLookup": "Order Lookup",
+    "myPage": "My Page",
+    "cart": "Cart",
+    "search": "Search",
+    "searchComingSoon": "Search feature coming soon.",
+    "logo": "FrameShop Home"
+  },
+  "footer": {
+    "company": "FrameShop Inc.",
+    "ceo": "CEO: John Doe",
+    "businessNumber": "Business No: 123-45-67890",
+    "address": "Gangnam-gu, Seoul",
+    "customerCenter": "Customer Center",
+    "email": "support@frameshop.kr",
+    "copyright": "© 2026 FrameShop. All rights reserved.",
+    "terms": "Terms of Service",
+    "privacy": "Privacy Policy"
+  },
+  "landing": {
+    "hero": {
+      "cta": "Create Now",
+      "subtitle": "Turn your precious moments into gallery-quality frames"
+    },
+    "howItWorks": {
+      "title": "3 Simple Steps",
+      "step1": { "title": "Choose a Photo", "desc": "Upload your treasured photo" },
+      "step2": { "title": "Pick a Frame", "desc": "Select from various sizes and colors" },
+      "step3": { "title": "Delivery", "desc": "Receive gallery art at your door" }
+    }
+  },
+  "catalog": {
+    "title": "Browse Frames",
+    "noProducts": "No products found.",
+    "loadMore": "Load More"
+  },
+  "product": {
+    "addToCart": "Add to Cart",
+    "customize": "Customize",
+    "size": "Size",
+    "color": "Color",
+    "price": "Price",
+    "outOfStock": "Out of Stock",
+    "startEditor": "Open in Editor"
+  },
+  "cart": {
+    "title": "Cart",
+    "empty": "Your cart is empty.",
+    "continueShopping": "Continue Shopping",
+    "checkout": "Checkout",
+    "total": "Total",
+    "items": "{count} items",
+    "remove": "Remove",
+    "quantity": "Quantity"
+  },
+  "checkout": {
+    "title": "Order Form",
+    "orderer": "Orderer",
+    "ordererName": "Name",
+    "ordererPhone": "Phone",
+    "ordererEmail": "Email",
+    "shippingMethod": "Shipping Method",
+    "shippingAddress": "Shipping Address",
+    "sameAsOrderer": "Same as orderer",
+    "recipient": "Recipient",
+    "phone": "Phone",
+    "zipCode": "Zip Code",
+    "searchZip": "Search zip code",
+    "address": "Address",
+    "addressDetail": "Address detail",
+    "memo": "Delivery memo",
+    "pickupNotice": "Pickup notice",
+    "freeShipping": "Free Shipping",
+    "freeAbove": "Free above {amount}",
+    "orderSummary": "Order Summary",
+    "subtotal": "Subtotal",
+    "shippingFee": "Shipping Fee",
+    "totalAmount": "Total",
+    "pay": "Pay Now",
+    "noShippingMethods": "No shipping methods available. Please contact the operator.",
+    "orderFailed": "Failed to create order"
+  },
+  "order": {
+    "success": {
+      "title": "Order Placed Successfully",
+      "orderNo": "Order No.",
+      "emailNotice": "You will receive an email with order details shortly.",
+      "guestNotice": "Your guest order has been placed.",
+      "guestLookupHint": "You can check your order anytime with your order number and phone number.",
+      "lookupLink": "Look up order",
+      "viewOrders": "View Orders",
+      "goHome": "Go Home"
+    },
+    "lookup": {
+      "title": "Order Lookup",
+      "orderNo": "Order Number",
+      "phone": "Phone Number",
+      "search": "Search",
+      "notFound": "Order not found.",
+      "result": "Order Details"
+    },
+    "status": {
+      "CREATED": "Order Placed",
+      "PAID": "Payment Complete",
+      "IN_PRODUCTION": "In Production",
+      "SHIPPED": "Shipped",
+      "DELIVERED": "Delivered",
+      "CANCELLED": "Cancelled",
+      "REFUNDED": "Refunded"
+    }
+  },
+  "account": {
+    "title": "My Page",
+    "orders": "My Orders",
+    "noOrders": "No orders found.",
+    "startShopping": "Start Shopping",
+    "reorder": "Reorder",
+    "writeReview": "Write Review",
+    "reviewDone": "Review Done",
+    "printFile": "View Print File",
+    "login": "Log In",
+    "logout": "Log Out"
+  },
+  "studio": {
+    "loadingEditor": "Loading editor...",
+    "uploadPhoto": "Upload Photo",
+    "artwork": "Artwork",
+    "googlePhotos": "Google Photos",
+    "uploadError": "Failed to upload photo.",
+    "addToCart": "Add to Cart",
+    "selectPhoto": "Select a photo",
+    "uploading": "Uploading...",
+    "confirming": "Processing..."
+  },
+  "language": {
+    "label": "Language",
+    "ko": "한국어",
+    "en": "English",
+    "toggle": "Language"
+  }
+}
