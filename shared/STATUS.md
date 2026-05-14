@@ -4,7 +4,7 @@
 
 **Project:** FrameShop
 **Started:** 2026-05-12
-**Current Phase:** Phase 3 Track A·B 완료 — PR #11 main 머지 (2026-05-14)
+**Current Phase:** Phase 5 완료 — PR #17 비회원 주문 + PR #18 i18n(ko/en) main 머지 (2026-05-14)
 **Worktree:** `.claude/worktrees/trusting-heisenberg-6e59ec` (branch: `claude/trusting-heisenberg-6e59ec`)
 
 ---
@@ -118,8 +118,24 @@
 
 ---
 
+## Phase 5 Feature PRs: 비회원 주문 + i18n ✅ DONE (2026-05-14)
+- [x] PR #17 merged: 비회원 주문 플로우 완성
+  - middleware.ts: fs-guest-sid 쿠키 자동 발급 (1년, HttpOnly, SameSite=Lax)
+  - /api/orders: 쿠키에서 sessionId 직접 읽기 (위변조 방지)
+  - studio/[orderId]/page: effectiveSessionId 연동 (userId > guestSid > orderId)
+  - order/success page: 비회원 감지 → "주문 조회하기" 링크 표시
+  - 21개 단위 테스트 추가
+- [x] PR #18 merged: i18n 다국어(ko/en)
+  - next-intl v4.12.0 설치 + createNextIntlPlugin
+  - 쿠키(NEXT_LOCALE) 기반 locale 전환 (URL 변경 없음)
+  - src/messages/ko.json + en.json (8개 섹션 전체)
+  - 헤더 KO/EN 토글 (LocaleSwitcher 컴포넌트)
+  - 19개 단위 테스트 추가 (키 완전성 검증 포함)
+- 전체 테스트: 204 passing / 14 todo / 0 failed
+- pnpm build: 성공
+
 ## Current Bottleneck
-**Phase 1 MVP 실제 연결까지 완료** (DB + dev 서버 동작 확인).
+**Phase 5 Feature 구현 완료.** Vercel 자동 배포 진행 중.
 
 핵심 주문 플로우 E2E 표면:
 landing → catalog → product → studio → cart → checkout (배송 방법 ADR-008) → [Toss 결제는 issue #2로 연기] → order success.
