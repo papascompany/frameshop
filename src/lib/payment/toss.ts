@@ -8,7 +8,7 @@
  */
 
 import 'server-only';
-import { env } from '../env';
+import { env, getEffectiveTossSecretKey } from '../env';
 import { MAX_PAYMENT_CONFIRM_TIMEOUT_MS } from '@/types/payment';
 import type { PaymentKey } from '@/types/common';
 
@@ -16,6 +16,16 @@ const TOSS_API_BASE = 'https://api.tosspayments.com/v1';
 
 function authHeader(): string {
   const key = env.tossSecretKey();
+  const encoded = Buffer.from(`${key}:`, 'utf8').toString('base64');
+  return `Basic ${encoded}`;
+}
+
+/**
+ * env var 우선, 없으면 DB에서 조회하는 async 버전.
+ * DB fallback이 필요한 Route Handler에서 사용.
+ */
+export async function getAuthHeader(): Promise<string> {
+  const key = await getEffectiveTossSecretKey();
   const encoded = Buffer.from(`${key}:`, 'utf8').toString('base64');
   return `Basic ${encoded}`;
 }

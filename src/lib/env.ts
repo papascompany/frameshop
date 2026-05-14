@@ -20,6 +20,10 @@ function readRequired(name: string): string {
   return value;
 }
 
+function readOptional(name: string): string | undefined {
+  return process.env[name];
+}
+
 export const env = {
   // Public (re-exported via envPublic for ergonomics inside server modules).
   publicSupabaseUrl: () => envPublic.supabaseUrl(),
@@ -31,4 +35,35 @@ export const env = {
   supabaseServiceRoleKey: () => readRequired('SUPABASE_SERVICE_ROLE_KEY'),
   tossSecretKey: () => readRequired('TOSS_SECRET_KEY'),
   tossWebhookSecret: () => readRequired('TOSS_WEBHOOK_SECRET'),
+
+  // Optional — used for fallback to DB when env var is missing.
+  tossSecretKeyOptional: () => readOptional('TOSS_SECRET_KEY'),
+  tossWebhookSecretOptional: () => readOptional('TOSS_WEBHOOK_SECRET'),
+  resendApiKey: () => readOptional('RESEND_API_KEY'),
 };
+
+/**
+ * Toss 시크릿 키를 반환.
+ * 환경변수 우선 → 없으면 app_settings DB 조회.
+ */
+export async function getEffectiveTossSecretKey(): Promise<string> {
+  const envKey = env.tossSecretKeyOptional();
+  if (envKey) return envKey;
+  const { getSetting } = await import('./db/settings');
+  const dbKey = await getSetting('toss_secret_key');
+  if (dbKey) return dbKey;
+  throw new Error('Toss 시크릿 키가 설정되지 않았습니다. 환경변수 또는 어드민 설정을 확인하세요.');
+}
+
+/**
+ * Toss 웹훅 시크릿을 반환.
+ * 환경변수 우선 → 없으면 app_settings DB 조회.
+ */
+export async function getEffectiveTossWebhookSecret(): Promise<string> {
+  const envKey = env.tossWebhookSecretOptional();
+  if (envKey) return envKey;
+  const { getSetting } = await import('./db/settings');
+  const dbKey = await getSetting('toss_webhook_secret');
+  if (dbKey) return dbKey;
+  throw new Error('Toss 웹훅 시크릿이 설정되지 않았습니다. 환경변수 또는 어드민 설정을 확인하세요.');
+}

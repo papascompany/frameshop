@@ -13,6 +13,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           <Link href="/admin/orders">주문</Link>
           <Link href="/admin/curation">큐레이션</Link>
           <Link href="/admin/shipping">배송 설정</Link>
+          <Link href="/admin/settings">설정</Link>
         </nav>
       </header>
       <main className="flex-1 p-4 md:p-8 max-w-5xl mx-auto w-full">
