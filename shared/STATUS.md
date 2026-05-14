@@ -4,8 +4,8 @@
 
 **Project:** FrameShop
 **Started:** 2026-05-12
-**Current Phase:** Phase 1 MVP 완료 — Phase 5 QC 진입 직전. 사용자 검수 대기.
-**Worktree:** `.claude/worktrees/trusting-pascal-b9b918` (branch: `claude/trusting-pascal-b9b918`)
+**Current Phase:** Phase 3 Track A·B 완료 — PR #11 main 머지 (2026-05-14)
+**Worktree:** `.claude/worktrees/trusting-heisenberg-6e59ec` (branch: `claude/trusting-heisenberg-6e59ec`)
 
 ---
 
