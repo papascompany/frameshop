@@ -11,6 +11,7 @@ import { FaqRow } from '@/components/marketing/FaqRow';
 import { HeroShowcase } from '@/components/marketing/HeroShowcase';
 import { LifestyleStudio } from '@/components/marketing/LifestyleStudio';
 import { MasterpieceGallery } from '@/components/marketing/MasterpieceGallery';
+import { RecentReviews } from '@/components/marketing/RecentReviews';
 import { SectionHeader } from '@/components/marketing/SectionHeader';
 import {
   HERO_SLIDES,
@@ -199,6 +200,9 @@ export default async function LandingPage() {
           <MasterpieceGallery tiles={MASTERPIECE_TILES} />
         </Container>
       </section>
+
+      {/* ── 3-B. Recent Reviews ────────────────────────────────────────── */}
+      <RecentReviews />
 
       {/* ── 4. Shop by Size ────────────────────────────────────────────── */}
       <section className="bg-soft-cloud py-[48px] md:py-[80px]">

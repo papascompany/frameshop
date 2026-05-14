@@ -150,13 +150,15 @@ export function CheckoutClient({ shippingMethods }: Props) {
 
   return (
     <form
-      className="flex flex-col gap-6"
+      className="flex flex-col gap-6 md:grid md:grid-cols-[1fr_340px] md:gap-6 md:items-start"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
       noValidate
     >
+      {/* 좌측: 주문인 + 배송방법 + 배송지 */}
+      <div className="flex flex-col gap-4">
       {/* Orderer */}
       <Card padding="md">
         <h2 className="font-semibold mb-3">주문인</h2>
@@ -324,6 +326,10 @@ export function CheckoutClient({ shippingMethods }: Props) {
         </Card>
       )}
 
+      </div>{/* 좌측 컬럼 끝 */}
+
+      {/* 우측: 주문 요약 + 결제 버튼 */}
+      <div className="flex flex-col gap-4 mt-4 md:mt-0">
       {/* Total */}
       <Card padding="md" className="flex flex-col gap-2">
         <div className="flex justify-between text-sm">
@@ -348,6 +354,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
       <Button type="submit" variant="primary" size="lg" fullWidth loading={submitting} disabled={submitting || items.length === 0}>
         결제하기
       </Button>
+      </div>{/* 우측 컬럼 끝 */}
     </form>
   );
 }
