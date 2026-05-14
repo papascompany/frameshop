@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { buildFaqJsonLd, SITE_URL, DEFAULT_OG_IMAGE } from '@/lib/seo/metadata';
 
 import { Container } from '@/components/layout/Container';
 import { ProductCard } from '@/components/ProductCard';
@@ -28,14 +29,23 @@ import type { ProductListItem } from '@/types';
 import type { BannerPayload, CollectionPayload, FeaturePayload, Curation } from '@/types/curation';
 
 export const metadata: Metadata = {
-  title: 'FrameShop — 사진을 작품으로',
+  title: '사진을 작품으로 — 맞춤 액자 주문',
   description:
     '풍경, 가족, 명화. 당신의 한 장을 액자에 담아 거실의 작품으로. 300dpi 미세 인쇄 + 3일 제작.',
+  alternates: { canonical: SITE_URL },
   openGraph: {
-    title: 'FrameShop — Your Memories, Framed Forever.',
+    title: 'FrameShop — 사진을 작품으로',
     description: '풍경, 가족, 명화. 당신의 한 장을 액자에 담아 거실의 작품으로.',
     type: 'website',
     locale: 'ko_KR',
+    url: SITE_URL,
+    images: [{ url: DEFAULT_OG_IMAGE, width: 1200, height: 630, alt: 'FrameShop' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'FrameShop — 사진을 작품으로',
+    description: '풍경, 가족, 명화. 당신의 한 장을 액자에 담아 거실의 작품으로.',
+    images: [DEFAULT_OG_IMAGE],
   },
 };
 
@@ -158,8 +168,38 @@ export default async function LandingPage() {
     featuredSlots.push({ kind: 'upcoming', name: filler.name, tagline: filler.tagline });
   }
 
+  const faqJsonLd = buildFaqJsonLd([
+    {
+      question: '배송은 얼마나 걸리나요?',
+      answer: '결제 완료 후 영업일 기준 1~3일 이내 발송됩니다.',
+    },
+    {
+      question: '어떤 액자 사이즈를 지원하나요?',
+      answer: '4x6, 5x7, 8x10, 11x14 인치를 지원합니다.',
+    },
+    {
+      question: '어떤 결제 수단을 지원하나요?',
+      answer:
+        'Toss Payments를 통해 신용카드, 계좌이체, 카카오페이, 네이버페이 등을 지원합니다.',
+    },
+    {
+      question: '환불이 가능한가요?',
+      answer:
+        '제작 시작 전까지 전액 환불 가능합니다. 제작 시작 후에는 환불이 어렵습니다.',
+    },
+    {
+      question: '어떤 사진 형식을 업로드할 수 있나요?',
+      answer:
+        'JPG, PNG 형식을 지원합니다. 고화질 인쇄를 위해 최소 1500px 이상 권장합니다.',
+    },
+  ]);
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+      />
       {/* ── 1. Hero showcase ───────────────────────────────────────────── */}
       <HeroShowcase slides={heroSlides} />
 
