@@ -4,9 +4,15 @@
  * Read-only. Uses the SSR Supabase client so anon RLS applies.
  * Public `categories` / `products` / `product_images` are world-readable
  * per migration 012.
+ *
+ * All public read functions are wrapped with `unstable_cache` (300 s /
+ * 5 min revalidate) so that repeated navigations within the same deploy
+ * hit the Next.js data cache instead of Supabase. Admin mutations call
+ * `revalidateTag` to flush relevant entries.
  */
 
 import 'server-only';
+import { unstable_cache } from 'next/cache';
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
@@ -23,7 +29,7 @@ import { getAnonSupabase } from '../supabase/anon';
 
 // ---------- Categories ----------
 
-export async function getCategories(): Promise<CategoryTreeNode[]> {
+async function _getCategories(): Promise<CategoryTreeNode[]> {
   const supabase = getAnonSupabase();
   const { data, error } = await supabase
     .from('categories')
@@ -38,6 +44,12 @@ export async function getCategories(): Promise<CategoryTreeNode[]> {
   const flat = (data ?? []).map(mapCategory);
   return buildCategoryTree(flat);
 }
+
+export const getCategories = unstable_cache(
+  _getCategories,
+  ['categories'],
+  { revalidate: 300, tags: ['categories'] },
+);
 
 function buildCategoryTree(flat: ReturnType<typeof mapCategory>[]): CategoryTreeNode[] {
   const byId = new Map<string, CategoryTreeNode>();
@@ -61,7 +73,7 @@ function buildCategoryTree(flat: ReturnType<typeof mapCategory>[]): CategoryTree
 
 // ---------- Products by category ----------
 
-export async function getProductsByCategory(
+async function _getProductsByCategory(
   slug: string,
   options: ProductListQuery = {},
 ): Promise<ProductListResult> {
@@ -158,6 +170,12 @@ export async function getProductsByCategory(
   };
 }
 
+export const getProductsByCategory = unstable_cache(
+  _getProductsByCategory,
+  ['products-by-category'],
+  { revalidate: 300, tags: ['products', 'categories'] },
+);
+
 // ---------- Search ----------
 
 export async function searchProducts(query: string): Promise<ProductListItem[]> {
@@ -208,7 +226,7 @@ export async function searchProducts(query: string): Promise<ProductListItem[]> 
 
 // ---------- Representative product per category (Landing) ----------
 
-export async function getRepresentativeProducts(
+async function _getRepresentativeProducts(
   categoryIds: readonly CategoryId[],
 ): Promise<Record<string, ProductListItem | null>> {
   if (categoryIds.length === 0) return {};
@@ -258,6 +276,12 @@ export async function getRepresentativeProducts(
   }
   return map;
 }
+
+export const getRepresentativeProducts = unstable_cache(
+  _getRepresentativeProducts,
+  ['representative-products'],
+  { revalidate: 300, tags: ['products', 'categories'] },
+);
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.trunc(n)));

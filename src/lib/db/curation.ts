@@ -1,8 +1,14 @@
 /**
  * Curation queries (M-Landing + M-Admin, ADR-007).
+ *
+ * getCurationProducts is wrapped with unstable_cache (300 s) because
+ * product rows are public and rarely change during a session.
+ * getActiveCurations is NOT cached because it accepts a `now` Date that
+ * changes every call, making deterministic cache-key generation unreliable.
  */
 
 import 'server-only';
+import { unstable_cache } from 'next/cache';
 import type { CurationDevice, Curation, CurationType } from '@/types/curation';
 import { payloadSchemaFor, type PayloadValidation } from '@/types/curation';
 import type { ProductListItem } from '@/types/product';
@@ -44,7 +50,7 @@ export async function getActiveCurations(
  * ID 배열로 상품 목록을 조회한다 (큐레이션 collection 타입용).
  * 순서는 ids 배열 순서를 따른다.
  */
-export async function getCurationProducts(
+async function _getCurationProducts(
   ids: string[],
 ): Promise<ProductListItem[]> {
   if (ids.length === 0) return [];
@@ -96,6 +102,12 @@ export async function getCurationProducts(
   }
   return result;
 }
+
+export const getCurationProducts = unstable_cache(
+  _getCurationProducts,
+  ['curation-products'],
+  { revalidate: 300, tags: ['products'] },
+);
 
 export function validateCurationPayload<T>(
   type: CurationType,

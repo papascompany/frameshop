@@ -1,15 +1,20 @@
 /**
  * Shipping methods read/write (M-Checkout + M-Admin, ADR-008).
+ *
+ * getShippingMethods (customer-facing) is wrapped with unstable_cache
+ * (300 s) because shipping options are public and change only via admin.
+ * Admin mutations should call revalidateTag('shipping') to flush.
  */
 
 import 'server-only';
+import { unstable_cache } from 'next/cache';
 import type { ShippingMethodConfig, ShippingMethodInput } from '@/types/shipping';
 import { mapShippingMethod } from './mappers';
 import { getServerSupabase } from '../supabase/server';
 import { getServiceRoleSupabase } from '../supabase/service';
 
 /** Customer-facing: active rows only. */
-export async function getShippingMethods(): Promise<ShippingMethodConfig[]> {
+async function _getShippingMethods(): Promise<ShippingMethodConfig[]> {
   const supabase = await getServerSupabase();
   const { data, error } = await supabase
     .from('shipping_methods')
@@ -19,6 +24,12 @@ export async function getShippingMethods(): Promise<ShippingMethodConfig[]> {
   if (error) throw new Error(`getShippingMethods: ${error.message}`);
   return (data ?? []).map(mapShippingMethod);
 }
+
+export const getShippingMethods = unstable_cache(
+  _getShippingMethods,
+  ['shipping-methods'],
+  { revalidate: 300, tags: ['shipping'] },
+);
 
 /** Admin: includes inactive rows. RLS requires admin role. */
 export async function listShippingMethods(): Promise<ShippingMethodConfig[]> {
