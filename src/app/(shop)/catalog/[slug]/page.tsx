@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Container } from '@/components/layout/Container';
 import { ProductCard } from '@/components/ProductCard';
 import { SectionHeader } from '@/components/marketing/SectionHeader';
-import { getProductsByCategory } from '@/lib/db/catalog';
+import { getProductsByCategory, getCategories } from '@/lib/db/catalog';
 import type { ProductListResult } from '@/types';
 import {
   buildCatalogMeta,
@@ -28,6 +28,25 @@ const SLUG_LABELS: Record<string, { title: string; eyebrow: string }> = {
   'premium-frame': { title: 'PREMIUM FRAMES', eyebrow: '프리미엄 액자' },
   canvas: { title: 'CANVAS PRINTS', eyebrow: '캔버스 프린트' },
 };
+
+export async function generateStaticParams(): Promise<{ slug: string }[]> {
+  try {
+    const categories = await getCategories();
+    // Flatten tree to get all leaf/root slugs.
+    const slugs: string[] = [];
+    function collectSlugs(nodes: typeof categories) {
+      for (const node of nodes) {
+        slugs.push(node.slug);
+        if (node.children.length) collectSlugs(node.children);
+      }
+    }
+    collectSlugs(categories);
+    return slugs.map((slug) => ({ slug }));
+  } catch {
+    // Return known slugs as fallback so build succeeds without DB.
+    return ['basic-frame', 'premium-frame', 'canvas'].map((slug) => ({ slug }));
+  }
+}
 
 export async function generateMetadata({
   params,

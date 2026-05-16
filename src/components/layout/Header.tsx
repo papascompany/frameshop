@@ -44,28 +44,30 @@ export async function Header() {
           aria-label="Primary"
           className="hidden md:flex items-center gap-6 body-strong"
         >
-          <Link href="/catalog/basic-frame" className="nav-link">
+          <Link href="/catalog/basic-frame" className="nav-link" prefetch={true}>
             {t('frames')}
           </Link>
           <Link
             href="/catalog/basic-frame?theme=masterpiece"
             className="nav-link"
+            prefetch={true}
           >
             {t('masterpiece')}
           </Link>
           <Link
             href="/catalog/basic-frame?theme=landscape"
             className="nav-link"
+            prefetch={true}
           >
             {t('landscape')}
           </Link>
-          <Link href="/#how-it-works" className="nav-link">
+          <Link href="/#how-it-works" className="nav-link" prefetch={true}>
             {t('howItWorks')}
           </Link>
-          <Link href="/order/lookup" className="nav-link">
+          <Link href="/order/lookup" className="nav-link" prefetch={true}>
             {t('orderLookup')}
           </Link>
-          <Link href="/account/orders" className="nav-link">
+          <Link href="/account/orders" className="nav-link" prefetch={true}>
             {t('myPage')}
           </Link>
         </nav>

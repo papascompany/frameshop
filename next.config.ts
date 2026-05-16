@@ -62,8 +62,8 @@ const nextConfig: NextConfig = {
     // Keep client-side Router Cache fresh longer to mask Supabase RTT
     // when users bounce between landing → catalog → product → cart.
     staleTimes: {
-      dynamic: 30,
-      static: 300,
+      dynamic: 30,   // 기존 유지
+      static: 180,   // static 페이지 3분 클라이언트 캐시
     },
   },
 

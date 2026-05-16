@@ -2,9 +2,12 @@
  * Product detail + option matrix (M-ProductDetail).
  *
  * RLS allows anon SELECT on product / image / frame / variant tables.
+ * getProductDetail and getProductOptions are wrapped with unstable_cache
+ * (300 s) to avoid Supabase RTT on repeat visits.
  */
 
 import 'server-only';
+import { unstable_cache } from 'next/cache';
 import type { ProductId } from '@/types/common';
 import {
   variantKey,
@@ -24,7 +27,7 @@ import {
 } from './mappers';
 import { getAnonSupabase } from '../supabase/anon';
 
-export async function getProductDetail(
+async function _getProductDetail(
   id: ProductId,
 ): Promise<ProductDetail | null> {
   const supabase = getAnonSupabase();
@@ -96,7 +99,13 @@ export async function getProductDetail(
   };
 }
 
-export async function getProductOptions(id: ProductId): Promise<OptionMatrix> {
+export const getProductDetail = unstable_cache(
+  _getProductDetail,
+  ['product-detail'],
+  { revalidate: 300, tags: ['products'] },
+);
+
+async function _getProductOptions(id: ProductId): Promise<OptionMatrix> {
   const supabase = getAnonSupabase();
 
   const [{ data: variantRows }, { data: frameRows }] = await Promise.all([
@@ -172,3 +181,9 @@ export async function getProductOptions(id: ProductId): Promise<OptionMatrix> {
     variantsByKey,
   };
 }
+
+export const getProductOptions = unstable_cache(
+  _getProductOptions,
+  ['product-options'],
+  { revalidate: 300, tags: ['products'] },
+);

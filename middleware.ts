@@ -2,6 +2,13 @@
  * Edge middleware: refreshes the Supabase session + guards /admin routes
  * + auto-issues guest session cookie (fs-guest-sid) for anonymous users.
  *
+ * Performance optimisation (2025-05):
+ *   - supabase.auth.getUser() is ONLY called for /admin/* and /api/admin/*
+ *     paths. All other routes skip the Supabase network round-trip entirely
+ *     (~100-200 ms saved per request on non-admin paths).
+ *   - Guest session cookie is issued based on the absence of an 'sb-*'
+ *     auth cookie instead of an explicit getUser() call.
+ *
  * For /admin/* and /api/admin/*, requires a Supabase session whose
  * `app_metadata.role` is 'admin'. Anything else 302→/login or 403.
  *
@@ -31,59 +38,69 @@ function needsGuestSession(pathname: string): boolean {
   return GUEST_SESSION_PATHS.some((p) => pathname.startsWith(p));
 }
 
+/** True when the request carries a Supabase auth cookie (logged-in user). */
+function hasAuthCookie(request: NextRequest): boolean {
+  return request.cookies.getAll().some((c) => c.name.startsWith('sb-'));
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   const response = NextResponse.next();
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  // If env isn't ready yet (e.g. preview without Supabase), pass through.
-  if (!supabaseUrl || !supabaseAnon) {
-    return response;
-  }
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnon, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll().map((c) => ({
-          name: c.name,
-          value: c.value,
-        }));
-      },
-      setAll(toSet) {
-        for (const { name, value, options } of toSet) {
-          response.cookies.set({ name, value, ...options });
-        }
-      },
-    },
-  });
-
-  // Touch the session so refresh works.
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
 
   const path = request.nextUrl.pathname;
   const isAdminRoute =
     path.startsWith('/admin') || path.startsWith('/api/admin');
 
+  // ── Admin routes: full Supabase session verification ──────────────────
   if (isAdminRoute) {
-    const role =
-      (user?.app_metadata as { role?: string } | null)?.role ?? null;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    // If env isn't ready yet (e.g. preview without Supabase), pass through.
+    if (!supabaseUrl || !supabaseAnon) {
+      return response;
+    }
+
+    const supabase = createServerClient(supabaseUrl, supabaseAnon, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll().map((c) => ({
+            name: c.name,
+            value: c.value,
+          }));
+        },
+        setAll(toSet) {
+          for (const { name, value, options } of toSet) {
+            response.cookies.set({ name, value, ...options });
+          }
+        },
+      },
+    });
+
+    const { data } = await supabase.auth.getUser();
+    const user = data.user;
+
     if (!user) {
       const url = request.nextUrl.clone();
       url.pathname = '/login';
       url.searchParams.set('redirect', path);
       return NextResponse.redirect(url);
     }
+
+    const role =
+      (user.app_metadata as { role?: string } | null)?.role ?? null;
     if (role !== 'admin') {
       return new NextResponse('Forbidden', { status: 403 });
     }
+
+    return response;
   }
 
+  // ── Non-admin routes: no Supabase network call ─────────────────────────
   // Auto-issue guest session cookie for unauthenticated users on relevant routes.
-  if (!user && needsGuestSession(path)) {
+  // Use cookie presence heuristic instead of getUser() to avoid the RTT.
+  if (needsGuestSession(path)) {
     const existingCookie = request.cookies.get(GUEST_COOKIE_NAME);
-    if (!existingCookie) {
+    if (!existingCookie && !hasAuthCookie(request)) {
       const guestSid = crypto.randomUUID();
       const isProduction = process.env.NODE_ENV === 'production';
       response.cookies.set({
