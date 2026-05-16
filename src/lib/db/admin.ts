@@ -161,7 +161,7 @@ export async function importVariants(
   await requireAdmin();
   const supabase = getServiceRoleSupabase();
   let inserted = 0;
-  let updated = 0;
+  const updated = 0; // Supabase upsert doesn't distinguish insert vs update; always 0.
   let skipped = 0;
   const errors: ImportReport['errors'] = [];
 
