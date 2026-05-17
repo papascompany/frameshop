@@ -3,10 +3,11 @@
 import { useState, useTransition } from 'react';
 import Image from 'next/image';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Badge } from '@/components/ui/Badge';
+import { cn } from '@/lib/cn';
 import type { Product } from '@/types/product';
 import type { CategoryTreeNode } from '@/types/product';
 import {
@@ -16,7 +17,6 @@ import {
 } from './actions';
 
 type ProductWithThumbnail = Product & { thumbnail: string | null };
-
 type FlatCategory = { value: string; label: string };
 
 function flattenCategories(nodes: CategoryTreeNode[], depth = 0): FlatCategory[] {
@@ -67,6 +67,18 @@ function productToForm(p: ProductWithThumbnail): FormState {
     sortOrder: String(p.sortOrder),
   };
 }
+
+const IconPlus = () => (
+  <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden>
+    <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+  </svg>
+);
+
+const IconPhoto = () => (
+  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden>
+    <path fillRule="evenodd" d="M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm2.25-.75a.75.75 0 0 0-.75.75v6.27l3.693-3.03a.75.75 0 0 1 .964.026l4.004 3.754 1.242-.836a.75.75 0 0 1 .894.062l2.953 2.637V5.25a.75.75 0 0 0-.75-.75H3.25Zm13.5 10.5a.75.75 0 0 0 .75-.75v-.358l-3.165-2.824-1.259.847a.75.75 0 0 1-.916-.062l-3.985-3.73-3.675 3.016V14.75a.75.75 0 0 0 .75.75h11.5Z" clipRule="evenodd" />
+  </svg>
+);
 
 export function ProductsClient({
   products,
@@ -149,76 +161,112 @@ export function ProductsClient({
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button variant="primary" onClick={openCreate} disabled={pending}>
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold text-ink">상품 목록</h2>
+          <span className="inline-flex items-center px-2 py-0.5 text-xs font-semibold bg-soft-cloud text-mute rounded-full">
+            {products.length}
+          </span>
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={openCreate}
+          disabled={pending}
+          startIcon={<IconPlus />}
+        >
           상품 등록
         </Button>
       </div>
 
-      <Card padding="none">
+      {/* Desktop: table */}
+      <div className="hidden md:block bg-canvas border border-hairline overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="text-left border-b border-border bg-muted/40">
-              <tr>
-                <th className="px-3 py-2 w-10">썸네일</th>
-                <th className="px-3 py-2">상품명</th>
-                <th className="px-3 py-2">카테고리</th>
-                <th className="px-3 py-2 tabular-nums text-right">기본가격</th>
-                <th className="px-3 py-2 text-center">프레임</th>
-                <th className="px-3 py-2 text-center">활성</th>
-                <th className="px-3 py-2 text-right">동작</th>
+            <thead>
+              <tr className="bg-soft-cloud border-b border-hairline">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-mute w-12">
+                  썸네일
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-mute">
+                  상품명
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-mute">
+                  카테고리
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-mute">
+                  기본가격
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-mute">
+                  프레임
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-mute">
+                  상태
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-mute">
+                  동작
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-hairline">
               {products.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-muted-fg">
+                  <td colSpan={7} className="px-4 py-12 text-center text-mute text-sm">
                     등록된 상품이 없습니다.
                   </td>
                 </tr>
               ) : (
                 products.map((p) => (
-                  <tr key={p.id as string} className="border-b border-border hover:bg-muted/20">
-                    <td className="px-3 py-2">
+                  <tr
+                    key={p.id as string}
+                    className="hover:bg-soft-cloud/60 transition-colors"
+                  >
+                    <td className="px-4 py-3">
                       {p.thumbnail ? (
                         <Image
                           src={p.thumbnail}
                           alt={p.name}
-                          width={32}
-                          height={32}
+                          width={36}
+                          height={36}
                           className="object-cover rounded"
                         />
                       ) : (
-                        <div className="w-8 h-8 bg-muted rounded flex items-center justify-center text-muted-fg text-xs">
-                          —
+                        <div className="w-9 h-9 bg-soft-cloud rounded flex items-center justify-center text-stone">
+                          <IconPhoto />
                         </div>
                       )}
                     </td>
-                    <td className="px-3 py-2 font-medium">{p.name}</td>
-                    <td className="px-3 py-2 text-muted-fg">
+                    <td className="px-4 py-3 font-medium text-ink">
+                      {p.name}
+                    </td>
+                    <td className="px-4 py-3 text-mute text-sm">
                       {categoryMap.get(p.categoryId as string) ?? p.categoryId}
                     </td>
-                    <td className="px-3 py-2 tabular-nums text-right">
+                    <td className="px-4 py-3 tabular-nums text-right font-medium text-ink">
                       {p.basePrice.toLocaleString('ko-KR')}원
                     </td>
-                    <td className="px-3 py-2 text-center">
-                      {p.hasFrame ? 'O' : '—'}
+                    <td className="px-4 py-3 text-center text-mute">
+                      {p.hasFrame ? (
+                        <span className="text-success font-semibold">O</span>
+                      ) : '—'}
                     </td>
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-4 py-3 text-center">
                       <button
                         type="button"
                         onClick={() => handleToggleActive(p)}
                         disabled={pending}
-                        className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${
+                        className={cn(
+                          'text-xs px-2.5 py-1 rounded-full font-semibold transition-colors',
                           p.isActive
                             ? 'bg-success/10 text-success hover:bg-success/20'
-                            : 'bg-muted text-muted-fg hover:bg-muted/70'
-                        }`}
+                            : 'bg-soft-cloud text-mute hover:bg-hairline',
+                        )}
                       >
                         {p.isActive ? '활성' : '비활성'}
                       </button>
                     </td>
-                    <td className="px-3 py-2 text-right space-x-1 whitespace-nowrap">
+                    <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
                       <Button
                         size="sm"
                         variant="ghost"
@@ -232,7 +280,7 @@ export function ProductsClient({
                         variant="ghost"
                         onClick={() => handleDelete(p)}
                         disabled={pending}
-                        className="text-danger hover:text-danger"
+                        className="text-sale hover:text-sale"
                       >
                         삭제
                       </Button>
@@ -243,8 +291,80 @@ export function ProductsClient({
             </tbody>
           </table>
         </div>
-      </Card>
+      </div>
 
+      {/* Mobile: card list */}
+      <div className="md:hidden space-y-2">
+        {products.length === 0 ? (
+          <div className="bg-canvas border border-hairline p-8 text-center text-mute text-sm">
+            등록된 상품이 없습니다.
+          </div>
+        ) : (
+          products.map((p) => (
+            <div
+              key={p.id as string}
+              className="bg-canvas border border-hairline p-4 flex items-center gap-3"
+            >
+              {/* Thumbnail */}
+              <div className="shrink-0">
+                {p.thumbnail ? (
+                  <Image
+                    src={p.thumbnail}
+                    alt={p.name}
+                    width={48}
+                    height={48}
+                    className="object-cover rounded"
+                  />
+                ) : (
+                  <div className="w-12 h-12 bg-soft-cloud rounded flex items-center justify-center text-stone">
+                    <IconPhoto />
+                  </div>
+                )}
+              </div>
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-ink text-sm truncate">{p.name}</p>
+                <p className="text-xs text-mute truncate">
+                  {categoryMap.get(p.categoryId as string) ?? p.categoryId}
+                </p>
+                <p className="text-xs font-medium text-ink mt-0.5 tabular-nums">
+                  {p.basePrice.toLocaleString('ko-KR')}원
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="shrink-0 flex flex-col items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleToggleActive(p)}
+                  disabled={pending}
+                  className={cn(
+                    'text-xs px-2 py-0.5 rounded-full font-semibold transition-colors',
+                    p.isActive
+                      ? 'bg-success/10 text-success'
+                      : 'bg-soft-cloud text-mute',
+                  )}
+                >
+                  {p.isActive ? '활성' : '비활성'}
+                </button>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => openEdit(p)}
+                    disabled={pending}
+                  >
+                    수정
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Dialog */}
       <Dialog
         open={open}
         onOpenChange={setOpen}
@@ -293,7 +413,7 @@ export function ProductsClient({
           />
 
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1">
+            <label className="block text-sm font-medium text-ink mb-1">
               설명
             </label>
             <textarea
@@ -302,7 +422,7 @@ export function ProductsClient({
               placeholder="상품 상세 설명 (마크다운 지원 예정)"
               rows={4}
               maxLength={50000}
-              className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-fg focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+              className="w-full border border-hairline bg-canvas px-3 py-2 text-sm text-ink placeholder:text-stone focus:outline-none focus:ring-2 focus:ring-ink/20 resize-y"
             />
           </div>
 
@@ -322,7 +442,7 @@ export function ProductsClient({
                 type="checkbox"
                 checked={form.hasFrame}
                 onChange={(e) => setForm({ ...form, hasFrame: e.target.checked })}
-                className="w-4 h-4 rounded border-border"
+                className="w-4 h-4 rounded border-hairline"
               />
               <span>프레임 유무</span>
             </label>
@@ -332,7 +452,7 @@ export function ProductsClient({
                 type="checkbox"
                 checked={form.isActive}
                 onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
-                className="w-4 h-4 rounded border-border"
+                className="w-4 h-4 rounded border-hairline"
               />
               <span>활성</span>
             </label>
@@ -351,7 +471,7 @@ export function ProductsClient({
           {error ? (
             <div
               role="alert"
-              className="text-sm text-danger border border-danger px-3 py-2 rounded"
+              className="text-sm text-sale border border-sale px-3 py-2 rounded"
             >
               {error}
             </div>
