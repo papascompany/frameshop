@@ -21,8 +21,19 @@ import {
   LIFESTYLE_BLOCKS,
   MASTERPIECE_TILES,
   MEMBER_BENEFIT_TILES,
+  mirrored,
 } from '@/data/landing-curation';
 import type { HeroSlide, LandscapeTile } from '@/data/landing-curation';
+
+/**
+ * Fallback thumbnails for featured products that have no product_images record.
+ * These are framed-print interior photography already mirrored to our CDN.
+ */
+const FEATURED_FALLBACK_THUMBS = [
+  mirrored('1513519245088-0e12902e5a38'), // 거실 갤러리 월 — 따뜻한 인테리어
+  mirrored('1582738411706-bfc8e691d1c2'), // 명화 액자 인테리어
+  mirrored('1452860606245-08befc0ff44b'), // 우드 프레임 풍경
+] as const;
 import { getProductsByCategory } from '@/lib/db/catalog';
 import { getActiveCurations, getCurationProducts } from '@/lib/db/curation';
 import { cn } from '@/lib/cn';
@@ -146,7 +157,11 @@ export default async function LandingPage() {
   let featuredProducts: ProductListItem[] = [];
   try {
     const result = await getProductsByCategory('basic-frame', { pageSize: 3 });
-    featuredProducts = result.items;
+    // Inject fallback thumbnails for products with no product_images yet.
+    featuredProducts = result.items.map((p, i) => ({
+      ...p,
+      thumbnail: p.thumbnail ?? FEATURED_FALLBACK_THUMBS[i % FEATURED_FALLBACK_THUMBS.length] ?? null,
+    }));
   } catch (err) {
     console.warn('Landing: getProductsByCategory("basic-frame") failed:', err);
   }
