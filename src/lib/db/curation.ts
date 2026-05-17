@@ -1,10 +1,10 @@
 /**
  * Curation queries (M-Landing + M-Admin, ADR-007).
  *
- * getCurationProducts is wrapped with unstable_cache (300 s) because
- * product rows are public and rarely change during a session.
- * getActiveCurations is NOT cached because it accepts a `now` Date that
- * changes every call, making deterministic cache-key generation unreliable.
+ * Both getActiveCurations and getCurationProducts are wrapped with
+ * unstable_cache so repeated requests within the same revalidate window
+ * never hit Supabase. getActiveCurations uses the anon client (no cookies)
+ * and a 60 s revalidate — acceptable staleness for promotional banners.
  */
 
 import 'server-only';
@@ -13,15 +13,16 @@ import type { CurationDevice, Curation, CurationType } from '@/types/curation';
 import { payloadSchemaFor, type PayloadValidation } from '@/types/curation';
 import type { ProductListItem } from '@/types/product';
 import { mapCuration, mapProductListItem } from './mappers';
-import { getServerSupabase } from '../supabase/server';
 import { getAnonSupabase } from '../supabase/anon';
 
-export async function getActiveCurations(
-  device: CurationDevice,
-  now: Date = new Date(),
-): Promise<Curation[]> {
-  const supabase = await getServerSupabase();
-  const isoNow = now.toISOString();
+/**
+ * Inner (uncached) implementation.
+ * Uses the anon client — curations are world-readable per migration 012.
+ * `now` is computed internally so the cache key is stable per device.
+ */
+async function _getActiveCurations(device: CurationDevice): Promise<Curation[]> {
+  const supabase = getAnonSupabase();
+  const isoNow = new Date().toISOString();
 
   // device filter: row.device === device || row.device === 'all'.
   // When `device === 'all'`, we return ALL devices (admin / preview path).
@@ -43,6 +44,16 @@ export async function getActiveCurations(
   if (error) throw new Error(`getActiveCurations: ${error.message}`);
   return (data ?? []).map(mapCuration);
 }
+
+/**
+ * Cached public API. 60 s revalidate keeps banners reasonably fresh while
+ * eliminating the Supabase round-trip on warm requests.
+ */
+export const getActiveCurations = unstable_cache(
+  _getActiveCurations,
+  ['active-curations'],
+  { revalidate: 60, tags: ['curations'] },
+);
 
 // ---------- getCurationProducts ----------
 

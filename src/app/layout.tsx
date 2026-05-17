@@ -91,6 +91,11 @@ export default async function RootLayout({
       lang={locale}
       className={`h-full antialiased ${fontDisplay.variable} ${fontSans.variable}`}
     >
+      <head>
+        {/* Preconnect to Supabase Storage CDN — landing hero images resolve here */}
+        <link rel="preconnect" href="https://acxsxjmqgvkceqahwkpz.supabase.co" />
+        <link rel="dns-prefetch" href="https://acxsxjmqgvkceqahwkpz.supabase.co" />
+      </head>
       <body className="min-h-full flex flex-col bg-canvas text-ink">
         <NextIntlClientProvider locale={locale} messages={messages}>
           {children}
