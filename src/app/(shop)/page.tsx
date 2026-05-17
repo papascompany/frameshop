@@ -118,53 +118,57 @@ function productToLandscapeTile(product: ProductListItem): LandscapeTile {
 }
 
 export default async function LandingPage() {
-  const t = await getTranslations('landing');
-  // ── DB 큐레이션 로드 (fallback: static 데이터) ──────────────────────────────
+  // ── 병렬 데이터 페칭 (직렬 → Promise.all → 대기 시간 최소화) ────────────────
+  const [t, curationsResult, featuredResult] = await Promise.all([
+    getTranslations('landing'),
+    getActiveCurations('all').catch((err) => {
+      console.warn('Landing: 큐레이션 로드 실패, static 데이터로 fallback:', err);
+      return [] as Awaited<ReturnType<typeof getActiveCurations>>;
+    }),
+    getProductsByCategory('basic-frame', { pageSize: 3 }).catch((err) => {
+      console.warn('Landing: getProductsByCategory("basic-frame") failed:', err);
+      return { items: [], total: 0, hasMore: false, page: 1, pageSize: 3 };
+    }),
+  ]);
+
+  // ── 큐레이션 파싱 ────────────────────────────────────────────────────────────
   let dbHeroSlides: HeroSlide[] = [];
   let dbCollectionTiles: LandscapeTile[] = [];
   let dbCollectionSubtitle: string | undefined;
 
-  try {
-    const curations = await getActiveCurations('all');
+  // banner → HeroShowcase
+  const bannerCurations = curationsResult.filter((c) => c.type === 'banner');
+  if (bannerCurations.length > 0) {
+    const slides = bannerCurations.flatMap((c) => {
+      const slide = bannerToHeroSlide(c);
+      return slide ? [slide] : [];
+    });
+    if (slides.length > 0) dbHeroSlides = slides;
+  }
 
-    // banner → HeroShowcase
-    const bannerCurations = curations.filter((c) => c.type === 'banner');
-    if (bannerCurations.length > 0) {
-      const slides = bannerCurations.flatMap((c) => {
-        const slide = bannerToHeroSlide(c);
-        return slide ? [slide] : [];
-      });
-      if (slides.length > 0) dbHeroSlides = slides;
-    }
-
-    // collection → CollectionRail (첫 번째 collection 큐레이션만 사용)
-    const collectionCuration = curations.find((c) => c.type === 'collection');
-    if (collectionCuration) {
-      const p = collectionCuration.payload as CollectionPayload | null;
-      if (p?.productIds && p.productIds.length > 0) {
+  // collection → CollectionRail (컬렉션 큐레이션 내 상품은 이미 getCurationProducts로 캐싱됨)
+  const collectionCuration = curationsResult.find((c) => c.type === 'collection');
+  if (collectionCuration) {
+    const p = collectionCuration.payload as CollectionPayload | null;
+    if (p?.productIds && p.productIds.length > 0) {
+      try {
         const products = await getCurationProducts(p.productIds as string[]);
         dbCollectionTiles = products.map(productToLandscapeTile);
         dbCollectionSubtitle = p.subtitle;
+      } catch {
+        // fallback to static tiles below
       }
     }
-  } catch (err) {
-    console.warn('Landing: 큐레이션 로드 실패, static 데이터로 fallback:', err);
   }
 
   const heroSlides = dbHeroSlides.length > 0 ? dbHeroSlides : HERO_SLIDES;
   const collectionTiles = dbCollectionTiles.length > 0 ? dbCollectionTiles : LANDSCAPE_TILES;
 
-  let featuredProducts: ProductListItem[] = [];
-  try {
-    const result = await getProductsByCategory('basic-frame', { pageSize: 3 });
-    // Inject fallback thumbnails for products with no product_images yet.
-    featuredProducts = result.items.map((p, i) => ({
-      ...p,
-      thumbnail: p.thumbnail ?? FEATURED_FALLBACK_THUMBS[i % FEATURED_FALLBACK_THUMBS.length] ?? null,
-    }));
-  } catch (err) {
-    console.warn('Landing: getProductsByCategory("basic-frame") failed:', err);
-  }
+  // ── 추천 상품 (fallback 썸네일 주입) ────────────────────────────────────────
+  const featuredProducts: ProductListItem[] = featuredResult.items.map((p, i) => ({
+    ...p,
+    thumbnail: p.thumbnail ?? FEATURED_FALLBACK_THUMBS[i % FEATURED_FALLBACK_THUMBS.length] ?? null,
+  }));
 
   // Pad the FEATURED FRAMES row to 3 cells using "Coming Soon" placeholders.
   const featuredSlots: Array<
