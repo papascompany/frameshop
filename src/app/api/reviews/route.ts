@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
 import { createReview, getOrderReview } from '@/lib/db/reviews';
+import { isSameOrigin } from '@/lib/security/same-origin';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,14 @@ const reviewSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  // HIGH-001 FIX: CSRF guard — reject cross-origin POST requests.
+  if (!isSameOrigin(request)) {
+    return NextResponse.json(
+      { ok: false, error: 'Cross-origin request rejected' },
+      { status: 403 },
+    );
+  }
+
   // 인증 확인
   const supabase = await getServerSupabase();
   const {

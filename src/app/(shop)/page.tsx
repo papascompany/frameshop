@@ -3,6 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { buildFaqJsonLd, SITE_URL, DEFAULT_OG_IMAGE } from '@/lib/seo/metadata';
+import { safeJsonLd } from '@/lib/seo/safe-json-ld';
 import { getTranslations } from 'next-intl/server';
 
 import { Container } from '@/components/layout/Container';
@@ -219,7 +220,7 @@ export default async function LandingPage() {
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(faqJsonLd) }}
       />
       {/* ── 1. Hero showcase ───────────────────────────────────────────── */}
       <HeroShowcase slides={heroSlides} />

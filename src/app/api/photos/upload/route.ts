@@ -123,7 +123,15 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const ext = mime.split('/')[1] ?? 'jpg';
+  // LOW-003 FIX: derive extension from a static allowlist map, not by splitting
+  // the MIME string (which could produce unexpected values like 'heif+sequence').
+  const MIME_TO_EXT: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/png':  'png',
+    'image/webp': 'webp',
+    'image/heif': 'heif',
+  };
+  const ext = MIME_TO_EXT[mime] ?? 'jpg';
   const uuid = crypto.randomUUID();
   const ownerPath = userId ?? `anon/${sessionId}`;
   const path = `${ownerPath}/${uuid}.${ext}`;
@@ -179,8 +187,32 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const originalUrl = supabaseSvc.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-  const thumbUrl = supabaseSvc.storage.from(BUCKET).getPublicUrl(thumbPath).data.publicUrl;
+  // SECURITY FIX (CRITICAL-001): photos bucket is now private.
+  // Generate short-lived signed URLs (1 h) for the immediate client response.
+  // The storage *paths* are persisted in the DB so fresh signed URLs can be
+  // generated at any time via the service-role key.
+  const SIGNED_URL_TTL = 3600; // 1 hour — editor session lifetime
+
+  const [origSigned, thumbSigned] = await Promise.all([
+    supabaseSvc.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL),
+    supabaseSvc.storage.from(BUCKET).createSignedUrl(thumbPath, SIGNED_URL_TTL),
+  ]);
+
+  if (origSigned.error || !origSigned.data?.signedUrl) {
+    return NextResponse.json(
+      { ok: false, code: 'SIGN_FAILED', message: origSigned.error?.message ?? 'signed url failed' },
+      { status: 500 },
+    );
+  }
+  if (thumbSigned.error || !thumbSigned.data?.signedUrl) {
+    return NextResponse.json(
+      { ok: false, code: 'SIGN_FAILED', message: thumbSigned.error?.message ?? 'thumb signed url failed' },
+      { status: 500 },
+    );
+  }
+
+  const originalUrl = origSigned.data.signedUrl;
+  const thumbUrl = thumbSigned.data.signedUrl;
 
   try {
     const photo = await createPhoto({
@@ -188,6 +220,8 @@ export async function POST(request: Request): Promise<Response> {
       sessionId: sessionId ? asBrand<SessionId>(sessionId) : null,
       originalUrl,
       thumbUrl,
+      storagePath: path,
+      thumbPath,
     });
     return NextResponse.json({ ok: true, photo }, { status: 200 });
   } catch (err) {

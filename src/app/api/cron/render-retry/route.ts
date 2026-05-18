@@ -18,6 +18,7 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'node:crypto';
 import { getRetryableJobs, claimRenderJob, markJobDone, markJobFailed } from '@/lib/render/jobs';
 import { renderOrderItemPrint } from '@/lib/render/pipeline';
 import type { OrderItemId } from '@/types/common';
@@ -26,15 +27,22 @@ import { asBrand } from '@/types/common';
 export const runtime = 'nodejs';
 export const maxDuration = 60; // seconds — process up to ~20 jobs per invocation
 
-/** Verify the request comes from Vercel Cron (or an authorised caller). */
+/** Verify the request comes from Vercel Cron (or an authorised caller).
+ *
+ * LOW-002 FIX: use constant-time comparison (timingSafeEqual) to prevent
+ * timing-oracle attacks on the CRON_SECRET, matching the pattern used in
+ * /api/render/print/route.ts.
+ */
 function isAuthorized(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
     // CRON_SECRET not configured — only allow in non-production (local dev).
     return process.env.NODE_ENV !== 'production';
   }
-  const auth = req.headers.get('authorization');
-  return auth === `Bearer ${cronSecret}`;
+  const auth = req.headers.get('authorization') ?? '';
+  const expected = `Bearer ${cronSecret}`;
+  if (auth.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

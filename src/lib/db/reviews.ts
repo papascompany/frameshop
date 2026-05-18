@@ -87,7 +87,12 @@ export async function getRecentPublicReviews(limit = 5): Promise<Review[]> {
 }
 
 export async function getOrderReview(orderId: string): Promise<Review | null> {
-  const supabase = getAnonSupabase();
+  // LOW-004 FIX: use service-role client so private (is_public=false) reviews
+  // belonging to the caller are also found during the duplicate-review check.
+  // Previously, the anon client only saw public reviews via RLS, so a user
+  // could bypass the duplicate check by flipping their review to is_public=false
+  // and then submitting a second review for the same order.
+  const supabase = getServiceRoleSupabase();
   const { data, error } = await supabase
     .from('reviews')
     .select('*')

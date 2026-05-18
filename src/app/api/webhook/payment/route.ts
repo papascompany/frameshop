@@ -9,7 +9,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { verifyWebhook } from '@/lib/payment/signature';
 import { handleWebhook } from '@/lib/payment/confirm';
-import { env } from '@/lib/env';
+import { getEffectiveTossWebhookSecret } from '@/lib/env';
 
 export async function POST(request: Request): Promise<Response> {
   const signature =
@@ -18,7 +18,19 @@ export async function POST(request: Request): Promise<Response> {
     '';
   const rawBody = await request.text();
 
-  const verified = verifyWebhook(rawBody, signature, env.tossWebhookSecret());
+  // MEDIUM-004 FIX: use getEffectiveTossWebhookSecret (env-var → DB fallback)
+  // instead of env.tossWebhookSecret() which throws if the env var is unset,
+  // causing a 500 → Toss retries forever → orders never reach PAID status.
+  let webhookSecret: string;
+  try {
+    webhookSecret = await getEffectiveTossWebhookSecret();
+  } catch {
+    console.error(JSON.stringify({ event: 'webhook_secret_missing' }));
+    // Return 200 so Toss stops retrying; log for investigation.
+    return NextResponse.json({ ok: false, code: 'CONFIG_ERROR' }, { status: 200 });
+  }
+
+  const verified = verifyWebhook(rawBody, signature, webhookSecret);
   if (!verified.valid) {
     return NextResponse.json(
       { ok: false, code: 'INVALID_SIGNATURE' },

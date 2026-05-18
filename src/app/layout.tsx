@@ -8,6 +8,7 @@ import {
   buildOrganizationJsonLd,
   buildWebSiteJsonLd,
 } from '@/lib/seo/metadata';
+import { safeJsonLd } from '@/lib/seo/safe-json-ld';
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 
@@ -102,11 +103,11 @@ export default async function RootLayout({
         </NextIntlClientProvider>
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(orgJsonLd) }}
         />
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(siteJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(siteJsonLd) }}
         />
       </body>
     </html>
