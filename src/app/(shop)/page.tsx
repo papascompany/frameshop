@@ -166,10 +166,16 @@ export default async function LandingPage() {
   const collectionTiles = dbCollectionTiles.length > 0 ? dbCollectionTiles : LANDSCAPE_TILES;
 
   // ── 추천 상품 (fallback 썸네일 주입) ────────────────────────────────────────
-  const featuredProducts: ProductListItem[] = featuredResult.items.map((p, i) => ({
-    ...p,
-    thumbnail: p.thumbnail ?? FEATURED_FALLBACK_THUMBS[i % FEATURED_FALLBACK_THUMBS.length] ?? null,
-  }));
+  // DB에 저장된 썸네일이 Unsplash 원본 URL인 경우 Supabase 미러 CDN URL로 교체.
+  // (마이그레이션 완료 전 임시 처리 — DB URL이 Supabase CDN으로 업데이트되면 이 분기 제거)
+  const featuredProducts: ProductListItem[] = featuredResult.items.map((p, i) => {
+    const fallback = FEATURED_FALLBACK_THUMBS[i % FEATURED_FALLBACK_THUMBS.length] ?? null;
+    const isUnsplashUrl = p.thumbnail?.includes('images.unsplash.com') ?? false;
+    return {
+      ...p,
+      thumbnail: (p.thumbnail && !isUnsplashUrl) ? p.thumbnail : fallback,
+    };
+  });
 
   // Pad the FEATURED FRAMES row to 3 cells using "Coming Soon" placeholders.
   const featuredSlots: Array<
