@@ -64,6 +64,12 @@ const IconPainting = () => (
   </svg>
 );
 
+const IconLayout = () => (
+  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden>
+    <path fillRule="evenodd" d="M4.25 2A2.25 2.25 0 0 0 2 4.25v2.5A2.25 2.25 0 0 0 4.25 9h2.5A2.25 2.25 0 0 0 9 6.75v-2.5A2.25 2.25 0 0 0 6.75 2h-2.5Zm0 9A2.25 2.25 0 0 0 2 13.25v2.5A2.25 2.25 0 0 0 4.25 18h2.5A2.25 2.25 0 0 0 9 15.75v-2.5A2.25 2.25 0 0 0 6.75 11h-2.5Zm6.75-9A2.25 2.25 0 0 0 8.75 4.25v2.5A2.25 2.25 0 0 0 11 9h5.75A2.25 2.25 0 0 0 19 6.75v-2.5A2.25 2.25 0 0 0 16.75 4H11Zm0 9A2.25 2.25 0 0 0 8.75 13.25v2.5A2.25 2.25 0 0 0 11 18h5.75A2.25 2.25 0 0 0 19 15.75v-2.5A2.25 2.25 0 0 0 16.75 13H11Z" clipRule="evenodd" />
+  </svg>
+);
+
 const IconTruck = () => (
   <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden>
     <path d="M6.5 3A1.5 1.5 0 0 0 5 4.5H3a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h.5a2.5 2.5 0 0 0 5 0h3a2.5 2.5 0 0 0 5 0H17a2 2 0 0 0 2-2V9.485a2 2 0 0 0-.586-1.414l-1.899-1.9A2 2 0 0 0 15.101 5.6H14A1.5 1.5 0 0 0 12.5 4H8A1.5 1.5 0 0 0 6.5 3Zm7 9.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-7 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm6-6.5v2h2.101a.5.5 0 0 1 .354.146l1.899 1.9A.5.5 0 0 1 17 10.015V11h-1V9.485a1 1 0 0 0-.293-.707L13.808 6.88A1 1 0 0 0 13.101 6.6H13.5Z" />
@@ -103,6 +109,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/admin/reviews', label: '리뷰', icon: <IconStar /> },
       { href: '/admin/curation', label: '큐레이션', icon: <IconSparkles /> },
       { href: '/admin/artworks', label: '명화', icon: <IconPainting /> },
+      { href: '/admin/landing', label: '랜딩 관리', icon: <IconLayout /> },
     ],
   },
   {

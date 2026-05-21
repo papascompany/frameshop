@@ -37,9 +37,10 @@ const FEATURED_FALLBACK_THUMBS = [
 ] as const;
 import { getProductsByCategory } from '@/lib/db/catalog';
 import { getActiveCurations, getCurationProducts } from '@/lib/db/curation';
+import { getAllLandingSections } from '@/lib/db/landing-sections';
 import { cn } from '@/lib/cn';
 import type { ProductListItem } from '@/types';
-import type { BannerPayload, CollectionPayload, FeaturePayload, Curation } from '@/types/curation';
+import type { BannerPayload, CollectionPayload, Curation } from '@/types/curation';
 
 export const metadata: Metadata = {
   title: '사진을 작품으로 — 맞춤 액자 주문',
@@ -120,7 +121,7 @@ function productToLandscapeTile(product: ProductListItem): LandscapeTile {
 
 export default async function LandingPage() {
   // ── 병렬 데이터 페칭 (직렬 → Promise.all → 대기 시간 최소화) ────────────────
-  const [t, curationsResult, featuredResult] = await Promise.all([
+  const [t, curationsResult, featuredResult, landingSectionsResult] = await Promise.all([
     getTranslations('landing'),
     getActiveCurations('all').catch((err) => {
       console.warn('Landing: 큐레이션 로드 실패, static 데이터로 fallback:', err);
@@ -130,7 +131,22 @@ export default async function LandingPage() {
       console.warn('Landing: getProductsByCategory("basic-frame") failed:', err);
       return { items: [], total: 0, hasMore: false, page: 1, pageSize: 3 };
     }),
+    getAllLandingSections().catch((err) => {
+      console.warn('Landing: getAllLandingSections 로드 실패, static 데이터로 fallback:', err);
+      return [] as Awaited<ReturnType<typeof getAllLandingSections>>;
+    }),
   ]);
+
+  // ── landing_sections DB 데이터를 sectionKey 맵으로 변환 ────────────────────
+  const lsMap: Record<string, (typeof landingSectionsResult)[number]> = {};
+  for (const sec of landingSectionsResult) {
+    lsMap[sec.sectionKey] = sec;
+  }
+
+  /** landing_sections imageUrl — DB 값이 있으면 DB, 없으면 정적 기본값 */
+  function lsImageUrl(key: string, fallback: string): string {
+    return lsMap[key]?.imageUrl ?? fallback;
+  }
 
   // ── 큐레이션 파싱 ────────────────────────────────────────────────────────────
   let dbHeroSlides: HeroSlide[] = [];
@@ -162,8 +178,126 @@ export default async function LandingPage() {
     }
   }
 
-  const heroSlides = dbHeroSlides.length > 0 ? dbHeroSlides : HERO_SLIDES;
-  const collectionTiles = dbCollectionTiles.length > 0 ? dbCollectionTiles : LANDSCAPE_TILES;
+  // ── landing_sections 오버라이드 적용 ──────────────────────────────────────
+  // DB에 저장된 값이 있으면 사용, 없으면 정적 기본값 유지
+
+  // Hero 슬라이드: curations 시스템(dbHeroSlides)보다 landing_sections 우선
+  const mergedHeroSlides: HeroSlide[] = HERO_SLIDES.map((def, i) => {
+    const key = `hero_${i + 1}`;
+    const p = lsMap[key]?.payload ?? {};
+    const getStr = (field: string, fallback: string) => {
+      const v = p[field];
+      return typeof v === 'string' && v.trim() !== '' ? v : fallback;
+    };
+    return {
+      imageUrl: lsImageUrl(key, def.imageUrl),
+      thumbnailUrl: lsImageUrl(key, def.thumbnailUrl),
+      imageAlt: getStr('imageAlt', def.imageAlt),
+      eyebrow: getStr('eyebrow', def.eyebrow),
+      headlineTop: getStr('headlineTop', def.headlineTop),
+      headlineBottom: getStr('headlineBottom', def.headlineBottom),
+      subhead: getStr('subhead', def.subhead),
+      cta: {
+        label: getStr('ctaLabel', def.cta.label),
+        href: getStr('ctaHref', def.cta.href),
+      },
+      tone: (getStr('tone', def.tone) as 'light' | 'dark'),
+    };
+  });
+
+  const mergedMasterpieceTiles = MASTERPIECE_TILES.map((def, i) => {
+    const key = `masterpiece_${i + 1}`;
+    const p = lsMap[key]?.payload ?? {};
+    const getStr = (field: string, fallback: string) => {
+      const v = p[field];
+      return typeof v === 'string' && v.trim() !== '' ? v : fallback;
+    };
+    return {
+      imageUrl: lsImageUrl(key, def.imageUrl),
+      imageAlt: getStr('imageAlt', def.imageAlt),
+      title: getStr('title', def.title),
+      artist: getStr('artist', def.artist),
+      size: getStr('size', def.size),
+      frameLabel: getStr('frameLabel', def.frameLabel),
+      swatch: getStr('swatch', def.swatch ?? '#ffffff') || def.swatch,
+      href: getStr('href', def.href),
+    };
+  });
+
+  const mergedLandscapeTiles: LandscapeTile[] = LANDSCAPE_TILES.map((def, i) => {
+    const key = `landscape_${i + 1}`;
+    const p = lsMap[key]?.payload ?? {};
+    const getStr = (field: string, fallback: string) => {
+      const v = p[field];
+      return typeof v === 'string' && v.trim() !== '' ? v : fallback;
+    };
+    return {
+      imageUrl: lsImageUrl(key, def.imageUrl),
+      imageAlt: getStr('imageAlt', def.imageAlt),
+      title: getStr('title', def.title),
+      caption: getStr('caption', def.caption),
+      href: getStr('href', def.href),
+    };
+  });
+
+  const mergedLifestyleBlocks = LIFESTYLE_BLOCKS.map((def, i) => {
+    const key = `lifestyle_${i + 1}`;
+    const p = lsMap[key]?.payload ?? {};
+    const getStr = (field: string, fallback: string) => {
+      const v = p[field];
+      return typeof v === 'string' && v.trim() !== '' ? v : fallback;
+    };
+    const bulletsRaw = getStr('bullets', def.bullets.join('\n'));
+    const bullets = bulletsRaw.split('\n').map((b) => b.trim()).filter(Boolean);
+    return {
+      imageUrl: lsImageUrl(key, def.imageUrl),
+      imageAlt: getStr('imageAlt', def.imageAlt),
+      eyebrow: getStr('eyebrow', def.eyebrow),
+      headline: getStr('headline', def.headline),
+      body: getStr('body', def.body),
+      bullets: bullets.length > 0 ? bullets : def.bullets,
+      cta: {
+        label: getStr('ctaLabel', def.cta.label),
+        href: getStr('ctaHref', def.cta.href),
+      },
+    };
+  });
+
+  const mergedMemberBenefitTiles = [...MEMBER_BENEFIT_TILES].map((def, i) => {
+    const key = `member_benefit_${i + 1}`;
+    const p = lsMap[key]?.payload ?? {};
+    const getStr = (field: string, fallback: string) => {
+      const v = p[field];
+      return typeof v === 'string' && v.trim() !== '' ? v : fallback;
+    };
+    return {
+      imageUrl: lsImageUrl(key, def.imageUrl),
+      imageAlt: getStr('imageAlt', def.imageAlt),
+      eyebrow: getStr('eyebrow', def.eyebrow),
+      headline: getStr('headline', def.headline),
+      cta: {
+        label: getStr('ctaLabel', def.cta.label),
+        href: getStr('ctaHref', def.cta.href),
+      },
+    };
+  });
+
+  // curations 시스템과 landing_sections 충돌 방지:
+  // - heroSlides: landing_sections 오버라이드가 있으면 mergedHeroSlides, 없으면 curations banners 또는 정적 기본값
+  const hasLsHeroData = landingSectionsResult.some((s) => s.sectionType === 'hero');
+  const heroSlides = hasLsHeroData
+    ? mergedHeroSlides
+    : dbHeroSlides.length > 0
+      ? dbHeroSlides
+      : HERO_SLIDES;
+
+  // landscape: landing_sections 오버라이드가 있으면 mergedLandscapeTiles, 없으면 curations collection 또는 정적
+  const hasLsLandscapeData = landingSectionsResult.some((s) => s.sectionType === 'landscape');
+  const collectionTiles: LandscapeTile[] = hasLsLandscapeData
+    ? mergedLandscapeTiles
+    : dbCollectionTiles.length > 0
+      ? dbCollectionTiles
+      : LANDSCAPE_TILES;
 
   // ── 추천 상품 (fallback 썸네일 주입) ────────────────────────────────────────
   // DB에 저장된 썸네일이 Unsplash 원본 URL인 경우 Supabase 미러 CDN URL로 교체.
@@ -271,7 +405,7 @@ export default async function LandingPage() {
             linkLabel={t('viewMasterpieces')}
             linkHref="/catalog/basic-frame?theme=masterpiece"
           />
-          <MasterpieceGallery tiles={MASTERPIECE_TILES} />
+          <MasterpieceGallery tiles={mergedMasterpieceTiles} />
         </Container>
       </section>
 
@@ -314,7 +448,7 @@ export default async function LandingPage() {
       {/* ── 5. Lifestyle Studio ────────────────────────────────────────── */}
       <section className="py-[48px] md:py-[96px]">
         <Container size="xl">
-          {LIFESTYLE_BLOCKS.map((block, i) => (
+          {mergedLifestyleBlocks.map((block, i) => (
             <LifestyleStudio
               key={block.headline}
               block={block}
@@ -345,7 +479,7 @@ export default async function LandingPage() {
         <Container size="xl">
           <SectionHeader title={t('memberBenefits')} eyebrow={t('memberBenefitsEyebrow')} />
           <ul className="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-3">
-            {MEMBER_BENEFIT_TILES.map((b) => (
+            {mergedMemberBenefitTiles.map((b) => (
               <li key={b.headline}>
                 <article className="relative w-full aspect-[4/5] overflow-hidden rounded-none bg-ink">
                   <Image
