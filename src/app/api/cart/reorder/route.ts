@@ -15,6 +15,7 @@ import { asBrand } from '@/types/common';
 import type { UserId } from '@/types/common';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getOrder } from '@/lib/db/order';
+import { isSameOrigin } from '@/lib/security/same-origin';
 
 async function getUserId(): Promise<UserId | null> {
   const supabase = await getServerSupabase();
@@ -23,6 +24,14 @@ async function getUserId(): Promise<UserId | null> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // HIGH-001 FIX: CSRF guard — reject cross-origin POST requests.
+  if (!isSameOrigin(request)) {
+    return NextResponse.json(
+      { ok: false, code: 'BAD_ORIGIN' },
+      { status: 403 },
+    );
+  }
+
   const userId = await getUserId();
   if (!userId) {
     return NextResponse.json(

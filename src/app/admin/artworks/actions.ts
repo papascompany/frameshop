@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/db/admin';
 import { upsertStockPhoto, deleteStockPhoto } from '@/lib/db/stock-photos';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
 import { revalidatePath } from 'next/cache';
+import sharp from 'sharp';
 
 type ActionResult = { ok: boolean; error?: string };
 
@@ -37,16 +38,51 @@ export async function upsertArtworkAction(
   let heightPx = parseInt((formData.get('existingHeightPx') as string) ?? '0', 10);
 
   if (imageFile && imageFile.size > 0) {
-    const ext = imageFile.name.split('.').pop() ?? 'jpg';
-    const path = `artworks/${crypto.randomUUID()}.${ext}`;
+    // HIGH-003 FIX: validate file with sharp (magic-byte check) before upload.
+    // Never trust the browser-supplied MIME type or filename extension.
+    const ALLOWED_SHARP_FORMATS = new Set(['jpeg', 'png', 'webp']);
+    const MIME_TO_EXT: Record<string, string> = {
+      jpeg: 'jpg',
+      png:  'png',
+      webp: 'webp',
+    };
+    const MAX_ARTWORK_BYTES = 20 * 1024 * 1024; // 20 MB
+
+    if (imageFile.size > MAX_ARTWORK_BYTES) {
+      return { ok: false, error: '이미지 파일 크기는 20MB를 초과할 수 없습니다.' };
+    }
 
     const arrayBuffer = await imageFile.arrayBuffer();
+    const buf = Buffer.from(arrayBuffer);
+
+    let detectedFormat: string | undefined;
+    let detectedWidth: number | undefined;
+    let detectedHeight: number | undefined;
+    try {
+      const meta = await sharp(buf).metadata();
+      detectedFormat = meta.format;
+      detectedWidth  = meta.width;
+      detectedHeight = meta.height;
+    } catch {
+      return { ok: false, error: '유효하지 않은 이미지 파일입니다.' };
+    }
+
+    if (!detectedFormat || !ALLOWED_SHARP_FORMATS.has(detectedFormat)) {
+      return {
+        ok: false,
+        error: `지원하지 않는 이미지 형식입니다 (jpg, png, webp 만 가능). 감지된 형식: ${detectedFormat ?? 'unknown'}`,
+      };
+    }
+
+    const ext  = MIME_TO_EXT[detectedFormat] ?? 'jpg';
+    const contentType =
+      detectedFormat === 'png'  ? 'image/png'  :
+      detectedFormat === 'webp' ? 'image/webp' : 'image/jpeg';
+    const path = `artworks/${crypto.randomUUID()}.${ext}`;
+
     const { error: uploadErr } = await supabase.storage
       .from('marketing')
-      .upload(path, Buffer.from(arrayBuffer), {
-        contentType: imageFile.type || 'image/jpeg',
-        upsert: false,
-      });
+      .upload(path, buf, { contentType, upsert: false });
 
     if (uploadErr) {
       return { ok: false, error: `이미지 업로드 실패: ${uploadErr.message}` };
@@ -56,9 +92,9 @@ export async function upsertArtworkAction(
       .from('marketing')
       .getPublicUrl(path);
     imageUrl = urlData.publicUrl;
-    thumbUrl = urlData.publicUrl; // 실제로는 썸네일 리사이즈 필요, 여기선 동일 URL 사용
-    widthPx = 1200;  // 클라이언트에서 전달받거나 sharp로 감지
-    heightPx = 900;
+    thumbUrl = urlData.publicUrl; // TODO: generate a resized thumbnail (Phase 2)
+    widthPx  = detectedWidth  ?? 1200;
+    heightPx = detectedHeight ?? 900;
   }
 
   if (!imageUrl) return { ok: false, error: '이미지를 업로드해주세요.' };

@@ -9,6 +9,7 @@ import {
   buildBreadcrumbJsonLd,
   SITE_URL,
 } from '@/lib/seo/metadata';
+import { safeJsonLd } from '@/lib/seo/safe-json-ld';
 
 /**
  * Catalog by category — ISR cached.
@@ -106,7 +107,7 @@ export default async function CatalogPage({
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(breadcrumbJsonLd) }}
       />
       <Container size="xl" className="py-8 md:py-12">
         <SectionHeader

@@ -14,6 +14,7 @@ import {
   buildBreadcrumbJsonLd,
   SITE_URL,
 } from '@/lib/seo/metadata';
+import { safeJsonLd } from '@/lib/seo/safe-json-ld';
 import { getTranslations } from 'next-intl/server';
 
 /**
@@ -113,11 +114,11 @@ export default async function ProductPage({
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(productJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(productJsonLd) }}
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(breadcrumbJsonLd) }}
       />
       <Container size="lg" className="py-6 md:py-10">
         <div className="grid md:grid-cols-2 gap-6">

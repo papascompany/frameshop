@@ -20,17 +20,71 @@ import createNextIntlPlugin from 'next-intl/plugin';
  *  Note: turbopack root pin is preserved to silence the workspace-root
  *  warning when running `next dev` from the worktree.
  */
+// ─── HTTP Security Headers ────────────────────────────────────────────────────
+// Applied to all routes. Provides baseline browser-level hardening.
+// INFO-002 FIX: security headers were completely absent before this change.
+const SUPABASE_HOSTNAME = process.env.NEXT_PUBLIC_SUPABASE_URL
+  ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname   // e.g. abc123.supabase.co
+  : 'acxsxjmqgvkceqahwkpz.supabase.co';
+
+const securityHeaders = [
+  // Prevent MIME-type sniffing (mitigates SVG-XSS and content-type spoofing).
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  // Clickjacking protection — our site should never be framed.
+  { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+  // Force HTTPS for 1 year and include sub-domains.
+  { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+  // Limit referrer info sent to cross-origin destinations.
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  // Disable browser features we don't use.
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
+  // Content Security Policy:
+  // - script-src includes 'unsafe-inline' for Next.js RSC hydration + JSON-LD
+  //   inline scripts. A nonce-based CSP is the next hardening step (Phase 2).
+  // - Toss Payments loads its SDK from js.tosspayments.com.
+  // - connect-src covers Supabase Realtime/Storage + Toss API.
+  // - frame-ancestors 'none' is stricter than X-Frame-Options for modern browsers.
+  {
+    key: 'Content-Security-Policy',
+    value: [
+      `default-src 'self'`,
+      `script-src 'self' 'unsafe-inline' https://js.tosspayments.com`,
+      `style-src 'self' 'unsafe-inline'`,
+      `img-src 'self' data: blob: https://${SUPABASE_HOSTNAME} https://lh3.googleusercontent.com`,
+      `font-src 'self' data:`,
+      `connect-src 'self' https://${SUPABASE_HOSTNAME} https://api.tosspayments.com wss://${SUPABASE_HOSTNAME}`,
+      `frame-src https://js.tosspayments.com`,
+      `frame-ancestors 'none'`,
+      `object-src 'none'`,
+      `base-uri 'self'`,
+      `form-action 'self'`,
+      `upgrade-insecure-requests`,
+    ].join('; '),
+  },
+];
+
 const nextConfig: NextConfig = {
   turbopack: {
     root: import.meta.dirname,
   },
 
+  // MEDIUM-002 FIX: apply security headers to all routes.
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: securityHeaders,
+      },
+    ];
+  },
+
   images: {
     remotePatterns: [
       {
+        // INFO-003 FIX: restrict to the specific project subdomain instead of *.supabase.co
         protocol: 'https',
-        hostname: '*.supabase.co',
-        pathname: '/storage/v1/object/public/**',
+        hostname: SUPABASE_HOSTNAME,
+        pathname: '/storage/v1/object/**',
       },
       // Google Photos base URLs (picker에서 직접 표시할 때 필요)
       {

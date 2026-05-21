@@ -16,6 +16,10 @@ export type CreatePhotoInput = {
   sessionId: SessionId | null;
   originalUrl: string;
   thumbUrl: string;
+  /** Object key inside the private `photos` bucket — used to regenerate signed URLs. */
+  storagePath?: string;
+  /** Object key for the thumbnail inside the private `photos` bucket. */
+  thumbPath?: string;
   widthPx?: number;
   heightPx?: number;
   exif?: ExifMeta;
@@ -33,6 +37,8 @@ export async function createPhoto(input: CreatePhotoInput): Promise<Photo> {
       session_id: input.sessionId as string | null,
       original_url: input.originalUrl,
       thumb_url: input.thumbUrl,
+      storage_path: input.storagePath ?? null,
+      thumb_path: input.thumbPath ?? null,
       width_px: input.widthPx ?? null,
       height_px: input.heightPx ?? null,
       exif: input.exif ?? null,
