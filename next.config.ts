@@ -50,7 +50,7 @@ const securityHeaders = [
       `default-src 'self'`,
       `script-src 'self' 'unsafe-inline' https://js.tosspayments.com`,
       `style-src 'self' 'unsafe-inline'`,
-      `img-src 'self' data: blob: https://${SUPABASE_HOSTNAME} https://lh3.googleusercontent.com`,
+      `img-src 'self' data: blob: https://${SUPABASE_HOSTNAME} https://lh3.googleusercontent.com https://images.unsplash.com`,
       `font-src 'self' data:`,
       `connect-src 'self' https://${SUPABASE_HOSTNAME} https://api.tosspayments.com wss://${SUPABASE_HOSTNAME}`,
       `frame-src https://js.tosspayments.com`,
@@ -91,8 +91,13 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'lh3.googleusercontent.com',
       },
-      // Unsplash entry removed — all editorial photos are now mirrored to
-      // Supabase Storage (marketing bucket) via scripts/mirror-unsplash.mjs (P1-07).
+      // Unsplash — DB에 저장된 상품 썸네일이 아직 images.unsplash.com URL을 참조함.
+      // 미러링 스크립트(scripts/mirror-unsplash.mjs)로 Supabase Storage로 이전 완료 후
+      // DB URL 업데이트가 완료되면 이 항목을 제거.
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
     ],
     formats: ['image/avif', 'image/webp'],
     // Pre-generate srcSet for the breakpoints we actually use:
