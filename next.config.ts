@@ -52,6 +52,7 @@ const securityHeaders = [
       `style-src 'self' 'unsafe-inline'`,
       `img-src 'self' data: blob: https://${SUPABASE_HOSTNAME} https://lh3.googleusercontent.com https://images.unsplash.com`,
       `font-src 'self' data:`,
+      `media-src 'self' data: blob:`,
       `connect-src 'self' https://${SUPABASE_HOSTNAME} https://api.tosspayments.com wss://${SUPABASE_HOSTNAME}`,
       `frame-src https://js.tosspayments.com`,
       `frame-ancestors 'none'`,
