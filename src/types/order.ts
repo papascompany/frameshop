@@ -14,7 +14,6 @@
 
 import { z } from 'zod';
 import { selectedOptionsSchema } from './product';
-import { cropTransformSchema } from './editor';
 import {
   shippingMethodSchema,
   SHIPPING_METHODS,
