@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/cn';
 import type { Product } from '@/types/product';
 import type { CategoryTreeNode } from '@/types/product';
