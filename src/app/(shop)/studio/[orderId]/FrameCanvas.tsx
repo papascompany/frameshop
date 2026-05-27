@@ -6,32 +6,37 @@
  * Imported via `dynamic(..., { ssr: false })` from StudioClient so Konva
  * never lands in the server bundle (editor.md AC-1/AC-12, ADR-015).
  *
- * Composition pattern (frame_skills.md §4):
+ * Composition pattern (Canva-style):
  *   Stage (aspect = current variant width_mm:height_mm, clamped to 720px long edge)
- *   └ Layer (single)
- *      ├ Group clipFunc=innerRectPx   ← photo only renders inside inner_rect
- *      │   └ KonvaImage photo (draggable, scale, rotation pivot = photo center)
- *      └ KonvaImage frame PNG (stretched to Stage size, listening=false)
+ *   └ Layer
+ *      ├ KonvaImage photo (draggable / scalable / rotatable, no clip)
+ *      ├ Rect × 4 dim-mask outside inner_rect (so photo is visible but dimmed)
+ *      ├ KonvaImage frame PNG (stretched to Stage size, listening=false)
+ *      └ Transformer attached to photo (8 corner/side anchors + rotate handle)
  *
- * Triggers for fit-cover re-layout (frame_skills.md §4.4-§4.5):
+ * UX:
+ *   - Photo is selected by default → handles always visible (no extra click).
+ *   - User can freely drag, scale, rotate via the handles or by dragging
+ *     the photo body. Areas of the photo outside the print region are
+ *     dimmed (50 % black) so the user understands what will be cropped.
+ *
+ * Triggers for fit-cover re-layout:
  *  - photo first load → reset rotation, fit-cover center
  *  - size change      → re-center on new innerRect, clamp scale to new fit-cover
  *  - color change     → keep cropTransform, clamp scale only (PNG src swap)
- *
- * Phase 1: simple drag clamp (photo center confined inside inner_rect).
- * Phase 2 OOS: pinch/rotate gestures, matte layer, accurate fit-cover invariant
- * under rotation, undo/redo (see editor.md OOS).
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type Konva from 'konva';
-import { Group, Image as KonvaImage, Layer, Rect, Stage } from 'react-konva';
+import { Group, Image as KonvaImage, Layer, Rect, Stage, Transformer } from 'react-konva';
 import { useEditorStore } from '@/store/editor';
 import {
   clamp,
   fitPhotoToFrame,
 } from '@/lib/editor/transform';
 import {
+  CROP_ROTATION_MAX_DEG,
+  CROP_ROTATION_MIN_DEG,
   CROP_SCALE_MAX,
   CROP_SCALE_MIN,
 } from '@/types/editor';
@@ -48,6 +53,14 @@ import type { Photo } from '@/types/photo';
 
 /** Max long-edge of the preview Stage in CSS pixels (mobile-safe, frame_skills.md §6.2). */
 const STAGE_MAX_LONG_EDGE_PX = 720;
+
+/** Anchor square edge length — large enough for comfortable touch (~24px). */
+const ANCHOR_SIZE_PX = 14;
+const ANCHOR_STROKE_PX = 1.5;
+const ROTATE_ANCHOR_OFFSET_PX = 28;
+
+/** Dim mask opacity for areas outside the print region. */
+const DIM_FILL = 'rgba(0, 0, 0, 0.55)';
 
 /** Compute Stage size from variant aspect, clamped to the max long edge. */
 function stageSizeForVariant(variant: ProductVariant | null): { w: number; h: number } {
@@ -131,6 +144,8 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
   const setCropTransform = useEditorStore((s) => s.setCropTransform);
 
   const stageRef = useRef<Konva.Stage | null>(null);
+  const photoNodeRef = useRef<Konva.Image | null>(null);
+  const transformerRef = useRef<Konva.Transformer | null>(null);
 
   // ----- Resolve current frame asset (by selectedColor) -----
   const frame: FrameAsset | null = useMemo(
@@ -161,9 +176,6 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
   const frameImg = useImageBitmap(frame?.pngUrl ?? '');
 
   // ----- Preview guide line (1.5s fade after first paint) -----
-  // Hint to the user where the actual print area is. We deliberately only
-  // run the fade on mount — re-showing it on every size/color change would
-  // be visually noisy. Caption below the canvas continues to communicate it.
   const [guideVisible, setGuideVisible] = useState(true);
   useEffect(() => {
     const t = setTimeout(() => setGuideVisible(false), 1500);
@@ -174,11 +186,19 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
   useImperativeHandle(
     ref,
     () => ({
-      toDataURL: (opts) =>
-        stageRef.current?.toDataURL({
+      toDataURL: (opts) => {
+        // Hide the transformer/guide for the snapshot so they don't bleed
+        // into the cart preview.
+        const tr = transformerRef.current;
+        const previousVisible = tr?.visible() ?? true;
+        if (tr) tr.visible(false);
+        const url = stageRef.current?.toDataURL({
           pixelRatio: opts?.pixelRatio ?? 2,
           mimeType: opts?.mimeType ?? 'image/png',
-        }) ?? null,
+        }) ?? null;
+        if (tr) tr.visible(previousVisible);
+        return url;
+      },
       getStageSize: () => stageSize,
     }),
     [stageSize],
@@ -205,14 +225,12 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     if (lastVariantIdRef.current === variant.id) return;
     const previous = lastVariantIdRef.current;
     lastVariantIdRef.current = variant.id;
-    // Skip the very first run (variant binds AFTER mount; photo load handler covers initial fit).
     if (previous === null) return;
     const r = innerRectToPx(frame.innerRect, stageSize);
     const fitCover = Math.max(
       r.w / photoImg.naturalWidth,
       r.h / photoImg.naturalHeight,
     );
-    // Re-center the photo on the new innerRect center; clamp scale upward to fit-cover.
     setCropTransform({
       x: r.x + r.w / 2,
       y: r.y + r.h / 2,
@@ -223,8 +241,6 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
       ),
       rotation: cropTransform.rotation,
     });
-    // We intentionally only depend on variant.id (and the supporting photo/frame refs)
-    // to avoid re-running on every cropTransform tick from drag events.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variant?.id, photoImg, frame?.id, stageSize.w, stageSize.h]);
 
@@ -250,6 +266,18 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame?.id, photoImg, stageSize.w, stageSize.h]);
 
+  // ----- Attach the Transformer to the photo node whenever the photo is ready -----
+  useEffect(() => {
+    const tr = transformerRef.current;
+    const node = photoNodeRef.current;
+    if (!tr || !node || !photoImg) {
+      tr?.nodes([]);
+      return;
+    }
+    tr.nodes([node]);
+    tr.getLayer()?.batchDraw();
+  }, [photoImg, frame?.id]);
+
   if (!frame || !innerRectPx) {
     return (
       <div className="w-full aspect-square bg-soft-cloud grid place-items-center text-sm text-mute">
@@ -258,22 +286,35 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     );
   }
 
-  // Drag clamp: keep photo center inside innerRect (frame_skills.md §A.5 Phase 1 simplification).
-  function clampToInnerRect(p: { x: number; y: number }): { x: number; y: number } {
-    if (!innerRectPx) return p;
-    return {
-      x: clamp(p.x, innerRectPx.x, innerRectPx.x + innerRectPx.w),
-      y: clamp(p.y, innerRectPx.y, innerRectPx.y + innerRectPx.h),
-    };
+  /**
+   * Konva Transformer drives scale via scaleX/scaleY. We commit changes to
+   * the store at the end of each interaction (drag / scale / rotate).
+   * Uniform scale is enforced by only enabling corner anchors.
+   */
+  function commitTransformFromNode(): void {
+    const node = photoNodeRef.current;
+    if (!node) return;
+    const rawScale = node.scaleX();
+    const scale = clamp(rawScale, CROP_SCALE_MIN, CROP_SCALE_MAX);
+    const rawRotation = node.rotation();
+    const rotation = clamp(
+      rawRotation,
+      CROP_ROTATION_MIN_DEG,
+      CROP_ROTATION_MAX_DEG,
+    );
+    setCropTransform({
+      x: node.x(),
+      y: node.y(),
+      scale,
+      rotation,
+    });
   }
 
-  // CSS-bound stage container — preserves aspect ratio on small viewports.
   return (
     <div className="w-full flex flex-col items-center">
       <div
-        className="bg-soft-cloud overflow-hidden"
+        className="bg-soft-cloud overflow-hidden touch-none"
         style={{
-          // Hard max in CSS px; on narrow viewports rely on CSS to scale down via container width.
           width: `min(100%, ${stageSize.w}px)`,
           aspectRatio: `${stageSize.w} / ${stageSize.h}`,
         }}
@@ -286,41 +327,65 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
           style={{ width: '100%', height: '100%' }}
         >
           <Layer>
-            {/* ---- Photo (clipped to inner_rect) ---- */}
+            {/* ---- Photo (no clip — full bitmap is visible) ---- */}
             {photoImg ? (
-              <Group
-                clipFunc={(ctx) => {
-                  if (!innerRectPx) return;
-                  ctx.beginPath();
-                  ctx.rect(innerRectPx.x, innerRectPx.y, innerRectPx.w, innerRectPx.h);
-                  ctx.closePath();
-                }}
-              >
-                <KonvaImage
-                  image={photoImg}
-                  x={cropTransform.x}
-                  y={cropTransform.y}
-                  scaleX={cropTransform.scale}
-                  scaleY={cropTransform.scale}
-                  rotation={cropTransform.rotation}
-                  offsetX={photoImg.naturalWidth / 2}
-                  offsetY={photoImg.naturalHeight / 2}
-                  draggable
-                  perfectDrawEnabled={false}
-                  dragBoundFunc={(pos) => clampToInnerRect(pos as { x: number; y: number })}
-                  onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
-                    const p = clampToInnerRect({ x: e.target.x(), y: e.target.y() });
-                    setCropTransform({
-                      ...cropTransform,
-                      x: p.x,
-                      y: p.y,
-                    });
-                  }}
+              <KonvaImage
+                ref={photoNodeRef}
+                image={photoImg}
+                x={cropTransform.x}
+                y={cropTransform.y}
+                scaleX={cropTransform.scale}
+                scaleY={cropTransform.scale}
+                rotation={cropTransform.rotation}
+                offsetX={photoImg.naturalWidth / 2}
+                offsetY={photoImg.naturalHeight / 2}
+                draggable
+                perfectDrawEnabled={false}
+                onDragEnd={commitTransformFromNode}
+                onTransformEnd={commitTransformFromNode}
+              />
+            ) : null}
+
+            {/* ---- Dim mask: 4 rects around inner_rect, so the photo is
+                       visible everywhere but darkened outside the print region ---- */}
+            {innerRectPx ? (
+              <Group listening={false}>
+                {/* top */}
+                <Rect
+                  x={0}
+                  y={0}
+                  width={stageSize.w}
+                  height={innerRectPx.y}
+                  fill={DIM_FILL}
+                />
+                {/* bottom */}
+                <Rect
+                  x={0}
+                  y={innerRectPx.y + innerRectPx.h}
+                  width={stageSize.w}
+                  height={Math.max(0, stageSize.h - (innerRectPx.y + innerRectPx.h))}
+                  fill={DIM_FILL}
+                />
+                {/* left */}
+                <Rect
+                  x={0}
+                  y={innerRectPx.y}
+                  width={innerRectPx.x}
+                  height={innerRectPx.h}
+                  fill={DIM_FILL}
+                />
+                {/* right */}
+                <Rect
+                  x={innerRectPx.x + innerRectPx.w}
+                  y={innerRectPx.y}
+                  width={Math.max(0, stageSize.w - (innerRectPx.x + innerRectPx.w))}
+                  height={innerRectPx.h}
+                  fill={DIM_FILL}
                 />
               </Group>
             ) : null}
 
-            {/* ---- Frame PNG overlay ---- */}
+            {/* ---- Frame PNG overlay (gets drawn over dim mask + photo edges) ---- */}
             {frameImg ? (
               <KonvaImage
                 image={frameImg}
@@ -346,11 +411,45 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
                 listening={false}
               />
             ) : null}
+
+            {/* ---- Transformer (8 anchors + rotate handle on the actual photo
+                       outline, drawn on top of everything so handles stay grabbable) ---- */}
+            {photoImg ? (
+              <Transformer
+                ref={transformerRef}
+                rotateEnabled
+                keepRatio
+                ignoreStroke
+                shouldOverdrawWholeArea
+                enabledAnchors={[
+                  'top-left',
+                  'top-right',
+                  'bottom-left',
+                  'bottom-right',
+                ]}
+                anchorSize={ANCHOR_SIZE_PX}
+                anchorStroke="#111"
+                anchorFill="#fff"
+                anchorStrokeWidth={ANCHOR_STROKE_PX}
+                anchorCornerRadius={2}
+                borderStroke="#111"
+                borderStrokeWidth={1}
+                borderDash={[4, 4]}
+                rotateAnchorOffset={ROTATE_ANCHOR_OFFSET_PX}
+                rotationSnaps={[0, 90, 180, 270]}
+                rotationSnapTolerance={4}
+                boundBoxFunc={(oldBox, newBox) => {
+                  // Reject degenerate boxes to avoid Konva NaN issues.
+                  if (newBox.width < 10 || newBox.height < 10) return oldBox;
+                  return newBox;
+                }}
+              />
+            ) : null}
           </Layer>
         </Stage>
       </div>
       <p className="mt-3 caption-md text-mute text-center">
-        사진을 드래그해 위치를 조정하세요. 점선 영역만 인쇄됩니다.
+        사진을 드래그·핸들로 위치/크기/회전을 조정하세요. 점선 영역만 인쇄됩니다.
       </p>
     </div>
   );
