@@ -76,17 +76,24 @@ function resolveVariant(state: State, partial: Partial<SelectedOptions>): Produc
 export const useEditorStore = create<State & Actions>((set) => ({
   ...initial,
   init: ({ productId, options, defaultVariantId }) => {
-    const first = Object.values(options.variantsByKey)[0];
+    // Derive selectedOptions from the default variant so that selectedVariantId
+    // and selectedOptions always refer to the same variant.  Falling back to the
+    // first entry in variantsByKey (by insertion order) only when there is no
+    // defaultVariantId (edge-case: empty catalogue).
+    const defaultVariant = defaultVariantId
+      ? Object.values(options.variantsByKey).find((v) => v.id === defaultVariantId) ?? null
+      : null;
+    const seed = defaultVariant ?? Object.values(options.variantsByKey)[0] ?? null;
     set({
       productId,
       options,
       selectedVariantId: defaultVariantId,
-      selectedOptions: first
+      selectedOptions: seed
         ? {
-            sizeCode: first.sizeCode,
-            colorCode: first.colorCode,
-            matteCode: first.matteCode,
-            paperCode: first.paperCode,
+            sizeCode: seed.sizeCode,
+            colorCode: seed.colorCode,
+            matteCode: seed.matteCode,
+            paperCode: seed.paperCode,
           }
         : initial.selectedOptions,
     });
