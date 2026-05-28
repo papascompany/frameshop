@@ -43,6 +43,8 @@ export type ProductFormInput = {
   hasFrame: boolean;
   isActive: boolean;
   sortOrder: number;
+  /** Print bleed in mm added around inner_rect when generating the print crop. */
+  bleedMm: number;
 };
 
 /** File-bearing input used by the form-data path. */
@@ -70,6 +72,7 @@ export const productFormSchema = z.object({
   hasFrame: z.boolean(),
   isActive: z.boolean(),
   sortOrder: z.number().int().nonnegative(),
+  bleedMm: z.number().min(0).max(50),
 });
 
 // ---------- Frame admin inputs ----------

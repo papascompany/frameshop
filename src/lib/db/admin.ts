@@ -51,7 +51,7 @@ export async function getAllProductsAdmin(): Promise<(Product & { thumbnail: str
   const { data, error } = await supabase
     .from('products')
     .select(
-      'id, category_id, name, tagline, description, base_price, has_frame, is_active, sort_order, created_at, product_images!left(image_url, type, sort_order)',
+      'id, category_id, name, tagline, description, base_price, has_frame, is_active, sort_order, bleed_mm, created_at, product_images!left(image_url, type, sort_order)',
     )
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: false });
@@ -68,6 +68,7 @@ export async function getAllProductsAdmin(): Promise<(Product & { thumbnail: str
     has_frame: boolean;
     is_active: boolean;
     sort_order: number;
+    bleed_mm?: number | string | null;
     created_at: string;
     product_images?: Array<{ image_url: string; type: string; sort_order: number }>;
   };
@@ -105,6 +106,7 @@ export async function upsertProduct(input: ProductFormInput & { id?: ProductId }
     has_frame: input.hasFrame,
     is_active: input.isActive,
     sort_order: input.sortOrder,
+    bleed_mm: input.bleedMm,
   };
   const result = input.id
     ? await supabase.from('products').update(row).eq('id', input.id as string).select().single()

@@ -31,6 +31,7 @@ export async function upsertProductAction(
     hasFrame: formData.get('hasFrame') === 'true',
     isActive: formData.get('isActive') === 'true',
     sortOrder: Number(formData.get('sortOrder') ?? 0),
+    bleedMm: Number(formData.get('bleedMm') ?? 0),
   };
 
   const parsed = productFormSchema.safeParse(raw);

@@ -15,7 +15,6 @@ import {
 } from '@/store/editor';
 import { addToCart } from '@/lib/cart/client';
 import { ImageResizeError, resizeImageToMax } from '@/lib/image/resize-client';
-import { getBrowserSupabase } from '@/lib/supabase/client';
 import { asBrand } from '@/types/common';
 import type { PhotoId, ProductId, SessionId } from '@/types/common';
 import { LONG_EDGE_RESIZE_PX } from '@/types/photo';
@@ -61,12 +60,14 @@ export function StudioClient({
   const photo = useEditorStore((s) => s.photo);
   const selected = useEditorStore((s) => s.selectedOptions);
   const variantId = useEditorStore((s) => s.selectedVariantId);
-  const cropTransform = useEditorStore((s) => s.cropTransform);
+  const confirmedCrop = useEditorStore((s) => s.confirmedCrop);
+  const setConfirmedCrop = useEditorStore((s) => s.setConfirmedCrop);
   const price = useCurrentVariantPrice();
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [placing, setPlacing] = useState(false);
   const [photoSourceTab, setPhotoSourceTab] = useState<PhotoSourceTab>('upload');
   const canvasRef = useRef<FrameCanvasHandle | null>(null);
 
@@ -178,46 +179,53 @@ export function StudioClient({
     setPhoto(mockPhoto);
   }
 
-  async function uploadPreviewSnapshot(): Promise<string | null> {
-    const dataUrl = canvasRef.current?.toDataURL({ pixelRatio: 2, mimeType: 'image/png' });
-    if (!dataUrl) return null;
+  /**
+   * "사진 배치 확정": render the print-ready crop of the ORIGINAL photo
+   * (full resolution, inner_rect + product bleed) and upload it as a new
+   * photo record. The confirmed crop is what gets added to the cart.
+   */
+  async function handleConfirmPlacement() {
+    if (!photo) return;
+    setPlacing(true);
+    setUploadError(null);
     try {
-      const blob = await (await fetch(dataUrl)).blob();
-      const supabase = getBrowserSupabase();
-      const path = `${sessionId}/${crypto.randomUUID()}.png`;
-      const { error } = await supabase.storage
-        .from('previews')
-        .upload(path, blob, {
-          contentType: 'image/png',
-          upsert: false,
-        });
-      if (error) {
-        console.warn('preview upload failed:', error.message);
-        return null;
+      const result = await canvasRef.current?.exportPrintCrop();
+      if (!result) {
+        setUploadError('크롭 이미지를 만들 수 없습니다. 잠시 후 다시 시도해 주세요.');
+        return;
       }
-      const { data } = supabase.storage.from('previews').getPublicUrl(path);
-      return data.publicUrl ?? null;
-    } catch (err) {
-      console.warn('preview snapshot threw:', err);
-      return null;
+      const form = new FormData();
+      form.append('file', result.blob, `cropped-${crypto.randomUUID()}.jpg`);
+      form.append('sessionId', sessionId);
+      const res = await fetch('/api/photos/upload', { method: 'POST', body: form });
+      const body = (await res.json()) as { ok: boolean; photo?: Photo };
+      if (body.ok && body.photo) {
+        setConfirmedCrop(body.photo);
+      } else {
+        setUploadError('크롭 이미지 업로드에 실패했습니다.');
+      }
+    } catch {
+      setUploadError('사진 배치 확정 중 오류가 발생했습니다.');
+    } finally {
+      setPlacing(false);
     }
   }
 
   async function addCurrentToCart() {
-    if (!photo || !variantId) return;
+    // The confirmed crop is already the exact print area; it is added with an
+    // identity transform so the print pipeline does not re-crop it.
+    if (!variantId || !confirmedCrop) return;
     setConfirming(true);
     try {
-      const composedPreview = await uploadPreviewSnapshot();
-      const previewUrl = composedPreview ?? photo.thumbUrl;
       await addToCart({
         userId: null,
         productId: productDetail.product.id,
         variantId,
-        photoId: asBrand<PhotoId>(photo.id),
+        photoId: asBrand<PhotoId>(confirmedCrop.id),
         options: selected,
-        photoUrl: photo.originalUrl,
-        cropTransform,
-        previewUrl,
+        photoUrl: confirmedCrop.originalUrl,
+        cropTransform: { x: 0, y: 0, scale: 1, rotation: 0 },
+        previewUrl: confirmedCrop.thumbUrl ?? confirmedCrop.originalUrl,
         price,
         quantity: 1,
       });
@@ -305,15 +313,48 @@ export function StudioClient({
 
           <div className="mt-4 flex items-center justify-between gap-3">
             <PriceTag amount={price} variant="large" />
-            <Button
-              variant="primary"
-              size="lg"
-              disabled={!photo || !variantId || confirming}
-              onClick={() => void addCurrentToCart()}
-            >
-              {confirming ? '담는 중…' : '장바구니 담기'}
-            </Button>
           </div>
+
+          {/* 2-step flow: 사진 배치 확정 → 장바구니 담기 */}
+          {!confirmedCrop ? (
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="primary"
+                size="lg"
+                disabled={!photo || placing}
+                onClick={() => void handleConfirmPlacement()}
+              >
+                {placing ? '사진 배치 확정 중…' : '사진 배치 확정'}
+              </Button>
+              <p className="text-xs text-muted-fg">
+                점선(인쇄 영역)에 맞춰 원본 화질 그대로 잘라낸 이미지를 만듭니다.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 rounded-md border border-hairline bg-soft-cloud px-3 py-2">
+                <span aria-hidden className="text-base leading-none">✓</span>
+                <p className="text-sm text-foreground">
+                  사진 배치가 확정되었습니다.
+                </p>
+                <button
+                  type="button"
+                  className="ml-auto text-xs underline text-mute hover:text-foreground"
+                  onClick={() => setConfirmedCrop(null)}
+                >
+                  다시 편집
+                </button>
+              </div>
+              <Button
+                variant="primary"
+                size="lg"
+                disabled={!variantId || confirming}
+                onClick={() => void addCurrentToCart()}
+              >
+                {confirming ? '담는 중…' : '장바구니 담기'}
+              </Button>
+            </div>
+          )}
 
           <p className="text-xs text-muted-fg">
             ※ 미리보기는 화면 색공간 기준이며 실제 인쇄 결과와 차이가 있을 수 있습니다.

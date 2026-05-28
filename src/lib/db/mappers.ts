@@ -69,6 +69,8 @@ type ProductRow = {
   has_frame: boolean;
   is_active: boolean;
   sort_order: number;
+  /** numeric column — Supabase returns it as number or string depending on driver. */
+  bleed_mm?: number | string | null;
   created_at: string;
 };
 
@@ -219,6 +221,7 @@ export const mapProduct = (row: ProductRow): Product => ({
   hasFrame: row.has_frame,
   isActive: row.is_active,
   sortOrder: row.sort_order,
+  bleedMm: row.bleed_mm == null ? 0 : Number(row.bleed_mm),
   createdAt: row.created_at,
 });
 
