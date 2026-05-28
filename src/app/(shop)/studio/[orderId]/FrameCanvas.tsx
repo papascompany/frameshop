@@ -207,16 +207,53 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     );
   }, [options.variantsByKey, selectedVariantId]);
 
-  // ----- Stage geometry + innerRect (absolute Stage coords) -----
-  const stage = useMemo(() => stageGeometryForVariant(variant), [variant]);
+  // ----- Load images -----
+  const photoImg = useImageBitmap(photo.originalUrl);
+  const frameImg = useImageBitmap(frame?.pngUrl ?? '');
+
+  // ----- Stage geometry: starts as `frame + padding`, then EXPANDS to fit
+  //       the photo's fit-cover bounding box + handle margin so that the
+  //       corner anchors are always inside the Stage canvas. Konva does not
+  //       draw outside the canvas pixels, so this is the only reliable way
+  //       to keep handles visible across all photo/frame aspect-ratio combos. -----
+  const stage = useMemo(() => {
+    const base = stageGeometryForVariant(variant);
+    if (!photoImg || !frame) return base;
+
+    // inner_rect dimensions in the BASE stage coordinate system
+    const innerW = frame.innerRect.w * base.frameW;
+    const innerH = frame.innerRect.h * base.frameH;
+    const fitCover = Math.max(
+      innerW / photoImg.naturalWidth,
+      innerH / photoImg.naturalHeight,
+    );
+    const photoOnCanvasW = photoImg.naturalWidth * fitCover;
+    const photoOnCanvasH = photoImg.naturalHeight * fitCover;
+
+    // Extra margin around the photo for anchor squares + rotate handle.
+    const HANDLE_MARGIN = ANCHOR_SIZE_PX + ROTATE_ANCHOR_OFFSET_PX + 12;
+    const requiredW = photoOnCanvasW + 2 * HANDLE_MARGIN;
+    const requiredH = photoOnCanvasH + 2 * HANDLE_MARGIN;
+
+    if (requiredW <= base.w && requiredH <= base.h) return base;
+
+    const newW = Math.max(base.w, Math.ceil(requiredW));
+    const newH = Math.max(base.h, Math.ceil(requiredH));
+    // Frame stays centred inside the expanded Stage.
+    return {
+      w: newW,
+      h: newH,
+      frameX: Math.round((newW - base.frameW) / 2),
+      frameY: Math.round((newH - base.frameH) / 2),
+      frameW: base.frameW,
+      frameH: base.frameH,
+    };
+  }, [variant, photoImg, frame]);
+
   const innerRectPx = useMemo(
     () => (frame ? innerRectToStagePx(frame.innerRect, stage) : null),
     [frame, stage],
   );
-
-  // ----- Load images -----
-  const photoImg = useImageBitmap(photo.originalUrl);
-  const frameImg = useImageBitmap(frame?.pngUrl ?? '');
 
   // ----- Imperative API for parent (preview export, print render input) -----
   useImperativeHandle(
@@ -443,18 +480,30 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
               />
             ) : null}
 
-            {/* ---- Print-area guide — always visible (no fade) ---- */}
+            {/* ---- Print-area guide — black outline + yellow dashed line so
+                       it stays visible on any photo colour ---- */}
             {innerRectPx ? (
-              <Rect
-                x={innerRectPx.x}
-                y={innerRectPx.y}
-                width={innerRectPx.w}
-                height={innerRectPx.h}
-                stroke={GUIDE_STROKE}
-                strokeWidth={2}
-                dash={[10, 6]}
-                listening={false}
-              />
+              <Group listening={false}>
+                {/* Black backdrop — solid, thicker, drawn first */}
+                <Rect
+                  x={innerRectPx.x}
+                  y={innerRectPx.y}
+                  width={innerRectPx.w}
+                  height={innerRectPx.h}
+                  stroke="rgba(0, 0, 0, 0.85)"
+                  strokeWidth={4}
+                />
+                {/* Yellow dashed line on top */}
+                <Rect
+                  x={innerRectPx.x}
+                  y={innerRectPx.y}
+                  width={innerRectPx.w}
+                  height={innerRectPx.h}
+                  stroke={GUIDE_STROKE}
+                  strokeWidth={2}
+                  dash={[10, 6]}
+                />
+              </Group>
             ) : null}
 
             {/* ---- Transformer (anchors + rotate handle on photo outline,
