@@ -1,39 +1,45 @@
 'use client';
 
 /**
- * Konva-based frame editor canvas.
+ * Konva-based frame editor canvas. Canva-style UX.
  *
  * Imported via `dynamic(..., { ssr: false })` from StudioClient so Konva
  * never lands in the server bundle (editor.md AC-1/AC-12, ADR-015).
  *
- * Composition pattern (Canva-style):
- *   Stage (aspect = current variant width_mm:height_mm, clamped to 720px long edge)
- *   └ Layer
- *      ├ KonvaImage photo (draggable / scalable / rotatable, no clip)
- *      ├ Rect × 4 dim-mask outside inner_rect (so photo is visible but dimmed)
- *      ├ KonvaImage frame PNG (stretched to Stage size, listening=false)
- *      └ Transformer attached to photo (8 corner/side anchors + rotate handle)
+ * Stage layout (PADDING around the frame so the user can grab handles that
+ * sit on the photo's outer edge):
  *
- * UX:
- *   - Photo is selected by default → handles always visible (no extra click).
- *   - User can freely drag, scale, rotate via the handles or by dragging
- *     the photo body. Areas of the photo outside the print region are
- *     dimmed (50 % black) so the user understands what will be cropped.
+ *     ┌──────────────── Stage ────────────────┐
+ *     │  pad                                  │
+ *     │   ┌──── Frame (real product size) ───┐│
+ *     │   │ pad                              ││
+ *     │   │  ┌── inner_rect (print area) ──┐ ││
+ *     │   │  │                             │ ││
+ *     │   │  │  photo (selected, dim mask  │ ││
+ *     │   │  │  applied OUTSIDE inner_rect)│ ││
+ *     │   │  └─────────────────────────────┘ ││
+ *     │   │                                  ││
+ *     │   └──────────────────────────────────┘│
+ *     │                                       │
+ *     └───────────────────────────────────────┘
  *
- * Triggers for fit-cover re-layout:
- *  - photo first load → reset rotation, fit-cover center
- *  - size change      → re-center on new innerRect, clamp scale to new fit-cover
- *  - color change     → keep cropTransform, clamp scale only (PNG src swap)
+ * Render order (back → front):
+ *   1. Photo (no clip — bitmap is drawn in full)
+ *   2. Dim mask — Stage-wide rgba(0,0,0,0.45) with the inner_rect cut out
+ *      → photo OUTSIDE the print region appears translucent so the user
+ *        can judge how much will be cropped
+ *   3. Frame PNG (drawn only over the frame rect, NOT over the padding)
+ *   4. Print-area dashed guide (always visible, brand-yellow)
+ *   5. Transformer attached to the photo (8/4 anchors + rotate handle).
+ *      anchors are filled BLACK with a thick WHITE stroke so they stand
+ *      out against any background (photo, padding, dim mask).
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type Konva from 'konva';
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Transformer } from 'react-konva';
 import { useEditorStore } from '@/store/editor';
-import {
-  clamp,
-  fitPhotoToFrame,
-} from '@/lib/editor/transform';
+import { clamp } from '@/lib/editor/transform';
 import {
   CROP_ROTATION_MAX_DEG,
   CROP_ROTATION_MIN_DEG,
@@ -51,49 +57,90 @@ import type { Photo } from '@/types/photo';
 
 // ---------- Stage sizing ----------
 
-/** Max long-edge of the preview Stage in CSS pixels (mobile-safe, frame_skills.md §6.2). */
-const STAGE_MAX_LONG_EDGE_PX = 720;
+/** Max long-edge of the FRAME (not the whole Stage) in CSS pixels. */
+const FRAME_MAX_LONG_EDGE_PX = 560;
+/** Stage = Frame size × (1 + 2 × PADDING_RATIO) so the photo can spill out. */
+const STAGE_PADDING_RATIO = 0.22;
 
-/** Anchor square edge length — large enough for comfortable touch (~24px). */
-const ANCHOR_SIZE_PX = 14;
-const ANCHOR_STROKE_PX = 1.5;
-const ROTATE_ANCHOR_OFFSET_PX = 28;
+/** Anchor visuals. Black fill + thick white stroke → visible on any bg. */
+const ANCHOR_SIZE_PX = 16;
+const ANCHOR_STROKE_PX = 2.5;
+const ROTATE_ANCHOR_OFFSET_PX = 32;
 
 /** Dim mask opacity for areas outside the print region. */
-const DIM_FILL = 'rgba(0, 0, 0, 0.55)';
+const DIM_FILL = 'rgba(0, 0, 0, 0.45)';
+/** Print-area guide colour (kept on permanently — no fade). */
+const GUIDE_STROKE = 'rgba(250, 204, 21, 1)'; // tailwind yellow-400
+/** Brand accent for transformer outline / handles. */
+const HANDLE_FILL = '#111111';
+const HANDLE_STROKE = '#ffffff';
+const BORDER_STROKE = '#111111';
 
-/** Compute Stage size from variant aspect, clamped to the max long edge. */
-function stageSizeForVariant(variant: ProductVariant | null): { w: number; h: number } {
-  // Fallback square when no variant yet (pre-init).
+// ---------- Stage geometry ----------
+
+type StageGeom = {
+  /** Full Stage size in CSS pixels (includes padding). */
+  w: number;
+  h: number;
+  /** Top-left of the frame rect inside the Stage. */
+  frameX: number;
+  frameY: number;
+  /** Frame rect (real product aspect). */
+  frameW: number;
+  frameH: number;
+};
+
+function stageGeometryForVariant(variant: ProductVariant | null): StageGeom {
+  // Pre-init / unknown — fall back to a square.
   if (!variant || variant.widthMm <= 0 || variant.heightMm <= 0) {
-    return { w: STAGE_MAX_LONG_EDGE_PX, h: STAGE_MAX_LONG_EDGE_PX };
+    const padX = Math.round(FRAME_MAX_LONG_EDGE_PX * STAGE_PADDING_RATIO);
+    return {
+      w: FRAME_MAX_LONG_EDGE_PX + 2 * padX,
+      h: FRAME_MAX_LONG_EDGE_PX + 2 * padX,
+      frameX: padX,
+      frameY: padX,
+      frameW: FRAME_MAX_LONG_EDGE_PX,
+      frameH: FRAME_MAX_LONG_EDGE_PX,
+    };
   }
   const ratio = variant.widthMm / variant.heightMm;
+  let frameW: number;
+  let frameH: number;
   if (ratio >= 1) {
-    return { w: STAGE_MAX_LONG_EDGE_PX, h: Math.round(STAGE_MAX_LONG_EDGE_PX / ratio) };
+    frameW = FRAME_MAX_LONG_EDGE_PX;
+    frameH = Math.round(FRAME_MAX_LONG_EDGE_PX / ratio);
+  } else {
+    frameW = Math.round(FRAME_MAX_LONG_EDGE_PX * ratio);
+    frameH = FRAME_MAX_LONG_EDGE_PX;
   }
-  return { w: Math.round(STAGE_MAX_LONG_EDGE_PX * ratio), h: STAGE_MAX_LONG_EDGE_PX };
+  const padX = Math.round(frameW * STAGE_PADDING_RATIO);
+  const padY = Math.round(frameH * STAGE_PADDING_RATIO);
+  return {
+    w: frameW + 2 * padX,
+    h: frameH + 2 * padY,
+    frameX: padX,
+    frameY: padY,
+    frameW,
+    frameH,
+  };
 }
 
-/** Convert normalized 0..1 inner_rect to Stage pixel rect. */
-function innerRectToPx(
+/** Convert normalized 0..1 inner_rect to absolute Stage pixel coords. */
+function innerRectToStagePx(
   rect: InnerRect,
-  stage: { w: number; h: number },
+  stage: StageGeom,
 ): { x: number; y: number; w: number; h: number } {
   return {
-    x: rect.x * stage.w,
-    y: rect.y * stage.h,
-    w: rect.w * stage.w,
-    h: rect.h * stage.h,
+    x: stage.frameX + rect.x * stage.frameW,
+    y: stage.frameY + rect.y * stage.frameH,
+    w: rect.w * stage.frameW,
+    h: rect.h * stage.frameH,
   };
 }
 
 // ---------- Image loader ----------
 
 function useImageBitmap(src: string): HTMLImageElement | null {
-  // Track state keyed by the src so that swapping to a new (or empty) src
-  // immediately invalidates the previous bitmap WITHOUT setState inside the
-  // effect (avoids the react-hooks/set-state-in-effect lint).
   const [entry, setEntry] = useState<{ src: string; img: HTMLImageElement | null }>(
     { src: '', img: null },
   );
@@ -105,24 +152,20 @@ function useImageBitmap(src: string): HTMLImageElement | null {
     i.onerror = () => setEntry({ src, img: null });
     i.src = src;
     return () => {
-      // Best-effort GC: unbind handlers and release src so the bitmap can be
-      // reclaimed when the component unmounts (frame_skills.md §6.2).
       i.onload = null;
       i.onerror = null;
       i.src = '';
     };
   }, [src]);
-  // Render-time invalidation: when the requested src differs from the loaded
-  // entry, return null so the canvas doesn't show a stale bitmap.
   return entry.src === src ? entry.img : null;
 }
 
 // ---------- Imperative handle for preview export ----------
 
 export type FrameCanvasHandle = {
-  /** Stage.toDataURL at retina pixelRatio, for cart preview upload (editor.md AC-9). */
+  /** Stage.toDataURL — clipped to the FRAME rect only (padding excluded). */
   toDataURL: (opts?: { pixelRatio?: number; mimeType?: string }) => string | null;
-  /** Stage CSS size — required by the print render pipeline (frame_skills.md §5.2). */
+  /** Frame CSS size — required by the print render pipeline (frame_skills.md §5.2). */
   getStageSize: () => { w: number; h: number };
 };
 
@@ -164,44 +207,40 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     );
   }, [options.variantsByKey, selectedVariantId]);
 
-  // ----- Compute Stage size + innerRect pixels -----
-  const stageSize = useMemo(() => stageSizeForVariant(variant), [variant]);
+  // ----- Stage geometry + innerRect (absolute Stage coords) -----
+  const stage = useMemo(() => stageGeometryForVariant(variant), [variant]);
   const innerRectPx = useMemo(
-    () => (frame ? innerRectToPx(frame.innerRect, stageSize) : null),
-    [frame, stageSize],
+    () => (frame ? innerRectToStagePx(frame.innerRect, stage) : null),
+    [frame, stage],
   );
 
   // ----- Load images -----
   const photoImg = useImageBitmap(photo.originalUrl);
   const frameImg = useImageBitmap(frame?.pngUrl ?? '');
 
-  // ----- Preview guide line (1.5s fade after first paint) -----
-  const [guideVisible, setGuideVisible] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setGuideVisible(false), 1500);
-    return () => clearTimeout(t);
-  }, []);
-
   // ----- Imperative API for parent (preview export, print render input) -----
   useImperativeHandle(
     ref,
     () => ({
       toDataURL: (opts) => {
-        // Hide the transformer/guide for the snapshot so they don't bleed
-        // into the cart preview.
         const tr = transformerRef.current;
-        const previousVisible = tr?.visible() ?? true;
+        const wasVisible = tr?.visible() ?? true;
         if (tr) tr.visible(false);
+        // Capture only the frame rect (skip the padding around it).
         const url = stageRef.current?.toDataURL({
+          x: stage.frameX,
+          y: stage.frameY,
+          width: stage.frameW,
+          height: stage.frameH,
           pixelRatio: opts?.pixelRatio ?? 2,
           mimeType: opts?.mimeType ?? 'image/png',
         }) ?? null;
-        if (tr) tr.visible(previousVisible);
+        if (tr) tr.visible(wasVisible);
         return url;
       },
-      getStageSize: () => stageSize,
+      getStageSize: () => ({ w: stage.frameW, h: stage.frameH }),
     }),
-    [stageSize],
+    [stage],
   );
 
   // ----- Trigger A: photo first loads or photo changes → reset to fit-cover -----
@@ -210,13 +249,18 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     if (!photoImg || !frame) return;
     if (photoIdRef.current === photo.id) return;
     photoIdRef.current = photo.id;
-    const t = fitPhotoToFrame(
-      { w: photoImg.naturalWidth, h: photoImg.naturalHeight },
-      frame.innerRect,
-      stageSize,
+    const r = innerRectToStagePx(frame.innerRect, stage);
+    const fitCover = Math.max(
+      r.w / photoImg.naturalWidth,
+      r.h / photoImg.naturalHeight,
     );
-    setCropTransform(t);
-  }, [photoImg, frame, photo.id, stageSize, setCropTransform]);
+    setCropTransform({
+      x: r.x + r.w / 2,
+      y: r.y + r.h / 2,
+      scale: clamp(fitCover, CROP_SCALE_MIN, CROP_SCALE_MAX),
+      rotation: 0,
+    });
+  }, [photoImg, frame, photo.id, stage, setCropTransform]);
 
   // ----- Trigger B: variant change (size) → re-center on new innerRect, clamp scale -----
   const lastVariantIdRef = useRef<string | null>(null);
@@ -226,7 +270,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     const previous = lastVariantIdRef.current;
     lastVariantIdRef.current = variant.id;
     if (previous === null) return;
-    const r = innerRectToPx(frame.innerRect, stageSize);
+    const r = innerRectToStagePx(frame.innerRect, stage);
     const fitCover = Math.max(
       r.w / photoImg.naturalWidth,
       r.h / photoImg.naturalHeight,
@@ -242,7 +286,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
       rotation: cropTransform.rotation,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variant?.id, photoImg, frame?.id, stageSize.w, stageSize.h]);
+  }, [variant?.id, photoImg, frame?.id, stage.w, stage.h]);
 
   // ----- Trigger C: frame (color) change → preserve cropTransform, clamp scale only -----
   const lastFrameIdRef = useRef<string | null>(null);
@@ -252,7 +296,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     const previous = lastFrameIdRef.current;
     lastFrameIdRef.current = frame.id;
     if (previous === null) return;
-    const r = innerRectToPx(frame.innerRect, stageSize);
+    const r = innerRectToStagePx(frame.innerRect, stage);
     const fitCover = Math.max(
       r.w / photoImg.naturalWidth,
       r.h / photoImg.naturalHeight,
@@ -264,7 +308,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame?.id, photoImg, stageSize.w, stageSize.h]);
+  }, [frame?.id, photoImg, stage.w, stage.h]);
 
   // ----- Attach the Transformer to the photo node whenever the photo is ready -----
   useEffect(() => {
@@ -289,7 +333,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
   /**
    * Konva Transformer drives scale via scaleX/scaleY. We commit changes to
    * the store at the end of each interaction (drag / scale / rotate).
-   * Uniform scale is enforced by only enabling corner anchors.
+   * Uniform scale is enforced by only enabling corner anchors with keepRatio.
    */
   function commitTransformFromNode(): void {
     const node = photoNodeRef.current;
@@ -315,14 +359,14 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
       <div
         className="bg-soft-cloud overflow-hidden touch-none"
         style={{
-          width: `min(100%, ${stageSize.w}px)`,
-          aspectRatio: `${stageSize.w} / ${stageSize.h}`,
+          width: `min(100%, ${stage.w}px)`,
+          aspectRatio: `${stage.w} / ${stage.h}`,
         }}
       >
         <Stage
           ref={stageRef}
-          width={stageSize.w}
-          height={stageSize.h}
+          width={stage.w}
+          height={stage.h}
           className="block max-w-full h-auto"
           style={{ width: '100%', height: '100%' }}
         >
@@ -346,15 +390,16 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
               />
             ) : null}
 
-            {/* ---- Dim mask: 4 rects around inner_rect, so the photo is
-                       visible everywhere but darkened outside the print region ---- */}
+            {/* ---- Dim mask: 4 rects covering the Stage *except* inner_rect.
+                       Photo OUTSIDE the print area becomes translucent so
+                       the user can judge what will be cropped. ---- */}
             {innerRectPx ? (
               <Group listening={false}>
-                {/* top */}
+                {/* top — from Stage top to top edge of inner_rect */}
                 <Rect
                   x={0}
                   y={0}
-                  width={stageSize.w}
+                  width={stage.w}
                   height={innerRectPx.y}
                   fill={DIM_FILL}
                 />
@@ -362,8 +407,8 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
                 <Rect
                   x={0}
                   y={innerRectPx.y + innerRectPx.h}
-                  width={stageSize.w}
-                  height={Math.max(0, stageSize.h - (innerRectPx.y + innerRectPx.h))}
+                  width={stage.w}
+                  height={Math.max(0, stage.h - (innerRectPx.y + innerRectPx.h))}
                   fill={DIM_FILL}
                 />
                 {/* left */}
@@ -378,42 +423,42 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
                 <Rect
                   x={innerRectPx.x + innerRectPx.w}
                   y={innerRectPx.y}
-                  width={Math.max(0, stageSize.w - (innerRectPx.x + innerRectPx.w))}
+                  width={Math.max(0, stage.w - (innerRectPx.x + innerRectPx.w))}
                   height={innerRectPx.h}
                   fill={DIM_FILL}
                 />
               </Group>
             ) : null}
 
-            {/* ---- Frame PNG overlay (gets drawn over dim mask + photo edges) ---- */}
+            {/* ---- Frame PNG overlay — drawn only over the frame rect ---- */}
             {frameImg ? (
               <KonvaImage
                 image={frameImg}
-                x={0}
-                y={0}
-                width={stageSize.w}
-                height={stageSize.h}
+                x={stage.frameX}
+                y={stage.frameY}
+                width={stage.frameW}
+                height={stage.frameH}
                 listening={false}
                 perfectDrawEnabled={false}
               />
             ) : null}
 
-            {/* ---- Print-area guide (fades after 1.5s, hint only) ---- */}
-            {guideVisible && innerRectPx ? (
+            {/* ---- Print-area guide — always visible (no fade) ---- */}
+            {innerRectPx ? (
               <Rect
                 x={innerRectPx.x}
                 y={innerRectPx.y}
                 width={innerRectPx.w}
                 height={innerRectPx.h}
-                stroke="rgba(255, 220, 60, 0.95)"
+                stroke={GUIDE_STROKE}
                 strokeWidth={2}
-                dash={[8, 6]}
+                dash={[10, 6]}
                 listening={false}
               />
             ) : null}
 
-            {/* ---- Transformer (8 anchors + rotate handle on the actual photo
-                       outline, drawn on top of everything so handles stay grabbable) ---- */}
+            {/* ---- Transformer (anchors + rotate handle on photo outline,
+                       drawn on top so handles stay grabbable). ---- */}
             {photoImg ? (
               <Transformer
                 ref={transformerRef}
@@ -428,18 +473,17 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
                   'bottom-right',
                 ]}
                 anchorSize={ANCHOR_SIZE_PX}
-                anchorStroke="#111"
-                anchorFill="#fff"
+                anchorStroke={HANDLE_STROKE}
+                anchorFill={HANDLE_FILL}
                 anchorStrokeWidth={ANCHOR_STROKE_PX}
-                anchorCornerRadius={2}
-                borderStroke="#111"
-                borderStrokeWidth={1}
-                borderDash={[4, 4]}
+                anchorCornerRadius={3}
+                borderStroke={BORDER_STROKE}
+                borderStrokeWidth={1.5}
+                borderDash={[6, 4]}
                 rotateAnchorOffset={ROTATE_ANCHOR_OFFSET_PX}
                 rotationSnaps={[0, 90, 180, 270]}
                 rotationSnapTolerance={4}
                 boundBoxFunc={(oldBox, newBox) => {
-                  // Reject degenerate boxes to avoid Konva NaN issues.
                   if (newBox.width < 10 || newBox.height < 10) return oldBox;
                   return newBox;
                 }}
@@ -449,7 +493,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
         </Stage>
       </div>
       <p className="mt-3 caption-md text-mute text-center">
-        사진을 드래그·핸들로 위치/크기/회전을 조정하세요. 점선 영역만 인쇄됩니다.
+        사진을 드래그·핸들로 위치/크기/회전을 조정하세요. 노란 점선 영역만 인쇄됩니다.
       </p>
     </div>
   );
