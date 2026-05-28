@@ -67,8 +67,10 @@ const ANCHOR_SIZE_PX = 16;
 const ANCHOR_STROKE_PX = 2.5;
 const ROTATE_ANCHOR_OFFSET_PX = 32;
 
-/** Dim mask opacity for areas outside the print region. */
-const DIM_FILL = 'rgba(0, 0, 0, 0.45)';
+/** Dim mask opacity for areas outside the print region.
+ *  Kept very light (alpha 0.09) so the user can still recognise the photo
+ *  outside the print region — earlier 0.45 was too heavy per UX feedback. */
+const DIM_FILL = 'rgba(0, 0, 0, 0.09)';
 /** Print-area guide colour (kept on permanently — no fade). */
 const GUIDE_STROKE = 'rgba(250, 204, 21, 1)'; // tailwind yellow-400
 /** Brand accent for transformer outline / handles. */
