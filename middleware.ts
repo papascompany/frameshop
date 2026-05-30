@@ -44,8 +44,6 @@ function hasAuthCookie(request: NextRequest): boolean {
 }
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
-  const response = NextResponse.next();
-
   const path = request.nextUrl.pathname;
   const isAdminRoute =
     path.startsWith('/admin') || path.startsWith('/api/admin');
@@ -57,8 +55,16 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
     // If env isn't ready yet (e.g. preview without Supabase), pass through.
     if (!supabaseUrl || !supabaseAnon) {
-      return response;
+      return NextResponse.next();
     }
+
+    // We need to mutate request headers so the verified identity is visible
+    // to downstream Server Components (avoids a second `getUser()` RTT in
+    // each page's `requireAdmin()` call — ~100-300 ms saved per navigation).
+    const forwardedHeaders = new Headers(request.headers);
+    const response = NextResponse.next({
+      request: { headers: forwardedHeaders },
+    });
 
     const supabase = createServerClient(supabaseUrl, supabaseAnon, {
       cookies: {
@@ -92,8 +98,16 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
       return new NextResponse('Forbidden', { status: 403 });
     }
 
+    // Forward verified identity to Server Components via request headers.
+    // `requireAdmin()` reads these and skips its own auth.getUser() call.
+    forwardedHeaders.set('x-fs-admin-user-id', user.id);
+    forwardedHeaders.set('x-fs-admin-email', user.email ?? '');
+    forwardedHeaders.set('x-fs-admin-role', 'admin');
+
     return response;
   }
+
+  const response = NextResponse.next();
 
   // ── Non-admin routes: no Supabase network call ─────────────────────────
   // Auto-issue guest session cookie for unauthenticated users on relevant routes.

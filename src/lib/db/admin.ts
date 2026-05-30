@@ -3,6 +3,8 @@
  */
 
 import 'server-only';
+import { cache } from 'react';
+import { headers } from 'next/headers';
 import { asBrand } from '@/types/common';
 import type {
   CurationId,
@@ -28,7 +30,19 @@ import {
 import { getServerSupabase } from '../supabase/server';
 import { getServiceRoleSupabase } from '../supabase/service';
 
-export async function requireAdmin(): Promise<AdminUser> {
+/**
+ * Verify the caller is an admin.
+ *
+ * Fast path: the edge middleware has already verified the session and
+ * forwarded `x-fs-admin-*` request headers — we trust those and return
+ * immediately, saving the ~100-300 ms RTT of a second `auth.getUser()` call.
+ *
+ * Fallback: when the headers are absent (e.g. a Server Action invoked
+ * outside the matched routes, or local dev without middleware) we still
+ * verify via Supabase. The fallback is wrapped in React `cache()` so
+ * repeated calls within the same Server request share a single RTT.
+ */
+const verifyAdminViaSupabase = cache(async (): Promise<AdminUser> => {
   const supabase = await getServerSupabase();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
@@ -40,6 +54,21 @@ export async function requireAdmin(): Promise<AdminUser> {
     email: user.email ?? '',
     role: 'admin',
   };
+});
+
+export async function requireAdmin(): Promise<AdminUser> {
+  const h = await headers();
+  if (h.get('x-fs-admin-role') === 'admin') {
+    const id = h.get('x-fs-admin-user-id');
+    if (id) {
+      return {
+        id: asBrand<UserId>(id),
+        email: h.get('x-fs-admin-email') ?? '',
+        role: 'admin',
+      };
+    }
+  }
+  return verifyAdminViaSupabase();
 }
 
 // ---------- Products ----------
