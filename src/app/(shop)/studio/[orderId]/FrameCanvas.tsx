@@ -40,6 +40,7 @@ import type Konva from 'konva';
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Transformer } from 'react-konva';
 import { useEditorStore } from '@/store/editor';
 import { clamp } from '@/lib/editor/transform';
+import { generatePrintCrop, type PrintCropResult } from '@/lib/editor/crop';
 import {
   CROP_ROTATION_MAX_DEG,
   CROP_ROTATION_MIN_DEG,
@@ -169,6 +170,11 @@ export type FrameCanvasHandle = {
   toDataURL: (opts?: { pixelRatio?: number; mimeType?: string }) => string | null;
   /** Frame CSS size — required by the print render pipeline (frame_skills.md §5.2). */
   getStageSize: () => { w: number; h: number };
+  /**
+   * Generate the print-ready crop of the ORIGINAL photo at full resolution,
+   * clipped to inner_rect + the product's bleed. Returns null if not ready.
+   */
+  exportPrintCrop: () => Promise<PrintCropResult | null>;
 };
 
 // ---------- Component ----------
@@ -278,8 +284,27 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
         return url;
       },
       getStageSize: () => ({ w: stage.frameW, h: stage.frameH }),
+      exportPrintCrop: async () => {
+        if (!photoImg || !frame || !variant) return null;
+        // Read the latest committed transform straight from the store so the
+        // crop reflects the user's final drag/scale/rotate.
+        const ct = useEditorStore.getState().cropTransform;
+        return generatePrintCrop({
+          photoImg,
+          cropTransform: ct,
+          innerRect: frame.innerRect,
+          bleedMm: productDetail.product.bleedMm,
+          frameWidthMm: variant.widthMm,
+          stage: {
+            frameX: stage.frameX,
+            frameY: stage.frameY,
+            frameW: stage.frameW,
+            frameH: stage.frameH,
+          },
+        });
+      },
     }),
-    [stage],
+    [stage, photoImg, frame, variant, productDetail.product.bleedMm],
   );
 
   // ----- Trigger A: photo first loads or photo changes → reset to fit-cover -----

@@ -3,6 +3,8 @@
  */
 
 import 'server-only';
+import { cache } from 'react';
+import { headers } from 'next/headers';
 import { asBrand } from '@/types/common';
 import type {
   CurationId,
@@ -28,7 +30,19 @@ import {
 import { getServerSupabase } from '../supabase/server';
 import { getServiceRoleSupabase } from '../supabase/service';
 
-export async function requireAdmin(): Promise<AdminUser> {
+/**
+ * Verify the caller is an admin.
+ *
+ * Fast path: the edge middleware has already verified the session and
+ * forwarded `x-fs-admin-*` request headers — we trust those and return
+ * immediately, saving the ~100-300 ms RTT of a second `auth.getUser()` call.
+ *
+ * Fallback: when the headers are absent (e.g. a Server Action invoked
+ * outside the matched routes, or local dev without middleware) we still
+ * verify via Supabase. The fallback is wrapped in React `cache()` so
+ * repeated calls within the same Server request share a single RTT.
+ */
+const verifyAdminViaSupabase = cache(async (): Promise<AdminUser> => {
   const supabase = await getServerSupabase();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
@@ -40,6 +54,21 @@ export async function requireAdmin(): Promise<AdminUser> {
     email: user.email ?? '',
     role: 'admin',
   };
+});
+
+export async function requireAdmin(): Promise<AdminUser> {
+  const h = await headers();
+  if (h.get('x-fs-admin-role') === 'admin') {
+    const id = h.get('x-fs-admin-user-id');
+    if (id) {
+      return {
+        id: asBrand<UserId>(id),
+        email: h.get('x-fs-admin-email') ?? '',
+        role: 'admin',
+      };
+    }
+  }
+  return verifyAdminViaSupabase();
 }
 
 // ---------- Products ----------
@@ -51,7 +80,7 @@ export async function getAllProductsAdmin(): Promise<(Product & { thumbnail: str
   const { data, error } = await supabase
     .from('products')
     .select(
-      'id, category_id, name, tagline, description, base_price, has_frame, is_active, sort_order, created_at, product_images!left(image_url, type, sort_order)',
+      'id, category_id, name, tagline, description, base_price, has_frame, is_active, sort_order, bleed_mm, created_at, product_images!left(image_url, type, sort_order)',
     )
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: false });
@@ -68,6 +97,7 @@ export async function getAllProductsAdmin(): Promise<(Product & { thumbnail: str
     has_frame: boolean;
     is_active: boolean;
     sort_order: number;
+    bleed_mm?: number | string | null;
     created_at: string;
     product_images?: Array<{ image_url: string; type: string; sort_order: number }>;
   };
@@ -105,6 +135,7 @@ export async function upsertProduct(input: ProductFormInput & { id?: ProductId }
     has_frame: input.hasFrame,
     is_active: input.isActive,
     sort_order: input.sortOrder,
+    bleed_mm: input.bleedMm,
   };
   const result = input.id
     ? await supabase.from('products').update(row).eq('id', input.id as string).select().single()

@@ -62,6 +62,8 @@ export type Product = {
   hasFrame: boolean;
   isActive: boolean;
   sortOrder: number;
+  /** Print bleed in mm added around inner_rect when generating the print crop. */
+  bleedMm: number;
   createdAt: IsoTimestamp;
 };
 

@@ -105,6 +105,27 @@ export const getProductDetail = unstable_cache(
   { revalidate: 300, tags: ['products'] },
 );
 
+/**
+ * Return every active product id — used by `generateStaticParams` to
+ * pre-render product detail pages at build time so cold-start latency is
+ * paid by CI, not the user. Cached for 5 minutes (matches detail revalidate).
+ */
+async function _getActiveProductIds(): Promise<string[]> {
+  const supabase = getAnonSupabase();
+  const { data, error } = await supabase
+    .from('products')
+    .select('id')
+    .eq('is_active', true);
+  if (error) throw new Error(`getActiveProductIds failed: ${error.message}`);
+  return (data ?? []).map((r) => (r as { id: string }).id);
+}
+
+export const getActiveProductIds = unstable_cache(
+  _getActiveProductIds,
+  ['active-product-ids'],
+  { revalidate: 300, tags: ['products'] },
+);
+
 async function _getProductOptions(id: ProductId): Promise<OptionMatrix> {
   const supabase = getAnonSupabase();
 

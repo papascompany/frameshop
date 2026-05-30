@@ -40,6 +40,7 @@ type FormState = {
   hasFrame: boolean;
   isActive: boolean;
   sortOrder: string;
+  bleedMm: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -51,6 +52,7 @@ const EMPTY_FORM: FormState = {
   hasFrame: false,
   isActive: true,
   sortOrder: '0',
+  bleedMm: '0',
 };
 
 function productToForm(p: ProductWithThumbnail): FormState {
@@ -64,6 +66,7 @@ function productToForm(p: ProductWithThumbnail): FormState {
     hasFrame: p.hasFrame,
     isActive: p.isActive,
     sortOrder: String(p.sortOrder),
+    bleedMm: String(p.bleedMm ?? 0),
   };
 }
 
@@ -129,6 +132,7 @@ export function ProductsClient({
       fd.append('hasFrame', String(form.hasFrame));
       fd.append('isActive', String(form.isActive));
       fd.append('sortOrder', form.sortOrder);
+      fd.append('bleedMm', form.bleedMm);
 
       const result = await upsertProductAction(fd);
       if (!result.ok) {
@@ -465,6 +469,17 @@ export function ProductsClient({
             value={form.sortOrder}
             onChange={(e) => setForm({ ...form, sortOrder: e.target.value })}
             hint="낮을수록 앞에 표시됩니다."
+          />
+
+          <Input
+            label="인쇄 블리드 (mm)"
+            type="number"
+            min={0}
+            max={50}
+            step={0.5}
+            value={form.bleedMm}
+            onChange={(e) => setForm({ ...form, bleedMm: e.target.value })}
+            hint="인쇄 영역(점선) 바깥으로 확장해 크롭할 여백. 재단 오차 보정용. 0 = 여백 없음."
           />
 
           {error ? (

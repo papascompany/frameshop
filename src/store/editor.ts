@@ -30,6 +30,12 @@ type State = {
   cropTransform: CropTransform;
   previewDataUrl: string | null;
   isProcessing: boolean;
+  /**
+   * The confirmed, print-ready cropped photo (full-resolution crop of the
+   * print area + bleed). Set by "사진 배치 확정". Any edit (move/scale/rotate,
+   * size or colour change) clears it so the user must re-confirm.
+   */
+  confirmedCrop: Photo | null;
 };
 
 type Actions = {
@@ -46,6 +52,7 @@ type Actions = {
   setCropTransform: (t: CropTransform) => void;
   setPreviewDataUrl: (url: string | null) => void;
   setProcessing: (flag: boolean) => void;
+  setConfirmedCrop: (photo: Photo | null) => void;
   reset: () => void;
 };
 
@@ -64,6 +71,7 @@ const initial: State = {
   cropTransform: { x: 0, y: 0, scale: 1, rotation: 0 },
   previewDataUrl: null,
   isProcessing: false,
+  confirmedCrop: null,
 };
 
 function resolveVariant(state: State, partial: Partial<SelectedOptions>): ProductVariantId | null {
@@ -98,7 +106,7 @@ export const useEditorStore = create<State & Actions>((set) => ({
         : initial.selectedOptions,
     });
   },
-  setPhoto: (photo) => set({ photo, photoId: photo.id }),
+  setPhoto: (photo) => set({ photo, photoId: photo.id, confirmedCrop: null }),
   setColor: (code) =>
     set((s) => {
       const variantId = resolveVariant(s, { colorCode: code });
@@ -106,6 +114,7 @@ export const useEditorStore = create<State & Actions>((set) => ({
       return {
         selectedOptions: { ...s.selectedOptions, colorCode: code },
         selectedVariantId: variantId,
+        confirmedCrop: null,
       };
     }),
   setSize: (code) =>
@@ -115,6 +124,7 @@ export const useEditorStore = create<State & Actions>((set) => ({
       return {
         selectedOptions: { ...s.selectedOptions, sizeCode: code },
         selectedVariantId: variantId,
+        confirmedCrop: null,
       };
     }),
   setMatte: (code) =>
@@ -124,6 +134,7 @@ export const useEditorStore = create<State & Actions>((set) => ({
       return {
         selectedOptions: { ...s.selectedOptions, matteCode: code },
         selectedVariantId: variantId,
+        confirmedCrop: null,
       };
     }),
   setPaper: (code) =>
@@ -133,11 +144,14 @@ export const useEditorStore = create<State & Actions>((set) => ({
       return {
         selectedOptions: { ...s.selectedOptions, paperCode: code },
         selectedVariantId: variantId,
+        confirmedCrop: null,
       };
     }),
-  setCropTransform: (t) => set({ cropTransform: t }),
+  // Any transform edit invalidates a previously confirmed crop.
+  setCropTransform: (t) => set({ cropTransform: t, confirmedCrop: null }),
   setPreviewDataUrl: (url) => set({ previewDataUrl: url }),
   setProcessing: (flag) => set({ isProcessing: flag }),
+  setConfirmedCrop: (photo) => set({ confirmedCrop: photo }),
   reset: () => set(initial),
 }));
 
