@@ -37,7 +37,7 @@ test.describe('User Purchase — 구매 흐름', () => {
     // 7. 결제 완료 → /order/success
   });
 
-  test.skip('회원 가입 → 로그인 → 주문 내역 확인', async ({ page }) => {
+  test.skip('회원 가입 → 로그인 → 주문 내역 확인', async () => {
     // Requires: Supabase auth, seeded order
   });
 });

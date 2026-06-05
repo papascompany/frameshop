@@ -4,7 +4,7 @@
  * - 실패해도 예외 미전파
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // notifyNewOrder는 server-only 모듈이므로 직접 import 대신
 // 내부 로직을 단위 테스트로 검증한다.
