@@ -10,12 +10,21 @@ import 'server-only';
 import { unstable_cache } from 'next/cache';
 import type { ShippingMethodConfig, ShippingMethodInput } from '@/types/shipping';
 import { mapShippingMethod } from './mappers';
+import { getAnonSupabase } from '../supabase/anon';
 import { getServerSupabase } from '../supabase/server';
 import { getServiceRoleSupabase } from '../supabase/service';
 
-/** Customer-facing: active rows only. */
+/**
+ * Customer-facing: active rows only.
+ *
+ * Uses the cookie-free `anon` client (RLS allows anon SELECT on
+ * shipping_methods — migration 012). REQUIRED because this function is wrapped
+ * in `unstable_cache` below: the cookied SSR client calls `cookies()`, a
+ * dynamic data source that throws inside a cache scope (and forces the route
+ * off the cache path). The anon client reads no cookies → genuinely cacheable.
+ */
 async function _getShippingMethods(): Promise<ShippingMethodConfig[]> {
-  const supabase = await getServerSupabase();
+  const supabase = getAnonSupabase();
   const { data, error } = await supabase
     .from('shipping_methods')
     .select('*')

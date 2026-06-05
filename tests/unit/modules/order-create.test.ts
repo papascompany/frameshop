@@ -171,6 +171,27 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 
+// `getShippingMethods` is wrapped in `unstable_cache`, which requires Next's
+// incremental-cache request context that vitest does not provide (it throws
+// "Invariant: incrementalCache missing"). Mock the db module directly so the
+// createOrder unit test exercises fee logic without the cache machinery.
+vi.mock('@/lib/db/shipping', () => ({
+  getShippingMethods: async () => [
+    {
+      id: 'sm-1',
+      code: 'STANDARD',
+      label: '일반배송',
+      fee: 3000,
+      freeThreshold: 50000,
+      note: null,
+      isActive: true,
+      sortOrder: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ],
+}));
+
 // Dynamic import after mocks are registered.
 async function importCreateOrder() {
   const mod = await import('@/lib/db/order');

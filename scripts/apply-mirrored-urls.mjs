@@ -76,7 +76,7 @@ const CURATION_FILE = resolve(
  * Returns the Supabase Storage public URL for a mirrored Unsplash photo.
  * Matches the path written by mirror-unsplash.mjs.
  */
-function mirroredUrl(photoId) {
+function _mirroredUrl(photoId) {
   return `${SUPABASE_URL}/storage/v1/object/public/marketing/unsplash/${photoId}.jpg`;
 }
 
