@@ -62,13 +62,13 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
 // Extracted from every unsplash() call in that file.
 // Update this list whenever landing-curation.ts adds new photo IDs.
 
+// NOTE: 1577083552431-6e5fd01988ec, 1565195972571-edec74b0bef8 는 Unsplash 에서
+// 삭제(404)되어 목록에서 제외함(2026-06-09). 더 이상 코드/DB 어디서도 참조하지 않음.
 const PHOTO_IDS = [
   '1513519245088-0e12902e5a38', // hero slide 1 — living room gallery wall
-  '1577083552431-6e5fd01988ec', // hero slide 2 — gallery white walls
   '1506905925346-21bda4d32df4', // hero slide 3 / landscape tile 1 — alpine fog
   '1582738411706-bfc8e691d1c2', // masterpiece tile 1 — impressionist interior
   '1554188248-986adbb73be4',    // masterpiece tile 2 — abstract on white wall
-  '1565195972571-edec74b0bef8', // masterpiece tile 3 — landscape in wood frame
   '1577720580479-7d839d829c73', // masterpiece tile 4 — black & white frames
   '1545987796-200677ee1011',    // masterpiece tile 5 — landscape interior
   '1518998053901-5348d3961a04', // masterpiece tile 6 — frame on furniture
