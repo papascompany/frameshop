@@ -32,30 +32,35 @@ BEGIN
   ------------------------------------------------------------------
   -- 1. product_images — refresh thumb + first gallery
   ------------------------------------------------------------------
+  -- NOTE: image_url 은 Supabase Storage 미러 CDN(marketing/unsplash/)을 사용합니다.
+  -- 원본 Unsplash hot-link 는 takedown/404 위험이 있어 scripts/mirror-unsplash.mjs 로
+  -- 미러링한 뒤 DB URL 을 갱신했습니다(2026-06-09). 미러 헬퍼: src/data/landing-curation.ts `mirrored()`.
   UPDATE product_images
-     SET image_url = 'https://images.unsplash.com/photo-1513519245088-0e12902e5a38?w=1200&q=85&auto=format&fit=crop',
+     SET image_url = 'https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/1513519245088-0e12902e5a38.jpg',
          alt_text  = '베이직 액자 — 거실 갤러리 컨셉'
    WHERE id = '00000000-0000-0000-0000-000000000201';
 
   UPDATE product_images
-     SET image_url = 'https://images.unsplash.com/photo-1582738411706-bfc8e691d1c2?w=1600&q=85&auto=format&fit=crop',
+     SET image_url = 'https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/1582738411706-bfc8e691d1c2.jpg',
          alt_text  = '베이직 액자 — 명화 컬렉션 디스플레이'
    WHERE id = '00000000-0000-0000-0000-000000000202';
 
   ------------------------------------------------------------------
   -- 2. product_images — additional gallery + guide rows
   ------------------------------------------------------------------
+  -- 1565195972571-edec74b0bef8 은 Unsplash 에서 삭제(404)되어 미러 불가 →
+  -- 1518998053901-5348d3961a04(프레임/가구, 동일 컨셉)로 대체.
   INSERT INTO product_images (product_id, image_url, alt_text, type, sort_order)
   VALUES
-    (product_id, 'https://images.unsplash.com/photo-1565195972571-edec74b0bef8?w=1600&q=85&auto=format&fit=crop',
+    (product_id, 'https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/1518998053901-5348d3961a04.jpg',
        '우드 프레임 — 자연광', 'gallery', 1),
-    (product_id, 'https://images.unsplash.com/photo-1597423498219-04418210827d?w=1600&q=85&auto=format&fit=crop',
+    (product_id, 'https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/1597423498219-04418210827d.jpg',
        '갤러리 월 — 사이즈 혼합 배치', 'gallery', 2),
-    (product_id, 'https://images.unsplash.com/photo-1556015048-4d3aa10df74c?w=1600&q=85&auto=format&fit=crop',
+    (product_id, 'https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/1556015048-4d3aa10df74c.jpg',
        '화이트 매트 — 사진 디테일', 'gallery', 3),
-    (product_id, 'https://images.unsplash.com/photo-1452860606245-08befc0ff44b?w=1600&q=85&auto=format&fit=crop',
+    (product_id, 'https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/1452860606245-08befc0ff44b.jpg',
        '제작 과정 — 작업실', 'guide', 0),
-    (product_id, 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1600&q=85&auto=format&fit=crop',
+    (product_id, 'https://acxsxjmqgvkceqahwkpz.supabase.co/storage/v1/object/public/marketing/unsplash/1607082348824-0a96f2a4b9da.jpg',
        '포장 및 배송', 'guide', 1)
   ON CONFLICT DO NOTHING;
 
