@@ -18,6 +18,9 @@ import { z } from 'zod';
 import { isSameOrigin } from '@/lib/security/same-origin';
 import { checkLoginRate, resetLoginRate } from '@/lib/login-ratelimit';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { claimGuestOrdersByEmail } from '@/lib/db/order';
+import { asBrand } from '@/types/common';
+import type { UserId } from '@/types/common';
 
 const bodySchema = z.object({
   email: z.string().email().max(254),
@@ -63,7 +66,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const supabase = await getServerSupabase();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
     // Do NOT reset the bucket on failure — allow the counter to accumulate.
@@ -77,6 +80,15 @@ export async function POST(request: Request): Promise<Response> {
   // Reset rate limit bucket on successful login.
   resetLoginRate(email);
   console.info(JSON.stringify({ event: 'login_success', domain: email.split('@')[1] }));
+
+  // Link any guest orders placed with this (now-verified) email to the account
+  // so they show up in /account/orders. Best-effort — must not block login.
+  if (data.user?.id) {
+    const claimed = await claimGuestOrdersByEmail(asBrand<UserId>(data.user.id), email);
+    if (claimed > 0) {
+      console.info(JSON.stringify({ event: 'guest_orders_claimed', count: claimed }));
+    }
+  }
 
   return NextResponse.json({ ok: true }, { status: 200 });
 }

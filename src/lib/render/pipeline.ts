@@ -167,9 +167,16 @@ export async function renderOrderItemPrint(
   const innerRect = sanitiseInnerRect(frame.inner_rect);
 
   // 6. Fetch photo + frame bytes.
+  //
+  // The `photo_url` snapshotted on the order is a short-lived signed URL minted
+  // at upload time and will have EXPIRED by the time the render runs (renders
+  // happen on payment confirmation, typically well after upload). Re-sign from
+  // the photo's durable `storage_path` so the fetch always uses a fresh URL.
+  // Falls back to the stored URL for legacy/external photos with no path.
+  const photoFetchUrl = await resolveFreshPhotoUrl(supabase, item.photo_url);
   let photoBuffer: Buffer;
   try {
-    photoBuffer = await fetchAsBuffer(item.photo_url);
+    photoBuffer = await fetchAsBuffer(photoFetchUrl);
   } catch (err) {
     return {
       ok: false,
@@ -306,6 +313,44 @@ function isAllowedImageHost(rawUrl: string): boolean {
   if (hostname === 'images.unsplash.com' || hostname === 'plus.unsplash.com') return true;
 
   return false;
+}
+
+const PHOTOS_BUCKET = 'photos';
+/** Fresh signed-URL TTL for re-signing a photo at render time (1 hour is plenty
+ *  — the URL is used immediately for the render fetch and then discarded). */
+const RENDER_PHOTO_SIGN_TTL = 60 * 60;
+
+/**
+ * Resolve a currently-valid URL for an order item's photo.
+ *
+ * Order items store the signed URL captured at upload time, which expires long
+ * before the render runs. We look the photo up by its stored `original_url`
+ * (an exact match — the same string was persisted on both rows) to recover the
+ * durable `storage_path`, then mint a fresh signed URL. If the photo has no
+ * row/path (e.g. legacy or external artwork URLs), we fall back to the stored
+ * URL and let the SSRF-guarded fetch try it directly.
+ */
+async function resolveFreshPhotoUrl(
+  supabase: ReturnType<typeof getServiceRoleSupabase>,
+  storedPhotoUrl: string,
+): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('photos')
+      .select('storage_path')
+      .eq('original_url', storedPhotoUrl)
+      .maybeSingle();
+    const storagePath = (data as { storage_path: string | null } | null)?.storage_path;
+    if (storagePath) {
+      const signed = await supabase.storage
+        .from(PHOTOS_BUCKET)
+        .createSignedUrl(storagePath, RENDER_PHOTO_SIGN_TTL);
+      if (signed.data?.signedUrl) return signed.data.signedUrl;
+    }
+  } catch {
+    // Non-fatal — fall back to the stored URL below.
+  }
+  return storedPhotoUrl;
 }
 
 async function fetchAsBuffer(url: string): Promise<Buffer> {

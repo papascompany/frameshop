@@ -73,7 +73,15 @@ export class PhotoUploadError extends Error {
 // ---------- Constants ----------
 
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
-export const LONG_EDGE_RESIZE_PX = 1600;
+/**
+ * Client-side pre-upload resize cap (long edge, px).
+ *
+ * Sized for print quality: the largest product is 11×14 in (~14 in long edge),
+ * so 2400 px ≈ 171 DPI on the biggest size and 300+ DPI on 4×6 / 5×7 / 8×10.
+ * (Was 1600 px ≈ 114 DPI on 11×14 — visibly soft for large prints.) Kept below
+ * a true 300 DPI master (~4200 px) to bound mobile memory and upload size.
+ */
+export const LONG_EDGE_RESIZE_PX = 2400;
 export const THUMB_LONG_EDGE_PX = 400;
 export const ALLOWED_PHOTO_MIME = [
   'image/jpeg',

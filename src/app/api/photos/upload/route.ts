@@ -105,9 +105,13 @@ export async function POST(request: Request): Promise<Response> {
   // Magic-byte / container validation (P1-05 fix). `file.type` is set by the
   // browser and can be spoofed; sharp inspects the actual bytes.
   let detectedFormat: string | undefined;
+  let detectedWidth: number | undefined;
+  let detectedHeight: number | undefined;
   try {
     const meta = await sharp(bytes).metadata();
     detectedFormat = meta.format;
+    detectedWidth = meta.width;
+    detectedHeight = meta.height;
   } catch (err) {
     return NextResponse.json(
       {
@@ -194,10 +198,13 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // SECURITY FIX (CRITICAL-001): photos bucket is now private.
-  // Generate short-lived signed URLs (1 h) for the immediate client response.
-  // The storage *paths* are persisted in the DB so fresh signed URLs can be
-  // generated at any time via the service-role key.
-  const SIGNED_URL_TTL = 3600; // 1 hour — editor session lifetime
+  // Generate signed URLs for client display. The storage *paths* are persisted
+  // so fresh signed URLs can be regenerated at any time via the service-role
+  // key (see render pipeline `resolveFreshPhotoUrl`). TTL is 7 days so the
+  // cart/checkout/preview window doesn't break the displayed image if the user
+  // takes a while between uploading and ordering (was 1 h — too short, a cart
+  // older than an hour showed a broken thumbnail).
+  const SIGNED_URL_TTL = 7 * 24 * 3600; // 7 days
 
   const [origSigned, thumbSigned] = await Promise.all([
     supabaseSvc.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL),
@@ -228,6 +235,10 @@ export async function POST(request: Request): Promise<Response> {
       thumbUrl,
       storagePath: path,
       thumbPath,
+      // Persist intrinsic dimensions (from sharp metadata) so consumers don't
+      // have to decode the bitmap to learn its size.
+      ...(detectedWidth ? { widthPx: detectedWidth } : {}),
+      ...(detectedHeight ? { heightPx: detectedHeight } : {}),
     });
     return NextResponse.json({ ok: true, photo }, { status: 200 });
   } catch (err) {

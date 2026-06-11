@@ -327,7 +327,8 @@ export function StudioClient({
                 {placing ? '사진 배치 확정 중…' : '사진 배치 확정'}
               </Button>
               <p className="text-xs text-muted-fg">
-                점선(인쇄 영역)에 맞춰 원본 화질 그대로 잘라낸 이미지를 만듭니다.
+                점선(인쇄 영역)에 맞춰 고해상도 인쇄용 이미지를 만듭니다. 큰 사이즈는
+                원본 사진의 해상도가 높을수록 더 선명하게 인쇄됩니다.
               </p>
             </div>
           ) : (
