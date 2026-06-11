@@ -12,6 +12,8 @@ import {
   startProductionAction,
   shipOrderAction,
   markDeliveredAction,
+  cancelOrderAction,
+  refundOrderAction,
 } from '../actions';
 
 type BadgeVariant = 'default' | 'accent' | 'dark' | 'success' | 'warning';
@@ -44,8 +46,15 @@ export function AdminOrderDetailClient({ order }: Props) {
   const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Inline cancel/refund flow: null = idle, otherwise the pending action with
+  // its reason text. Requires an explicit confirm + non-empty reason.
+  const [pendingAction, setPendingAction] = useState<null | 'cancel' | 'refund'>(null);
+  const [reason, setReason] = useState('');
 
   const badge = STATUS_BADGE[status];
+  // CREATED / PAID / IN_PRODUCTION can be cancelled; PAID / DELIVERED can be refunded.
+  const canCancel = status === 'CREATED' || status === 'PAID' || status === 'IN_PRODUCTION';
+  const canRefund = status === 'PAID' || status === 'DELIVERED';
 
   async function handleStartProduction() {
     setLoading(true);
@@ -68,6 +77,10 @@ export function AdminOrderDetailClient({ order }: Props) {
       setError('운송장번호를 입력해주세요.');
       return;
     }
+    // Shipping sends a customer email — confirm to avoid mis-click.
+    if (!window.confirm(`${courier} ${trackingNumber.trim()} 운송장으로 출하 처리하고 고객에게 배송 알림을 보냅니다. 계속할까요?`)) {
+      return;
+    }
     setLoading(true);
     setError(null);
     const result = await shipOrderAction(order.id as string, courier, trackingNumber.trim());
@@ -80,12 +93,42 @@ export function AdminOrderDetailClient({ order }: Props) {
   }
 
   async function handleDelivered() {
+    if (!window.confirm('배송완료로 변경합니다. 계속할까요?')) return;
     setLoading(true);
     setError(null);
     const result = await markDeliveredAction(order.id as string);
     setLoading(false);
     if (result.ok) {
       setStatus('DELIVERED');
+    } else {
+      setError(result.error ?? '처리 실패');
+    }
+  }
+
+  async function handleConfirmCancelOrRefund() {
+    if (!pendingAction) return;
+    if (reason.trim().length === 0) {
+      setError(pendingAction === 'cancel' ? '취소 사유를 입력해주세요.' : '환불 사유를 입력해주세요.');
+      return;
+    }
+    const isPaid = Boolean(order.paymentId);
+    const verb = pendingAction === 'cancel' ? '취소' : '환불';
+    const msg = isPaid
+      ? `결제 금액 ${order.totalPrice.toLocaleString('ko-KR')}원을 환불하고 주문을 ${verb} 처리합니다. 되돌릴 수 없습니다. 계속할까요?`
+      : `주문을 ${verb} 처리합니다. 되돌릴 수 없습니다. 계속할까요?`;
+    if (!window.confirm(msg)) return;
+
+    setLoading(true);
+    setError(null);
+    const result =
+      pendingAction === 'cancel'
+        ? await cancelOrderAction(order.id as string, reason.trim())
+        : await refundOrderAction(order.id as string, reason.trim());
+    setLoading(false);
+    if (result.ok) {
+      setStatus(pendingAction === 'cancel' ? 'CANCELLED' : 'REFUNDED');
+      setPendingAction(null);
+      setReason('');
     } else {
       setError(result.error ?? '처리 실패');
     }
@@ -251,8 +294,75 @@ export function AdminOrderDetailClient({ order }: Props) {
           </Button>
         )}
 
-        {(status === 'DELIVERED' || status === 'CANCELLED' || status === 'REFUNDED' || status === 'CREATED') && (
-          <p className="text-sm text-muted-fg">현재 상태에서 전환 가능한 액션이 없습니다.</p>
+        {status === 'CREATED' && (
+          <p className="text-sm text-muted-fg mb-3">
+            결제 대기 중입니다. 필요 시 아래에서 주문을 취소할 수 있습니다.
+          </p>
+        )}
+
+        {(status === 'CANCELLED' || status === 'REFUNDED') && (
+          <p className="text-sm text-muted-fg">
+            {status === 'CANCELLED' ? '취소된 주문입니다.' : '환불된 주문입니다.'} 추가 전환은 없습니다.
+          </p>
+        )}
+
+        {/* 취소 / 환불 */}
+        {(canCancel || canRefund) && (
+          <div className="mt-5 pt-5 border-t border-border">
+            {pendingAction === null ? (
+              <div className="flex flex-wrap gap-2">
+                {canCancel && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => { setPendingAction('cancel'); setError(null); }}
+                    disabled={loading}
+                  >
+                    주문 취소
+                  </Button>
+                )}
+                {canRefund && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => { setPendingAction('refund'); setError(null); }}
+                    disabled={loading}
+                  >
+                    환불
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm font-medium">
+                  {pendingAction === 'cancel' ? '주문 취소' : '환불'}
+                  {order.paymentId ? ` — 결제 ${order.totalPrice.toLocaleString('ko-KR')}원이 환불됩니다.` : ''}
+                </p>
+                <Input
+                  label="사유"
+                  placeholder={pendingAction === 'cancel' ? '취소 사유' : '환불 사유'}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  disabled={loading}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={() => void handleConfirmCancelOrRefund()}
+                    loading={loading}
+                    disabled={loading}
+                  >
+                    {pendingAction === 'cancel' ? '취소 확정' : '환불 확정'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => { setPendingAction(null); setReason(''); setError(null); }}
+                    disabled={loading}
+                  >
+                    닫기
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </Card>
     </div>

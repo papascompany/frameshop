@@ -371,32 +371,57 @@ export async function getOrdersByUser(userId: UserId): Promise<OrderWithItems[]>
   });
 }
 
-// ---------- getAllOrders (admin) ----------
+// ---------- getAllOrdersPaged (admin) ----------
+// (replaces the former getAllOrders 100-row hard cap — see below)
 
 /**
- * 전체 주문 목록 (관리자용). created_at DESC, 최대 limit건.
- * order_items를 조인하여 OrderWithItems 배열 반환.
+ * 페이지네이션 + 서버사이드 상태 필터 (관리자 주문 목록).
+ *
+ * 기존 getAllOrders(100건 하드캡 + 클라이언트 필터)는 주문이 100건을 넘으면
+ * 오래된 주문이 보이지 않고 탭 필터도 잘린 100건 안에서만 동작했다. 이 함수는
+ * status 를 DB 에서 필터하고 range 로 페이지를 끊어 모든 주문에 접근 가능하게 한다.
  */
-export async function getAllOrders(limit = 100): Promise<OrderWithItems[]> {
+export async function getAllOrdersPaged(args: {
+  page?: number;
+  pageSize?: number;
+  status?: OrderStatus | null;
+}): Promise<{
+  items: OrderWithItems[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}> {
   const supabase = getServiceRoleSupabase();
+  const page = Math.max(1, args.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, args.pageSize ?? 20));
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
 
-  const { data: orderRows, error } = await supabase
+  let query = supabase
     .from('orders')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(limit);
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false });
+  if (args.status) {
+    query = query.eq('status', args.status);
+  }
+  query = query.range(from, to);
 
-  if (error) throw new Error(`getAllOrders: ${error.message}`);
-  if (!orderRows || orderRows.length === 0) return [];
+  const { data: orderRows, count, error } = await query;
+  if (error) throw new Error(`getAllOrdersPaged: ${error.message}`);
 
-  const orderIds = orderRows.map((r) => (r as { id: string }).id);
+  const rows = orderRows ?? [];
+  const total = count ?? rows.length;
+  if (rows.length === 0) {
+    return { items: [], total, page, pageSize, hasMore: false };
+  }
 
+  const orderIds = rows.map((r) => (r as { id: string }).id);
   const { data: itemRows, error: itemErr } = await supabase
     .from('order_items')
     .select('*')
     .in('order_id', orderIds);
-
-  if (itemErr) throw new Error(`getAllOrders items: ${itemErr.message}`);
+  if (itemErr) throw new Error(`getAllOrdersPaged items: ${itemErr.message}`);
 
   const itemsByOrderId = new Map<string, OrderItem[]>();
   for (const row of itemRows ?? []) {
@@ -406,12 +431,12 @@ export async function getAllOrders(limit = 100): Promise<OrderWithItems[]> {
     itemsByOrderId.set(r.order_id, existing);
   }
 
-  return orderRows.map((row) => {
+  const items = rows.map((row) => {
     const r = row as { id: string };
-    const order = mapOrder(row);
-    const items = itemsByOrderId.get(r.id) ?? [];
-    return { ...order, items };
+    return { ...mapOrder(row), items: itemsByOrderId.get(r.id) ?? [] };
   });
+
+  return { items, total, page, pageSize, hasMore: from + items.length < total };
 }
 
 // ---------- attach paymentKey (used by confirm route) ----------
