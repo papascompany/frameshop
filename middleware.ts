@@ -48,6 +48,15 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   const isAdminRoute =
     path.startsWith('/admin') || path.startsWith('/api/admin');
 
+  // ── SECURITY: strip any client-supplied internal auth headers on EVERY
+  // request. These names are reserved for trusted server-internal use; if a
+  // client could smuggle them through, a downstream handler might mistake a
+  // forged header for a verified identity. We forward the sanitized headers.
+  const sanitizedHeaders = new Headers(request.headers);
+  sanitizedHeaders.delete('x-fs-admin-user-id');
+  sanitizedHeaders.delete('x-fs-admin-email');
+  sanitizedHeaders.delete('x-fs-admin-role');
+
   // ── Admin routes: full Supabase session verification ──────────────────
   if (isAdminRoute) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -55,15 +64,11 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
 
     // If env isn't ready yet (e.g. preview without Supabase), pass through.
     if (!supabaseUrl || !supabaseAnon) {
-      return NextResponse.next();
+      return NextResponse.next({ request: { headers: sanitizedHeaders } });
     }
 
-    // We need to mutate request headers so the verified identity is visible
-    // to downstream Server Components (avoids a second `getUser()` RTT in
-    // each page's `requireAdmin()` call — ~100-300 ms saved per navigation).
-    const forwardedHeaders = new Headers(request.headers);
     const response = NextResponse.next({
-      request: { headers: forwardedHeaders },
+      request: { headers: sanitizedHeaders },
     });
 
     const supabase = createServerClient(supabaseUrl, supabaseAnon, {
@@ -98,16 +103,14 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
       return new NextResponse('Forbidden', { status: 403 });
     }
 
-    // Forward verified identity to Server Components via request headers.
-    // `requireAdmin()` reads these and skips its own auth.getUser() call.
-    forwardedHeaders.set('x-fs-admin-user-id', user.id);
-    forwardedHeaders.set('x-fs-admin-email', user.email ?? '');
-    forwardedHeaders.set('x-fs-admin-role', 'admin');
-
+    // NOTE: admin identity is re-verified server-side in `requireAdmin()`
+    // (Supabase session, cache()-wrapped). We deliberately do NOT forward a
+    // trusted identity header — Server Actions can be POSTed to any path, so
+    // a header is not a sound auth channel.
     return response;
   }
 
-  const response = NextResponse.next();
+  const response = NextResponse.next({ request: { headers: sanitizedHeaders } });
 
   // ── Non-admin routes: no Supabase network call ─────────────────────────
   // Auto-issue guest session cookie for unauthenticated users on relevant routes.

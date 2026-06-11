@@ -100,11 +100,15 @@ async function _getProductsByCategory(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
+  // PERF: `count: 'planned'` uses the Postgres planner's row estimate instead
+  // of an exact COUNT(*) full scan on every catalog/landing call. `total`/
+  // `hasMore` are pagination hints, so an estimate is acceptable and avoids the
+  // count scan dominating the query (esp. the landing call with pageSize=3).
   let query = supabase
     .from('products')
     .select(
       'id, category_id, name, tagline, description, base_price, has_frame, is_active, sort_order, created_at, product_images!left(image_url, type, sort_order)',
-      { count: 'exact' },
+      { count: 'planned' },
     )
     .eq('category_id', cat.id as string)
     .eq('is_active', true);

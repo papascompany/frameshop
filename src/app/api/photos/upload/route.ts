@@ -69,12 +69,18 @@ export async function POST(request: Request): Promise<Response> {
   const supabaseUser = await getServerSupabase();
   const { data: userData } = await supabaseUser.auth.getUser();
   const userId = userData.user?.id ?? null;
+
+  // SECURITY: the guest sessionId is concatenated into the Storage object path
+  // (`anon/<sessionId>/...`). Restrict it to a safe token charset so a value
+  // containing `/` or `..` cannot escape the `anon/` namespace (path injection).
+  const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/;
   const sessionId =
-    typeof sessionIdRaw === 'string' && sessionIdRaw.length > 0
+    typeof sessionIdRaw === 'string' && SAFE_SESSION_ID.test(sessionIdRaw)
       ? sessionIdRaw
       : null;
 
   if (!userId && !sessionId) {
+    // Either no owner at all, or a malformed/unsafe sessionId was supplied.
     return NextResponse.json(
       { ok: false, code: 'NO_OWNER' },
       { status: 400 },

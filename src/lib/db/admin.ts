@@ -4,7 +4,6 @@
 
 import 'server-only';
 import { cache } from 'react';
-import { headers } from 'next/headers';
 import { asBrand } from '@/types/common';
 import type {
   CurationId,
@@ -31,18 +30,17 @@ import { getServerSupabase } from '../supabase/server';
 import { getServiceRoleSupabase } from '../supabase/service';
 
 /**
- * Verify the caller is an admin.
+ * Verify the caller is an admin via the Supabase session (JWT app_metadata.role).
  *
- * Fast path: the edge middleware has already verified the session and
- * forwarded `x-fs-admin-*` request headers — we trust those and return
- * immediately, saving the ~100-300 ms RTT of a second `auth.getUser()` call.
- *
- * Fallback: when the headers are absent (e.g. a Server Action invoked
- * outside the matched routes, or local dev without middleware) we still
- * verify via Supabase. The fallback is wrapped in React `cache()` so
- * repeated calls within the same Server request share a single RTT.
+ * SECURITY: we intentionally do NOT trust any request header (e.g. a
+ * middleware-forwarded `x-fs-admin-*`) as an auth source. Next.js Server
+ * Actions are dispatched by action id and can be POSTed to ANY route path,
+ * so a request header is attacker-controllable on paths the admin-route
+ * middleware branch never processes. Always re-verifying the session here is
+ * the only sound model. The check is wrapped in React `cache()` so multiple
+ * `requireAdmin()` calls within the same Server request share a single RTT.
  */
-const verifyAdminViaSupabase = cache(async (): Promise<AdminUser> => {
+export const requireAdmin = cache(async (): Promise<AdminUser> => {
   const supabase = await getServerSupabase();
   const { data: userData } = await supabase.auth.getUser();
   const user = userData.user;
@@ -55,21 +53,6 @@ const verifyAdminViaSupabase = cache(async (): Promise<AdminUser> => {
     role: 'admin',
   };
 });
-
-export async function requireAdmin(): Promise<AdminUser> {
-  const h = await headers();
-  if (h.get('x-fs-admin-role') === 'admin') {
-    const id = h.get('x-fs-admin-user-id');
-    if (id) {
-      return {
-        id: asBrand<UserId>(id),
-        email: h.get('x-fs-admin-email') ?? '',
-        role: 'admin',
-      };
-    }
-  }
-  return verifyAdminViaSupabase();
-}
 
 // ---------- Products ----------
 
@@ -191,36 +174,51 @@ export async function importVariants(
 ): Promise<ImportReport> {
   await requireAdmin();
   const supabase = getServiceRoleSupabase();
-  let inserted = 0;
   const updated = 0; // Supabase upsert doesn't distinguish insert vs update; always 0.
-  let skipped = 0;
   const errors: ImportReport['errors'] = [];
 
+  if (rows.length === 0) {
+    return { inserted: 0, updated, skipped: 0, errors };
+  }
+
+  const ONCONFLICT = 'product_id,size_code,color_code,matte_code,paper_code';
+  const toRow = (row: VariantInput) => ({
+    product_id: productId as string,
+    size_code: row.sizeCode,
+    size_label: row.sizeLabel,
+    width_mm: row.widthMm,
+    height_mm: row.heightMm,
+    color_code: row.colorCode,
+    matte_code: row.matteCode,
+    paper_code: row.paperCode,
+    price: row.price,
+    stock: row.stock,
+    is_active: row.isActive,
+  });
+
+  // Fast path: a single batched upsert (1 round-trip instead of N).
+  const batch = await supabase
+    .from('product_variants')
+    .upsert(rows.map(toRow), { onConflict: ONCONFLICT });
+
+  if (!batch.error) {
+    return { inserted: rows.length, updated, skipped: 0, errors };
+  }
+
+  // Slow path: the batch failed (e.g. one bad row aborts the statement).
+  // Fall back to per-row upserts so we can attribute the error and still
+  // import the valid rows. Only runs on the rare failure case.
+  let inserted = 0;
+  let skipped = 0;
   for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]!;
     const { error } = await supabase
       .from('product_variants')
-      .upsert(
-        {
-          product_id: productId as string,
-          size_code: row.sizeCode,
-          size_label: row.sizeLabel,
-          width_mm: row.widthMm,
-          height_mm: row.heightMm,
-          color_code: row.colorCode,
-          matte_code: row.matteCode,
-          paper_code: row.paperCode,
-          price: row.price,
-          stock: row.stock,
-          is_active: row.isActive,
-        },
-        { onConflict: 'product_id,size_code,color_code,matte_code,paper_code' },
-      );
+      .upsert(toRow(rows[i]!), { onConflict: ONCONFLICT });
     if (error) {
       skipped++;
       errors.push({ row: i + 1, field: 'upsert', message: error.message });
     } else {
-      inserted++; // Supabase doesn't distinguish insert vs update on upsert in JS client; count as inserted.
+      inserted++;
     }
   }
   return { inserted, updated, skipped, errors };
