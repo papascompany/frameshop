@@ -327,6 +327,38 @@ export async function findOrderByGuest(
   return result;
 }
 
+/**
+ * Link guest orders (user_id IS NULL) placed with the given email to a now
+ * authenticated account, so they appear under /account/orders.
+ *
+ * SAFETY: only call this with an email the caller has just authenticated as
+ * (e.g. right after a successful sign-in). The orderer email was entered at
+ * checkout; matching it to the logged-in user's verified email is the link key.
+ * Returns the number of orders claimed. Best-effort — never throws.
+ */
+export async function claimGuestOrdersByEmail(
+  userId: UserId,
+  email: string,
+): Promise<number> {
+  try {
+    const supabase = getServiceRoleSupabase();
+    const { data, error } = await supabase
+      .from('orders')
+      .update({ user_id: userId as string })
+      .is('user_id', null)
+      .eq('orderer->>email', email)
+      .select('id');
+    if (error) {
+      console.warn(`claimGuestOrdersByEmail: ${error.message}`);
+      return 0;
+    }
+    return (data ?? []).length;
+  } catch (err) {
+    console.warn('claimGuestOrdersByEmail threw:', err);
+    return 0;
+  }
+}
+
 // ---------- getOrdersByUser ----------
 
 /**
