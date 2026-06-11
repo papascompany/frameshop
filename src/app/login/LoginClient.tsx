@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
+import { syncCartOnLogin } from '@/lib/cart/client';
 
 type Props = {
   /** Where to navigate after a successful sign-in. Already validated as
@@ -48,6 +49,15 @@ export function LoginClient({ redirectTo }: Props) {
         setError(json.message ?? '로그인에 실패했습니다.');
         setSubmitting(false);
         return;
+      }
+      // Merge any guest (LocalStorage) cart into the now-authenticated server
+      // cart before navigating away — otherwise the guest cart silently
+      // disappears once getCart() switches to the server source. Best-effort:
+      // a sync failure must not block login.
+      try {
+        await syncCartOnLogin();
+      } catch {
+        /* non-fatal — server cart will simply lack the guest items */
       }
       const safeTarget = isSameOriginPath(redirectTo) ? redirectTo : '/admin';
       window.location.assign(safeTarget);

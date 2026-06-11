@@ -27,6 +27,14 @@ export function verifyWebhook(
   signature: string,
   secret: string,
 ): WebhookVerifyResult {
+  // SECURITY: never verify against an empty/whitespace secret. A misconfigured
+  // (unset/blank) secret would otherwise compute an attacker-reproducible HMAC,
+  // letting anyone forge a valid signature for an arbitrary payload. Likewise
+  // an empty incoming signature is always invalid.
+  if (secret.trim().length === 0 || signature.trim().length === 0) {
+    return { valid: false };
+  }
+
   const expected = computeSignature(rawBody, secret);
   if (!constantTimeEquals(expected, signature)) {
     return { valid: false };

@@ -7,6 +7,7 @@
  */
 
 import 'server-only';
+import { revalidateTag, unstable_cache } from 'next/cache';
 import { getAnonSupabase } from '@/lib/supabase/anon';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
@@ -50,41 +51,50 @@ function mapRow(row: Record<string, unknown>): Review {
 
 // ─── 공개 조회 ───────────────────────────────────────────────────────────────
 
-export async function getProductReviews(
-  productId: string,
-  limit = 20,
-): Promise<Review[]> {
-  const supabase = getAnonSupabase();
-  const { data, error } = await supabase
-    .from('reviews')
-    .select('*')
-    .eq('product_id', productId)
-    .eq('is_public', true)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+// Public review reads are cached (300s, tag 'reviews'). They render on the
+// landing page (getRecentPublicReviews) and product detail (getProductReviews),
+// both hot paths — without caching each render hit a live Supabase RTT.
+// createReview / toggleReviewPublic call revalidateTag('reviews', 'max') to flush.
+export const getProductReviews = unstable_cache(
+  async (productId: string, limit = 20): Promise<Review[]> => {
+    const supabase = getAnonSupabase();
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('product_id', productId)
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .limit(limit);
 
-  if (error) {
-    console.error('[reviews] getProductReviews error:', error.message);
-    return [];
-  }
-  return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
-}
+    if (error) {
+      console.error('[reviews] getProductReviews error:', error.message);
+      return [];
+    }
+    return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+  },
+  ['product-reviews'],
+  { revalidate: 300, tags: ['reviews'] },
+);
 
-export async function getRecentPublicReviews(limit = 5): Promise<Review[]> {
-  const supabase = getAnonSupabase();
-  const { data, error } = await supabase
-    .from('reviews')
-    .select('*')
-    .eq('is_public', true)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+export const getRecentPublicReviews = unstable_cache(
+  async (limit = 5): Promise<Review[]> => {
+    const supabase = getAnonSupabase();
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('is_public', true)
+      .order('created_at', { ascending: false })
+      .limit(limit);
 
-  if (error) {
-    console.error('[reviews] getRecentPublicReviews error:', error.message);
-    return [];
-  }
-  return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
-}
+    if (error) {
+      console.error('[reviews] getRecentPublicReviews error:', error.message);
+      return [];
+    }
+    return (data ?? []).map((row) => mapRow(row as Record<string, unknown>));
+  },
+  ['recent-public-reviews'],
+  { revalidate: 300, tags: ['reviews'] },
+);
 
 export async function getOrderReview(orderId: string): Promise<Review | null> {
   // LOW-004 FIX: use service-role client so private (is_public=false) reviews
@@ -127,6 +137,7 @@ export async function createReview(input: CreateReviewInput): Promise<Review> {
   if (error || !data) {
     throw new Error(`[reviews] createReview failed: ${error?.message ?? 'no data'}`);
   }
+  revalidateTag('reviews', 'max');
   return mapRow(data as Record<string, unknown>);
 }
 
@@ -159,4 +170,5 @@ export async function toggleReviewPublic(
   if (error) {
     throw new Error(`[reviews] toggleReviewPublic failed: ${error.message}`);
   }
+  revalidateTag('reviews', 'max');
 }
