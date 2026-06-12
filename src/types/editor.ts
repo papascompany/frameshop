@@ -31,6 +31,29 @@ export type CropTransform = {
   rotation: number;
 };
 
+// ---------- Multi-photo tray (M-Editor v2) ----------
+
+/**
+ * One confirmed photo ready to be ordered. Multiple entries share the SAME
+ * selectedOptions/variant (그룹 주문). Each entry holds the already-confirmed,
+ * print-ready crop (re-uploaded full-res Photo) + its copy quantity.
+ *
+ * The crop is baked at "담기" time using the active variant geometry, so the
+ * stored `photo` is the cropped print master and needs only an identity
+ * transform downstream. Size changes invalidate the geometry → the tray is
+ * cleared (colour/matte/paper do not affect crop geometry, so they preserve it).
+ */
+export type EditorPhotoEntry = {
+  /** Client-only id (crypto.randomUUID). */
+  entryId: string;
+  /** Confirmed print-ready crop, re-uploaded via /api/photos/upload. */
+  photo: import('./photo').Photo;
+  /** Thumbnail URL for the tray strip. */
+  previewUrl: string;
+  /** Copy count for this photo, 1..99 (그룹사진 = 1장 × N부). */
+  quantity: number;
+};
+
 // ---------- Editor state (Zustand store) ----------
 
 /**

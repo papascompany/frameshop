@@ -12,6 +12,7 @@ import { GooglePhotosPicker } from '@/components/GooglePhotosPicker';
 import {
   useCurrentVariantPrice,
   useEditorStore,
+  useEditorTotals,
 } from '@/store/editor';
 import { addToCart } from '@/lib/cart/client';
 import { ImageResizeError, resizeImageToMax } from '@/lib/image/resize-client';
@@ -53,16 +54,20 @@ export function StudioClient({
   const router = useRouter();
   const init = useEditorStore((s) => s.init);
   const setPhoto = useEditorStore((s) => s.setPhoto);
+  const clearActivePhoto = useEditorStore((s) => s.clearActivePhoto);
   const setColor = useEditorStore((s) => s.setColor);
   const setSize = useEditorStore((s) => s.setSize);
   const setMatte = useEditorStore((s) => s.setMatte);
   const setPaper = useEditorStore((s) => s.setPaper);
   const photo = useEditorStore((s) => s.photo);
+  const entries = useEditorStore((s) => s.entries);
+  const addEntry = useEditorStore((s) => s.addEntry);
+  const removeEntry = useEditorStore((s) => s.removeEntry);
+  const setEntryQuantity = useEditorStore((s) => s.setEntryQuantity);
   const selected = useEditorStore((s) => s.selectedOptions);
   const variantId = useEditorStore((s) => s.selectedVariantId);
-  const confirmedCrop = useEditorStore((s) => s.confirmedCrop);
-  const setConfirmedCrop = useEditorStore((s) => s.setConfirmedCrop);
   const price = useCurrentVariantPrice();
+  const { totalQuantity, totalPrice } = useEditorTotals();
 
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -180,11 +185,12 @@ export function StudioClient({
   }
 
   /**
-   * "사진 배치 확정": render the print-ready crop of the ORIGINAL photo
-   * (full resolution, inner_rect + product bleed) and upload it as a new
-   * photo record. The confirmed crop is what gets added to the cart.
+   * "담기": render the print-ready crop of the active photo (full-res,
+   * inner_rect + bleed), re-upload it, and push it into the order tray. The
+   * canvas then resets so the next photo can be placed. Multiple photos share
+   * the same options and are added to the cart together later.
    */
-  async function handleConfirmPlacement() {
+  async function handleAddToTray() {
     if (!photo) return;
     setPlacing(true);
     setUploadError(null);
@@ -200,39 +206,63 @@ export function StudioClient({
       const res = await fetch('/api/photos/upload', { method: 'POST', body: form });
       const body = (await res.json()) as { ok: boolean; photo?: Photo };
       if (body.ok && body.photo) {
-        setConfirmedCrop(body.photo);
+        addEntry({
+          photo: body.photo,
+          previewUrl: body.photo.thumbUrl ?? body.photo.originalUrl,
+        });
+        setPhotoSourceTab('upload');
       } else {
-        setUploadError('크롭 이미지 업로드에 실패했습니다.');
+        setUploadError('이미지 처리에 실패했습니다. 다시 시도해 주세요.');
       }
     } catch {
-      setUploadError('사진 배치 확정 중 오류가 발생했습니다.');
+      setUploadError('사진을 담는 중 오류가 발생했습니다.');
     } finally {
       setPlacing(false);
     }
   }
 
-  async function addCurrentToCart() {
-    // The confirmed crop is already the exact print area; it is added with an
-    // identity transform so the print pipeline does not re-crop it.
-    if (!variantId || !confirmedCrop) return;
+  /**
+   * "장바구니 담기": add every tray entry as its own cart line (same options,
+   * per-entry quantity), then go to the cart. Each entry's photo is the already
+   * print-ready crop, so it is added with an identity transform.
+   */
+  async function handleCheckoutAll() {
+    if (!variantId || entries.length === 0) return;
     setConfirming(true);
     try {
-      await addToCart({
-        userId: null,
-        productId: productDetail.product.id,
-        variantId,
-        photoId: asBrand<PhotoId>(confirmedCrop.id),
-        options: selected,
-        photoUrl: confirmedCrop.originalUrl,
-        cropTransform: { x: 0, y: 0, scale: 1, rotation: 0 },
-        previewUrl: confirmedCrop.thumbUrl ?? confirmedCrop.originalUrl,
-        price,
-        quantity: 1,
-      });
+      for (const entry of entries) {
+        await addToCart({
+          userId: null,
+          productId: productDetail.product.id,
+          variantId,
+          photoId: asBrand<PhotoId>(entry.photo.id),
+          options: selected,
+          photoUrl: entry.photo.originalUrl,
+          cropTransform: { x: 0, y: 0, scale: 1, rotation: 0 },
+          previewUrl: entry.previewUrl,
+          price,
+          quantity: entry.quantity,
+        });
+      }
       router.push('/cart');
     } finally {
       setConfirming(false);
     }
+  }
+
+  /**
+   * Size change clears the tray (baked crops no longer fit the new aspect).
+   * Confirm with the user when entries would be discarded.
+   */
+  function handleSizeChange(code: string) {
+    if (code === selected.sizeCode) return;
+    if (
+      entries.length > 0 &&
+      !window.confirm('사이즈를 변경하면 담은 사진을 다시 맞춰야 합니다. 계속할까요?')
+    ) {
+      return;
+    }
+    setSize(code);
   }
 
   // 매트 라벨 매핑
@@ -248,11 +278,41 @@ export function StudioClient({
     <Container size="lg" className="py-6 md:py-10">
       {/* PC: 2컬럼 레이아웃 */}
       <div className="md:grid md:grid-cols-[1fr_380px] md:gap-8">
-        {/* 좌측: 캔버스 */}
+        {/* 좌측: 캔버스 / 사진 소스 + 담은 사진 트레이 */}
         <div>
           <h1 className="text-xl font-bold mb-4">{productDetail.product.name}</h1>
 
-          {!photo ? (
+          {photo ? (
+            <>
+              <FrameCanvas
+                ref={canvasRef}
+                photo={photo}
+                productDetail={productDetail}
+                options={options}
+              />
+              <div className="mt-3 flex flex-col gap-2">
+                <Button
+                  variant="primary"
+                  size="lg"
+                  disabled={placing}
+                  onClick={() => void handleAddToTray()}
+                >
+                  {placing ? '담는 중…' : '이 사진 담기'}
+                </Button>
+                <button
+                  type="button"
+                  className="self-center text-xs underline text-mute hover:text-foreground"
+                  onClick={clearActivePhoto}
+                  disabled={placing}
+                >
+                  이 사진 취소
+                </button>
+                {uploadError ? (
+                  <p role="alert" className="caption-md text-red-600 text-center">{uploadError}</p>
+                ) : null}
+              </div>
+            </>
+          ) : (
             <PhotoSourceStep
               tab={photoSourceTab}
               onTabChange={setPhotoSourceTab}
@@ -263,15 +323,65 @@ export function StudioClient({
               onArtworkSelect={(a) => void handleArtworkSelect(a)}
               googlePhotosEnabled={googlePhotosEnabled}
               onGooglePhotoSelect={handleGooglePhotoSelect}
-            />
-          ) : (
-            <FrameCanvas
-              ref={canvasRef}
-              photo={photo}
-              productDetail={productDetail}
-              options={options}
+              heading={entries.length > 0 ? '사진 추가' : undefined}
             />
           )}
+
+          {/* 담은 사진 트레이 */}
+          {entries.length > 0 ? (
+            <div className="mt-6">
+              <p className="text-sm font-medium mb-2">
+                담은 사진 <span className="text-mute">({entries.length}종 · 총 {totalQuantity}장)</span>
+              </p>
+              <ul className="flex flex-col gap-2">
+                {entries.map((e) => (
+                  <li
+                    key={e.entryId}
+                    className="flex items-center gap-3 border border-hairline rounded-md p-2"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={e.previewUrl}
+                      alt="담은 사진"
+                      className="w-14 h-14 object-cover rounded bg-soft-cloud shrink-0"
+                    />
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        aria-label="수량 감소"
+                        className="w-8 h-8 rounded border border-hairline grid place-items-center disabled:opacity-40"
+                        onClick={() => setEntryQuantity(e.entryId, e.quantity - 1)}
+                        disabled={e.quantity <= 1}
+                      >
+                        −
+                      </button>
+                      <span className="w-8 text-center tabular-nums text-sm">{e.quantity}</span>
+                      <button
+                        type="button"
+                        aria-label="수량 증가"
+                        className="w-8 h-8 rounded border border-hairline grid place-items-center disabled:opacity-40"
+                        onClick={() => setEntryQuantity(e.entryId, e.quantity + 1)}
+                        disabled={e.quantity >= 99}
+                      >
+                        ＋
+                      </button>
+                    </div>
+                    <span className="ml-auto text-sm tabular-nums text-mute">
+                      {(price * e.quantity).toLocaleString('ko-KR')}원
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="삭제"
+                      className="text-mute hover:text-foreground px-1"
+                      onClick={() => removeEntry(e.entryId)}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
 
         {/* 우측: 옵션 패널 */}
@@ -279,7 +389,7 @@ export function StudioClient({
           <OptionTabs
             label="사이즈"
             value={selected.sizeCode}
-            onChange={setSize}
+            onChange={handleSizeChange}
             options={options.sizes.map((s) => ({ value: s.code, label: s.label }))}
           />
           <OptionTabs
@@ -311,51 +421,34 @@ export function StudioClient({
             />
           ) : null}
 
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <PriceTag amount={price} variant="large" />
+          {/* 합계 + 장바구니 담기 */}
+          <div className="mt-4 flex items-end justify-between gap-3">
+            <div>
+              <p className="text-xs text-mute mb-0.5">
+                {totalQuantity > 0 ? `총 ${totalQuantity}장` : '낱장 단가'}
+              </p>
+              <PriceTag amount={totalQuantity > 0 ? totalPrice : price} variant="large" />
+            </div>
           </div>
 
-          {/* 2-step flow: 사진 배치 확정 → 장바구니 담기 */}
-          {!confirmedCrop ? (
-            <div className="flex flex-col gap-2">
-              <Button
-                variant="primary"
-                size="lg"
-                disabled={!photo || placing}
-                onClick={() => void handleConfirmPlacement()}
-              >
-                {placing ? '사진 배치 확정 중…' : '사진 배치 확정'}
-              </Button>
-              <p className="text-xs text-muted-fg">
-                점선(인쇄 영역)에 맞춰 고해상도 인쇄용 이미지를 만듭니다. 큰 사이즈는
-                원본 사진의 해상도가 높을수록 더 선명하게 인쇄됩니다.
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2 rounded-md border border-hairline bg-soft-cloud px-3 py-2">
-                <span aria-hidden className="text-base leading-none">✓</span>
-                <p className="text-sm text-foreground">
-                  사진 배치가 확정되었습니다.
-                </p>
-                <button
-                  type="button"
-                  className="ml-auto text-xs underline text-mute hover:text-foreground"
-                  onClick={() => setConfirmedCrop(null)}
-                >
-                  다시 편집
-                </button>
-              </div>
-              <Button
-                variant="primary"
-                size="lg"
-                disabled={!variantId || confirming}
-                onClick={() => void addCurrentToCart()}
-              >
-                {confirming ? '담는 중…' : '장바구니 담기'}
-              </Button>
-            </div>
-          )}
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={entries.length === 0 || !variantId || confirming}
+            onClick={() => void handleCheckoutAll()}
+          >
+            {confirming
+              ? '담는 중…'
+              : entries.length > 0
+                ? `장바구니 담기 (${totalQuantity}장)`
+                : '사진을 먼저 담아주세요'}
+          </Button>
+
+          {photo ? (
+            <p className="text-xs text-muted-fg">
+              현재 편집 중인 사진은 <b className="font-medium">이 사진 담기</b>를 눌러야 주문에 포함됩니다.
+            </p>
+          ) : null}
 
           <p className="text-xs text-muted-fg">
             ※ 미리보기는 화면 색공간 기준이며 실제 인쇄 결과와 차이가 있을 수 있습니다.
@@ -381,6 +474,8 @@ type PhotoSourceStepProps = {
   onArtworkSelect: (artwork: StockPhoto) => void;
   googlePhotosEnabled: boolean;
   onGooglePhotoSelect: (photoUrl: string, width: number, height: number) => void;
+  /** Heading for the upload tab — "사진 추가" when the tray already has photos. */
+  heading?: string;
 };
 
 function PhotoSourceStep({
@@ -393,6 +488,7 @@ function PhotoSourceStep({
   onArtworkSelect,
   googlePhotosEnabled,
   onGooglePhotoSelect,
+  heading,
 }: PhotoSourceStepProps) {
   const tabs: { id: PhotoSourceTab; label: string }[] = [
     { id: 'upload', label: '내 사진' },
@@ -422,7 +518,7 @@ function PhotoSourceStep({
 
       <div className="p-5">
         {tab === 'upload' ? (
-          <UploadTab onFile={onFile} uploading={uploading} error={error} />
+          <UploadTab onFile={onFile} uploading={uploading} error={error} heading={heading} />
         ) : tab === 'artwork' ? (
           <div className="space-y-3">
             <p className="caption-md text-mute">
@@ -450,14 +546,16 @@ function UploadTab({
   onFile,
   uploading,
   error,
+  heading,
 }: {
   onFile: (file: File) => void;
   uploading: boolean;
   error: string | null;
+  heading?: string;
 }) {
   return (
     <div className="flex flex-col gap-3 items-start">
-      <p className="heading-md text-ink">사진 가져오기</p>
+      <p className="heading-md text-ink">{heading ?? '사진 가져오기'}</p>
       <p className="caption-md text-mute">
         JPG, PNG, HEIC, WEBP (최대 50MB)
       </p>
