@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { PriceTag } from '@/components/PriceTag';
 import { getCart, clearCart, getCartSummary } from '@/lib/cart/client';
+import { takeCheckoutSelection } from '@/lib/cart/selection';
 import { formatPhone, validateCheckoutForm } from '@/lib/checkout/validate';
 import { calculateShippingFee } from '@/lib/shipping/calc';
 import { requestPayment } from '@/lib/payment/client';
@@ -35,10 +36,18 @@ export function CheckoutClient({ shippingMethods }: Props) {
   const [loadingCart, setLoadingCart] = useState(true);
 
   useEffect(() => {
+    // Honor a one-shot selection handed off from the cart ("선택 상품 주문").
+    // No selection → order the full cart (direct /checkout link still works).
+    const selection = takeCheckoutSelection();
     void getCart().then((rows) => {
-      setItems(rows);
+      const filtered =
+        selection && selection.length > 0
+          ? rows.filter((r) => selection.includes(r.localId as string))
+          : rows;
+      const finalRows = filtered.length > 0 ? filtered : rows;
+      setItems(finalRows);
       setLoadingCart(false);
-      if (rows.length === 0) router.replace('/cart');
+      if (finalRows.length === 0) router.replace('/cart');
     });
   }, [router]);
 
