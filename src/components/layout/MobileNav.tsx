@@ -26,16 +26,8 @@ export function MobileNav() {
       <ul className="grid grid-cols-5 caption-sm">
         <NavItem href="/" label="홈" icon={<IconHome />} />
         <NavItem href="/catalog/basic-frame" label="액자" icon={<IconFrame />} />
-        <NavItem
-          href="/catalog/basic-frame?theme=masterpiece"
-          label="명화"
-          icon={<IconArt />}
-        />
-        <NavItem
-          href="/catalog/basic-frame?theme=landscape"
-          label="풍경"
-          icon={<IconMountain />}
-        />
+        <NavItem href="/catalog/masterpiece" label="명화" icon={<IconArt />} />
+        <NavItem href="/catalog/landscape" label="풍경" icon={<IconMountain />} />
         <NavItem href="/cart" label="장바구니" icon={<IconBag />} />
       </ul>
     </nav>

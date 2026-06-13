@@ -41,7 +41,7 @@ export function CollectionRail({ tiles }: Props) {
           <CollectionCard key={tile.imageUrl} tile={tile} />
         ))}
         <Link
-          href="/catalog/basic-frame?theme=landscape"
+          href="/catalog/landscape"
           className={cn(
             'relative block aspect-[4/5] overflow-hidden rounded-none',
             'bg-ink text-on-primary',

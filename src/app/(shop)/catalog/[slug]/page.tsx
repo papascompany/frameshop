@@ -28,6 +28,8 @@ const SLUG_LABELS: Record<string, { title: string; eyebrow: string }> = {
   'basic-frame': { title: 'BASIC FRAMES', eyebrow: '베이직 액자' },
   'premium-frame': { title: 'PREMIUM FRAMES', eyebrow: '프리미엄 액자' },
   canvas: { title: 'CANVAS PRINTS', eyebrow: '캔버스 프린트' },
+  masterpiece: { title: 'MASTERPIECE', eyebrow: '명화' },
+  landscape: { title: 'LANDSCAPE', eyebrow: '풍경' },
 };
 
 export async function generateStaticParams(): Promise<{ slug: string }[]> {
@@ -45,7 +47,9 @@ export async function generateStaticParams(): Promise<{ slug: string }[]> {
     return slugs.map((slug) => ({ slug }));
   } catch {
     // Return known slugs as fallback so build succeeds without DB.
-    return ['basic-frame', 'premium-frame', 'canvas'].map((slug) => ({ slug }));
+    return ['basic-frame', 'masterpiece', 'landscape', 'premium-frame', 'canvas'].map(
+      (slug) => ({ slug }),
+    );
   }
 }
 

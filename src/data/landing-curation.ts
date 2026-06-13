@@ -46,7 +46,7 @@ export const HERO_SLIDES: HeroSlide[] = [
     headlineTop: 'GALLERY AT',
     headlineBottom: 'HOME.',
     subhead: '클로드 모네부터 한국 근대 회화까지 — 명작을 우리 집 거실에.',
-    cta: { label: '명화 컬렉션 보기', href: '/catalog/basic-frame?theme=masterpiece' },
+    cta: { label: '명화 컬렉션 보기', href: '/catalog/masterpiece' },
     tone: 'light',
   },
   {
@@ -57,7 +57,7 @@ export const HERO_SLIDES: HeroSlide[] = [
     headlineTop: 'NATURE,',
     headlineBottom: 'IMMORTALIZED.',
     subhead: '300dpi 미세 인쇄로 담는 풍경의 디테일.',
-    cta: { label: '풍경 컬렉션 보기', href: '/catalog/basic-frame?theme=landscape' },
+    cta: { label: '풍경 컬렉션 보기', href: '/catalog/landscape' },
     tone: 'light',
   },
 ];
@@ -164,35 +164,35 @@ export const LANDSCAPE_TILES: LandscapeTile[] = [
     imageAlt: '새벽 안개에 잠긴 산맥',
     title: 'ALPINE GLOW',
     caption: '새벽의 산맥, 알펜글로 시리즈',
-    href: '/catalog/basic-frame?theme=landscape',
+    href: '/catalog/landscape',
   },
   {
     imageUrl: mirrored('1470071459604-3b5ec3a7fe05'),
     imageAlt: '안개 낀 숲',
     title: 'FOREST CALM',
     caption: '북유럽 침엽수림의 정적',
-    href: '/catalog/basic-frame?theme=landscape',
+    href: '/catalog/landscape',
   },
   {
     imageUrl: mirrored('1501785888041-af3ef285b470'),
     imageAlt: '해안 절벽과 바다',
     title: 'OCEAN BREATH',
     caption: '제주 바다, 한 호흡의 풍경',
-    href: '/catalog/basic-frame?theme=landscape',
+    href: '/catalog/landscape',
   },
   {
     imageUrl: mirrored('1469474968028-56623f02e42e'),
     imageAlt: '강과 산',
     title: 'RIVER LINES',
     caption: '비가 갠 후의 강 풍경',
-    href: '/catalog/basic-frame?theme=landscape',
+    href: '/catalog/landscape',
   },
   {
     imageUrl: mirrored('1418065460487-3e41a6c84dc5'),
     imageAlt: '들판 위 일몰',
     title: 'GOLDEN HOUR',
     caption: '황금 시간대의 들판',
-    href: '/catalog/basic-frame?theme=landscape',
+    href: '/catalog/landscape',
   },
 ];
 
