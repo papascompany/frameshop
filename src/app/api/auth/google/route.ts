@@ -6,13 +6,31 @@
  */
 
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getSetting } from '@/lib/db/settings';
 import { envPublic } from '@/lib/env-public';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+/** Name of the httpOnly cookie that carries the OAuth CSRF state token. */
+export const GOOGLE_OAUTH_STATE_COOKIE = 'fs_g_oauth_state';
+
+export async function GET(request: NextRequest) {
+  // Linking a Google Photos integration mutates THIS user's account, so it
+  // requires an authenticated session. (The old flow encoded the user id in the
+  // `state` param and trusted it back in the callback — a CSRF / identity-
+  // injection hole. Identity now comes only from the session.)
+  const supabase = await getServerSupabase();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.redirect(
+      new URL('/login?redirect=/account', request.url),
+    );
+  }
+
   // Google OAuth Client ID 조회 (env 우선 → DB fallback)
   const clientId =
     process.env.GOOGLE_CLIENT_ID ?? (await getSetting('google_client_id'));
@@ -24,13 +42,9 @@ export async function GET() {
     );
   }
 
-  // 현재 사용자 ID (state에 인코딩)
-  const supabase = await getServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const state = user?.id ?? 'anon';
+  // CSRF: random, single-use state echoed by Google and matched against an
+  // httpOnly cookie in the callback. Not derived from any guessable value.
+  const state = crypto.randomUUID();
   const siteUrl = envPublic.siteUrl();
   const redirectUri = `${siteUrl}/api/auth/google/callback`;
 
@@ -45,5 +59,15 @@ export async function GET() {
   });
 
   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-  return NextResponse.redirect(authUrl);
+  const res = NextResponse.redirect(authUrl);
+  res.cookies.set({
+    name: GOOGLE_OAUTH_STATE_COOKIE,
+    value: state,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax', // top-level GET redirect back from Google still sends it
+    path: '/api/auth/google',
+    maxAge: 600, // 10 minutes
+  });
+  return res;
 }

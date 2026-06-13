@@ -13,6 +13,7 @@ import type { CartItem } from '@/types/cart';
 import { listCartForUser, upsertCartItem } from '@/lib/db/cart';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { isSameOrigin } from '@/lib/security/same-origin';
+import { checkRate } from '@/lib/ratelimit';
 
 async function getUserId(): Promise<UserId | null> {
   const supabase = await getServerSupabase();
@@ -44,6 +45,13 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json(
       { ok: false, code: 'UNAUTHENTICATED' },
       { status: 401 },
+    );
+  }
+  const rate = checkRate('cart_write', userId as string, { max: 60, windowMs: 60_000 });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { ok: false, code: 'RATE_LIMITED' },
+      { status: 429, headers: { 'Retry-After': String(rate.retryAfterSec) } },
     );
   }
   let body: unknown;

@@ -13,6 +13,8 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { findOrderByGuest } from '@/lib/db/order';
 import { checkLookupRate } from '@/lib/lookup-ratelimit';
+import { checkRate } from '@/lib/ratelimit';
+import { getClientIp } from '@/lib/security/client-ip';
 import { asBrand } from '@/types/common';
 import type { OrderNo } from '@/types/common';
 
@@ -25,27 +27,20 @@ const lookupSchema = z.object({
     .regex(/^01[0-9]-\d{3,4}-\d{4}$/, '전화번호 형식이 올바르지 않습니다.'),
 });
 
-/** Extract caller IP from Vercel's x-forwarded-for or fallback. */
-function getClientIp(req: NextRequest): string {
-  return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    req.headers.get('x-real-ip') ??
-    'unknown'
-  );
-}
+const TOO_MANY = {
+  error: '너무 많은 조회 요청입니다. 잠시 후 다시 시도해 주세요.',
+};
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  // Rate limit check (by IP).
+  // Rate limit by IP. Uses the trusted client IP (right-most XFF hop / x-real-ip)
+  // so a spoofed left-most X-Forwarded-For can't forge a fresh bucket.
   const ip = getClientIp(req);
   const rateResult = checkLookupRate(ip);
   if (!rateResult.ok) {
-    return NextResponse.json(
-      { error: '너무 많은 조회 요청입니다. 잠시 후 다시 시도해 주세요.' },
-      {
-        status: 429,
-        headers: { 'Retry-After': String(rateResult.retryAfterSec) },
-      },
-    );
+    return NextResponse.json(TOO_MANY, {
+      status: 429,
+      headers: { 'Retry-After': String(rateResult.retryAfterSec) },
+    });
   }
 
   // Parse body.
@@ -63,6 +58,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const { orderNo, phone } = parsed.data;
+
+  // Spoof-proof secondary limit keyed by the order being probed: caps phone
+  // enumeration per orderNo regardless of IP rotation (the IP limit alone is
+  // bypassable with a botnet / rotating IPs).
+  const perOrder = checkRate('order_lookup', orderNo, { max: 10, windowMs: 15 * 60_000 });
+  if (!perOrder.ok) {
+    return NextResponse.json(TOO_MANY, {
+      status: 429,
+      headers: { 'Retry-After': String(perOrder.retryAfterSec) },
+    });
+  }
 
   // Constant-time-ish: always perform the DB query regardless of format,
   // so response time doesn't reveal "orderNo exists" from format rejection.

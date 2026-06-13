@@ -10,6 +10,9 @@ import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
 import { getSettings } from '@/lib/db/settings';
 import { envPublic } from '@/lib/env-public';
+import { GOOGLE_OAUTH_STATE_COOKIE } from '../route';
+import { checkRate } from '@/lib/ratelimit';
+import { getClientIp } from '@/lib/security/client-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,9 +25,20 @@ type GoogleTokenResponse = {
 };
 
 export async function GET(request: NextRequest) {
+  // Rate limit the token-exchange to curb code-replay / DB-write spam.
+  const rate = checkRate('oauth_google_cb', getClientIp(request), {
+    max: 10,
+    windowMs: 60_000,
+  });
+  if (!rate.ok) {
+    return NextResponse.redirect(
+      new URL('/account?google_error=rate_limited', request.url),
+    );
+  }
+
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
-  const state = searchParams.get('state'); // userId or 'anon'
+  const state = searchParams.get('state');
   const errorParam = searchParams.get('error');
 
   if (errorParam) {
@@ -35,6 +49,26 @@ export async function GET(request: NextRequest) {
 
   if (!code) {
     return NextResponse.json({ error: 'code 파라미터가 없습니다.' }, { status: 400 });
+  }
+
+  // CSRF: the state echoed by Google must match the httpOnly cookie set when
+  // the flow started. Blocks forged callbacks (attacker-chosen state).
+  const cookieState = request.cookies.get(GOOGLE_OAUTH_STATE_COOKIE)?.value;
+  if (!state || !cookieState || state !== cookieState) {
+    return NextResponse.redirect(
+      new URL('/account?google_error=invalid_state', request.url),
+    );
+  }
+
+  // Identity comes ONLY from the authenticated session — never from `state`.
+  const supabaseAuth = await getServerSupabase();
+  const {
+    data: { user: sessionUser },
+  } = await supabaseAuth.auth.getUser();
+  if (!sessionUser) {
+    return NextResponse.redirect(
+      new URL('/login?redirect=/account', request.url),
+    );
   }
 
   // 설정 조회
@@ -76,18 +110,9 @@ export async function GET(request: NextRequest) {
 
   const tokenData = (await tokenRes.json()) as GoogleTokenResponse;
 
-  // 현재 로그인 사용자 확인
-  const supabase = await getServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const userId = user?.id ?? state;
-  if (!userId || userId === 'anon') {
-    return NextResponse.redirect(
-      new URL('/login?redirect=/account', request.url),
-    );
-  }
+  // Bind the integration to the AUTHENTICATED user (verified above) — not to
+  // any value carried in the URL.
+  const userId = sessionUser.id;
 
   // user_integrations에 저장 (service role — RLS 우회)
   const svcSupabase = getServiceRoleSupabase();
@@ -113,6 +138,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // 성공 — 스튜디오 또는 계정 페이지로 redirect
-  return NextResponse.redirect(new URL('/account?google_connected=1', request.url));
+  // 성공 — 계정 페이지로 redirect + single-use state 쿠키 소거
+  const okRes = NextResponse.redirect(
+    new URL('/account?google_connected=1', request.url),
+  );
+  okRes.cookies.set({
+    name: GOOGLE_OAUTH_STATE_COOKIE,
+    value: '',
+    path: '/api/auth/google',
+    maxAge: 0,
+  });
+  return okRes;
 }
