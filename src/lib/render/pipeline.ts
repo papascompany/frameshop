@@ -1,34 +1,34 @@
 /**
  * Render-pipeline orchestration.
  *
- * Glue between `renderPrintFile` (pure compositor) and the database +
- * Supabase Storage. Owns:
- *   - loading the order_item snapshot + sibling frame_asset + variant,
- *   - fetching the photo + frame buffers (HTTPS or `supabase.storage`),
+ * Glue between `renderPrintFile` (pure, photo-only normaliser) and the database
+ * + Supabase Storage. Owns:
+ *   - loading the order_item snapshot + sibling frame_asset (for inner_rect) +
+ *     variant,
+ *   - fetching the baked print-crop buffer (HTTPS or `supabase.storage`),
+ *   - resolving the frozen per-product bleed,
  *   - calling `renderPrintFile`,
  *   - uploading the result to the `previews` bucket under
  *     `print/<orderNo>-<itemIdx>.png`,
  *   - persisting `order_items.print_file_url`.
  *
- * Defensive defaults (frame_skills §5.1):
- *   - missing `stage_size` (legacy rows) → derive from `variant.widthMm`
- *     scaled to an 800px longer edge, matching the editor's BASE_STAGE_PX.
- *   - missing `frame_asset_id` → fall back to a frame_asset on the same
- *     product matching the snapshot's colour code.
+ * Photo-only pipeline (product decision 2026-06-13): the frame moulding is NOT
+ * printed, so the frame PNG is never fetched — `frame_asset` is loaded only for
+ * its `inner_rect` (print-window size). `stage_size`/`crop_transform` columns
+ * are likewise unused (legacy of the retired frame-composite path).
+ *
+ * Defensive default (frame_skills §5.1): missing `frame_asset_id` → fall back to
+ * a frame_asset on the same product matching the snapshot's colour code.
  */
 
 import 'server-only';
 import type { OrderItemId } from '@/types/common';
 import { getServiceRoleSupabase } from '../supabase/service';
-import { renderPrintFile, type InnerRectNorm } from './print';
+import { renderPrintFile, BLEED_MM, type InnerRectNorm } from './print';
 import { envPublic } from '../env-public';
 
 // Same fallback used by the editor when a frame_asset has a malformed inner_rect.
 const DEFAULT_INNER_RECT: InnerRectNorm = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
-
-// Editor base stage longer-edge (matches BASE_STAGE_PX in studio client).
-// Used only as a fallback for legacy order_items missing stage_size.
-const FALLBACK_STAGE_LONG_EDGE = 800;
 
 const PREVIEWS_BUCKET = 'previews';
 
@@ -41,7 +41,6 @@ export type RenderErrorCode =
   | 'VARIANT_MISSING'
   | 'FRAME_ASSET_MISSING'
   | 'PHOTO_FETCH_FAILED'
-  | 'FRAME_FETCH_FAILED'
   | 'RENDER_FAILED'
   | 'UPLOAD_FAILED'
   | 'DB_UPDATE_FAILED';
@@ -57,6 +56,8 @@ type OrderItemRow = {
     colorLabel: string;
     unitPrice: number;
     options: { sizeCode: string; colorCode: string; matteCode: string; paperCode: string };
+    /** Per-product bleed (mm) frozen at order creation. Absent on legacy rows. */
+    bleedMm?: number;
   };
   photo_url: string;
   crop_transform: { x: number; y: number; scale: number; rotation: number };
@@ -78,7 +79,6 @@ type FrameAssetRow = {
   id: string;
   product_id: string;
   color_code: string;
-  png_url: string;
   inner_rect: InnerRectNorm;
 };
 
@@ -138,7 +138,7 @@ export async function renderOrderItemPrint(
   if (item.frame_asset_id) {
     const { data } = await supabase
       .from('frame_assets')
-      .select('id, product_id, color_code, png_url, inner_rect')
+      .select('id, product_id, color_code, inner_rect')
       .eq('id', item.frame_asset_id)
       .maybeSingle();
     frame = data as FrameAssetRow | null;
@@ -146,7 +146,7 @@ export async function renderOrderItemPrint(
   if (!frame) {
     const { data } = await supabase
       .from('frame_assets')
-      .select('id, product_id, color_code, png_url, inner_rect')
+      .select('id, product_id, color_code, inner_rect')
       .eq('product_id', variant.product_id)
       .eq('color_code', variant.color_code)
       .maybeSingle();
@@ -160,19 +160,29 @@ export async function renderOrderItemPrint(
     };
   }
 
-  // 4. Stage size — use saved value or derive from variant aspect ratio.
-  const stageSize = item.stage_size ?? deriveFallbackStageSize(variant);
-
-  // 5. inner_rect — sanity check + fallback.
+  // 4. inner_rect — sanity check + fallback. Drives the print's physical size
+  //    (print window = inner_rect of the oriented variant).
   const innerRect = sanitiseInnerRect(frame.inner_rect);
 
-  // 6. Fetch photo + frame bytes.
+  // 5. Per-product bleed (mm). MUST equal the value the client baked the crop
+  //    with, or the canvas won't match the crop's true size (fit:'cover' would
+  //    crop/border). The order snapshot FREEZES it at order creation, so admin
+  //    edits to products.bleed_mm after the order can't corrupt the render.
+  //    Legacy orders predating the frozen field fall back to the live value.
+  const frozenBleed = item.variant_snapshot.bleedMm;
+  const bleedMm =
+    typeof frozenBleed === 'number' && Number.isFinite(frozenBleed) && frozenBleed >= 0
+      ? frozenBleed
+      : await resolveBleedMm(supabase, variant.product_id);
+
+  // 6. Fetch the baked print crop bytes.
   //
-  // The `photo_url` snapshotted on the order is a short-lived signed URL minted
-  // at upload time and will have EXPIRED by the time the render runs (renders
-  // happen on payment confirmation, typically well after upload). Re-sign from
-  // the photo's durable `storage_path` so the fetch always uses a fresh URL.
-  // Falls back to the stored URL for legacy/external photos with no path.
+  // `photo_url` is the client-baked, print-ready crop (inner_rect + bleed,
+  // oriented, full-res). It's a short-lived signed URL minted at upload time
+  // and will have EXPIRED by render time (renders happen on payment
+  // confirmation, well after upload). Re-sign from the photo's durable
+  // `storage_path` so the fetch always uses a fresh URL. Falls back to the
+  // stored URL for legacy/external photos with no path.
   const photoFetchUrl = await resolveFreshPhotoUrl(supabase, item.photo_url);
   let photoBuffer: Buffer;
   try {
@@ -185,27 +195,16 @@ export async function renderOrderItemPrint(
     };
   }
 
-  let frameBuffer: Buffer;
-  try {
-    frameBuffer = await fetchAsBuffer(frame.png_url);
-  } catch (err) {
-    return {
-      ok: false,
-      code: 'FRAME_FETCH_FAILED',
-      message: err instanceof Error ? err.message : String(err),
-    };
-  }
-
-  // 7. Render.
+  // 7. Render — photo-only (no frame moulding printed); the baked crop is
+  //    normalised to its exact 300dpi physical size. Orientation comes from
+  //    the baked crop's own aspect (set in renderPrintFile).
   let rendered;
   try {
     rendered = await renderPrintFile({
       photoBuffer,
-      frameBuffer,
       innerRect,
-      cropTransform: item.crop_transform,
-      stageSize,
       variant: { widthMm: variant.width_mm, heightMm: variant.height_mm },
+      bleedMm,
     });
   } catch (err) {
     return {
@@ -281,9 +280,9 @@ export async function renderOrderItemPrint(
  * P0-02 SSRF allowlist.
  *
  * Only HTTPS URLs pointing to known-safe image hosts may be fetched by the
- * render pipeline. This prevents an attacker-controlled `photo_url` or
- * `frame.png_url` from being used to probe cloud-metadata endpoints
- * (e.g. 169.254.169.254) or internal services.
+ * render pipeline. This prevents an attacker-controlled `photo_url` from being
+ * used to probe cloud-metadata endpoints (e.g. 169.254.169.254) or internal
+ * services.
  *
  * Allowed hosts:
  *   - Our own Supabase project host (NEXT_PUBLIC_SUPABASE_URL hostname)
@@ -381,11 +380,28 @@ function sanitiseInnerRect(raw: unknown): InnerRectNorm {
   return { x: r.x, y: r.y, w: r.w, h: r.h };
 }
 
-function deriveFallbackStageSize(variant: VariantRow): { w: number; h: number } {
-  // Match BASE_STAGE_PX = 800 with the longer edge.
-  const ratio = variant.width_mm / variant.height_mm;
-  if (ratio >= 1) {
-    return { w: FALLBACK_STAGE_LONG_EDGE, h: Math.round(FALLBACK_STAGE_LONG_EDGE / ratio) };
+/**
+ * Resolve the per-product bleed (mm). Admin-configured via `products.bleed_mm`
+ * (NOT NULL DEFAULT 0; `0` = "정사이즈"/exact-cut). The client baked the crop
+ * with this same value, so reusing it keeps the print canvas sized to the
+ * baked crop's true physical extent (uniform resize, no rescale). Falls back to
+ * the industry-standard `BLEED_MM` only if the row is unreadable.
+ */
+async function resolveBleedMm(
+  supabase: ReturnType<typeof getServiceRoleSupabase>,
+  productId: string,
+): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from('products')
+      .select('bleed_mm')
+      .eq('id', productId)
+      .maybeSingle();
+    const raw = (data as { bleed_mm: number | string | null } | null)?.bleed_mm;
+    const n = typeof raw === 'string' ? Number(raw) : raw;
+    if (typeof n === 'number' && Number.isFinite(n) && n >= 0) return n;
+  } catch {
+    // Non-fatal — fall back to the industry-standard default below.
   }
-  return { w: Math.round(FALLBACK_STAGE_LONG_EDGE * ratio), h: FALLBACK_STAGE_LONG_EDGE };
+  return BLEED_MM;
 }

@@ -111,6 +111,14 @@ export type OrderItemSnapshot = {
   sizeLabel: string;
   colorLabel: string;
   unitPrice: number;
+  /**
+   * Per-product print bleed (mm), FROZEN at order creation. The client baked
+   * the print crop with this value, so the render pipeline must reuse the
+   * frozen value (not re-read `products.bleed_mm`, which an admin may change
+   * after the order is placed). Optional for legacy orders predating this field
+   * — the pipeline falls back to the live product value then.
+   */
+  bleedMm?: number;
 };
 
 export type OrderItem = {
