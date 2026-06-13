@@ -8,29 +8,29 @@ import { getClientIp } from '@/lib/security/client-ip';
 
 afterEach(() => _resetRateLimit());
 
-describe('checkRate', () => {
-  it('allows up to `max` then blocks within the window', () => {
+describe('checkRate (in-memory backend)', () => {
+  it('allows up to `max` then blocks within the window', async () => {
     const opts = { max: 3, windowMs: 60_000 };
-    expect(checkRate('ns', 'k', opts).ok).toBe(true);
-    expect(checkRate('ns', 'k', opts).ok).toBe(true);
-    expect(checkRate('ns', 'k', opts).ok).toBe(true);
-    const blocked = checkRate('ns', 'k', opts);
+    expect((await checkRate('ns', 'k', opts)).ok).toBe(true);
+    expect((await checkRate('ns', 'k', opts)).ok).toBe(true);
+    expect((await checkRate('ns', 'k', opts)).ok).toBe(true);
+    const blocked = await checkRate('ns', 'k', opts);
     expect(blocked.ok).toBe(false);
     if (!blocked.ok) expect(blocked.retryAfterSec).toBeGreaterThan(0);
   });
 
-  it('isolates counters by namespace and by key', () => {
+  it('isolates counters by namespace and by key', async () => {
     const opts = { max: 1, windowMs: 60_000 };
-    expect(checkRate('a', 'k', opts).ok).toBe(true);
-    expect(checkRate('a', 'k', opts).ok).toBe(false); // same ns+key blocked
-    expect(checkRate('b', 'k', opts).ok).toBe(true); // different ns
-    expect(checkRate('a', 'k2', opts).ok).toBe(true); // different key
+    expect((await checkRate('a', 'k', opts)).ok).toBe(true);
+    expect((await checkRate('a', 'k', opts)).ok).toBe(false); // same ns+key blocked
+    expect((await checkRate('b', 'k', opts)).ok).toBe(true); // different ns
+    expect((await checkRate('a', 'k2', opts)).ok).toBe(true); // different key
   });
 
-  it('reports decreasing remaining', () => {
+  it('reports decreasing remaining', async () => {
     const opts = { max: 2, windowMs: 60_000 };
-    const r1 = checkRate('ns', 'x', opts);
-    const r2 = checkRate('ns', 'x', opts);
+    const r1 = await checkRate('ns', 'x', opts);
+    const r2 = await checkRate('ns', 'x', opts);
     expect(r1.ok && r1.remaining).toBe(1);
     expect(r2.ok && r2.remaining).toBe(0);
   });

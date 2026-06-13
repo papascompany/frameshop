@@ -53,7 +53,7 @@ export async function POST(request: Request): Promise<Response> {
   const { email, password } = parsed.data;
 
   // Rate limit check BEFORE touching Supabase auth.
-  const rl = checkLoginRate(email);
+  const rl = await checkLoginRate(email);
   if (!rl.ok) {
     console.warn(JSON.stringify({ event: 'login_rate_limited', email: email.split('@')[1] }));
     return NextResponse.json(
@@ -78,7 +78,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // Reset rate limit bucket on successful login.
-  resetLoginRate(email);
+  await resetLoginRate(email);
   console.info(JSON.stringify({ event: 'login_success', domain: email.split('@')[1] }));
 
   // Link any guest orders placed with this (now-verified) email to the account

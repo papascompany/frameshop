@@ -15,8 +15,8 @@ async function getUserId(): Promise<UserId | null> {
 }
 
 /** Per-user cart-mutation throttle (shared by PATCH/DELETE). null = allowed. */
-function cartRateLimited(userId: UserId): Response | null {
-  const rate = checkRate('cart_write', userId as string, { max: 60, windowMs: 60_000 });
+async function cartRateLimited(userId: UserId): Promise<Response | null> {
+  const rate = await checkRate('cart_write', userId as string, { max: 60, windowMs: 60_000 });
   if (rate.ok) return null;
   return NextResponse.json(
     { ok: false, code: 'RATE_LIMITED' },
@@ -38,7 +38,7 @@ export async function PATCH(
   if (!userId) {
     return NextResponse.json({ ok: false, code: 'UNAUTHENTICATED' }, { status: 401 });
   }
-  const limited = cartRateLimited(userId);
+  const limited = await cartRateLimited(userId);
   if (limited) return limited;
   const { localId } = await context.params;
   let body: { quantity?: number };
@@ -69,7 +69,7 @@ export async function DELETE(
   if (!userId) {
     return NextResponse.json({ ok: false, code: 'UNAUTHENTICATED' }, { status: 401 });
   }
-  const limited = cartRateLimited(userId);
+  const limited = await cartRateLimited(userId);
   if (limited) return limited;
   const { localId } = await context.params;
   await removeCartItem(userId, asBrand<LocalId>(localId));

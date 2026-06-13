@@ -35,7 +35,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Rate limit by IP. Uses the trusted client IP (right-most XFF hop / x-real-ip)
   // so a spoofed left-most X-Forwarded-For can't forge a fresh bucket.
   const ip = getClientIp(req);
-  const rateResult = checkLookupRate(ip);
+  const rateResult = await checkLookupRate(ip);
   if (!rateResult.ok) {
     return NextResponse.json(TOO_MANY, {
       status: 429,
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Spoof-proof secondary limit keyed by the order being probed: caps phone
   // enumeration per orderNo regardless of IP rotation (the IP limit alone is
   // bypassable with a botnet / rotating IPs).
-  const perOrder = checkRate('order_lookup', orderNo, { max: 10, windowMs: 15 * 60_000 });
+  const perOrder = await checkRate('order_lookup', orderNo, { max: 10, windowMs: 15 * 60_000 });
   if (!perOrder.ok) {
     return NextResponse.json(TOO_MANY, {
       status: 429,

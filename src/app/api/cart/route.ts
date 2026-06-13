@@ -47,7 +47,7 @@ export async function POST(request: Request): Promise<Response> {
       { status: 401 },
     );
   }
-  const rate = checkRate('cart_write', userId as string, { max: 60, windowMs: 60_000 });
+  const rate = await checkRate('cart_write', userId as string, { max: 60, windowMs: 60_000 });
   if (!rate.ok) {
     return NextResponse.json(
       { ok: false, code: 'RATE_LIMITED' },
