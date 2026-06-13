@@ -7,6 +7,7 @@ import { Container } from '@/components/layout/Container';
 import { OptionTabs } from '@/components/OptionTabs';
 import { Button } from '@/components/ui/Button';
 import { PriceTag } from '@/components/PriceTag';
+import { MobileStickyBar } from '@/components/MobileStickyBar';
 import { ArtworkPicker } from '@/components/ArtworkPicker';
 import { GooglePhotosPicker } from '@/components/GooglePhotosPicker';
 import {
@@ -190,15 +191,17 @@ export function StudioClient({
    * canvas then resets so the next photo can be placed. Multiple photos share
    * the same options and are added to the cart together later.
    */
-  async function handleAddToTray() {
-    if (!photo) return;
+  /** Render + upload the active photo's print crop and push it into the tray.
+   *  Returns true on success. */
+  async function handleAddToTray(): Promise<boolean> {
+    if (!photo) return false;
     setPlacing(true);
     setUploadError(null);
     try {
       const result = await canvasRef.current?.exportPrintCrop();
       if (!result) {
         setUploadError('크롭 이미지를 만들 수 없습니다. 잠시 후 다시 시도해 주세요.');
-        return;
+        return false;
       }
       const form = new FormData();
       form.append('file', result.blob, `cropped-${crypto.randomUUID()}.jpg`);
@@ -211,11 +214,13 @@ export function StudioClient({
           previewUrl: body.photo.thumbUrl ?? body.photo.originalUrl,
         });
         setPhotoSourceTab('upload');
-      } else {
-        setUploadError('이미지 처리에 실패했습니다. 다시 시도해 주세요.');
+        return true;
       }
+      setUploadError('이미지 처리에 실패했습니다. 다시 시도해 주세요.');
+      return false;
     } catch {
       setUploadError('사진을 담는 중 오류가 발생했습니다.');
+      return false;
     } finally {
       setPlacing(false);
     }
@@ -225,12 +230,22 @@ export function StudioClient({
    * "장바구니 담기": add every tray entry as its own cart line (same options,
    * per-entry quantity), then go to the cart. Each entry's photo is the already
    * print-ready crop, so it is added with an identity transform.
+   *
+   * #8: if a photo is still being placed on the canvas (not yet in the tray),
+   * include it automatically so it is never silently dropped at checkout.
    */
   async function handleCheckoutAll() {
-    if (!variantId || entries.length === 0) return;
+    if (!variantId) return;
     setConfirming(true);
     try {
-      for (const entry of entries) {
+      if (photo) {
+        const ok = await handleAddToTray();
+        if (!ok) return; // upload failed — keep the user on the editor
+      }
+      // Read the freshest tray (handleAddToTray updates the store async).
+      const all = useEditorStore.getState().entries;
+      if (all.length === 0) return;
+      for (const entry of all) {
         await addToCart({
           userId: null,
           productId: productDetail.product.id,
@@ -252,18 +267,28 @@ export function StudioClient({
 
   /**
    * Size change clears the tray (baked crops no longer fit the new aspect).
-   * Confirm with the user when entries would be discarded.
+   * Confirm with the concrete count so the cost is visible (#12).
    */
   function handleSizeChange(code: string) {
     if (code === selected.sizeCode) return;
     if (
       entries.length > 0 &&
-      !window.confirm('사이즈를 변경하면 담은 사진을 다시 맞춰야 합니다. 계속할까요?')
+      !window.confirm(`사이즈를 변경하면 담은 사진 ${entries.length}종이 초기화됩니다. 계속할까요?`)
     ) {
       return;
     }
     setSize(code);
   }
+
+  // 결제 가능 여부: 트레이에 사진이 있거나, 편집 중인 사진이 있으면(담기 후 주문).
+  const canCheckout = entries.length > 0 || !!photo;
+  const checkoutLabel = confirming
+    ? '담는 중…'
+    : totalQuantity > 0
+      ? `장바구니 담기 (${totalQuantity}장)`
+      : photo
+        ? '장바구니 담기'
+        : '사진을 먼저 담아주세요';
 
   // 매트 라벨 매핑
   const matteLabels: Record<string, string> = { none: '없음', with: '있음' };
@@ -275,7 +300,7 @@ export function StudioClient({
   };
 
   return (
-    <Container size="lg" className="py-6 md:py-10">
+    <Container size="lg" className="pt-6 pb-28 md:py-10">
       {/* PC: 2컬럼 레이아웃 */}
       <div className="md:grid md:grid-cols-[1fr_380px] md:gap-8">
         {/* 좌측: 캔버스 / 사진 소스 + 담은 사진 트레이 */}
@@ -421,7 +446,7 @@ export function StudioClient({
             />
           ) : null}
 
-          {/* 합계 + 장바구니 담기 */}
+          {/* 합계 + 장바구니 담기 (데스크톱) */}
           <div className="mt-4 flex items-end justify-between gap-3">
             <div>
               <p className="text-xs text-mute mb-0.5">
@@ -434,19 +459,16 @@ export function StudioClient({
           <Button
             variant="primary"
             size="lg"
-            disabled={entries.length === 0 || !variantId || confirming}
+            disabled={!canCheckout || !variantId || confirming}
             onClick={() => void handleCheckoutAll()}
+            className="hidden md:flex"
           >
-            {confirming
-              ? '담는 중…'
-              : entries.length > 0
-                ? `장바구니 담기 (${totalQuantity}장)`
-                : '사진을 먼저 담아주세요'}
+            {checkoutLabel}
           </Button>
 
-          {photo ? (
+          {photo && entries.length > 0 ? (
             <p className="text-xs text-muted-fg">
-              현재 편집 중인 사진은 <b className="font-medium">이 사진 담기</b>를 눌러야 주문에 포함됩니다.
+              편집 중인 사진은 <b className="font-medium">장바구니 담기</b> 시 함께 담깁니다.
             </p>
           ) : null}
 
@@ -455,6 +477,27 @@ export function StudioClient({
           </p>
         </div>
       </div>
+
+      {/* 모바일: 하단 고정 장바구니 바 */}
+      <MobileStickyBar>
+        <div className="flex items-center gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] text-mute leading-none mb-0.5">
+              {totalQuantity > 0 ? `총 ${totalQuantity}장` : '낱장 단가'}
+            </p>
+            <PriceTag amount={totalQuantity > 0 ? totalPrice : price} variant="large" />
+          </div>
+          <Button
+            variant="primary"
+            size="lg"
+            className="ml-auto"
+            disabled={!canCheckout || !variantId || confirming}
+            onClick={() => void handleCheckoutAll()}
+          >
+            {checkoutLabel}
+          </Button>
+        </div>
+      </MobileStickyBar>
 
       <input type="hidden" data-testid="session-id" value={sessionId as unknown as SessionId} />
       <input type="hidden" data-testid="product-id" value={productDetail.product.id as unknown as ProductId} />
