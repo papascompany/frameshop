@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { courierTrackingUrl } from '@/lib/shipping/courier';
 import type { OrderStatus, OrderWithItems } from '@/types/order';
 
 /**
@@ -154,6 +155,7 @@ export function MyOrdersClient({ orders }: Props) {
   const t = useTranslations('account');
   const tStatus = useTranslations('order.status');
   const [reorderingId, setReorderingId] = useState<string | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
   const [reviewOrderId, setReviewOrderId] = useState<string | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
 
@@ -167,6 +169,7 @@ export function MyOrdersClient({ orders }: Props) {
 
   async function handleReorder(orderId: string) {
     setReorderingId(orderId);
+    setReorderError(null);
     try {
       const res = await fetch('/api/cart/reorder', {
         method: 'POST',
@@ -179,12 +182,12 @@ export function MyOrdersClient({ orders }: Props) {
         code?: string;
       };
       if (!body.ok) {
-        alert('재주문 처리 중 오류가 발생했습니다.');
+        setReorderError('재주문 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
         return;
       }
       router.push('/cart');
     } catch {
-      alert('재주문 요청에 실패했습니다.');
+      setReorderError('재주문 요청에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setReorderingId(null);
     }
@@ -194,9 +197,14 @@ export function MyOrdersClient({ orders }: Props) {
     return (
       <div className="text-center py-16 text-muted-fg">
         <p className="text-sm">{t('noOrders')}</p>
-        <Link href="/catalog/basic-frame" className="mt-4 inline-block text-sm underline">
-          {t('startShopping')}
-        </Link>
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <Link href="/catalog/basic-frame" className="text-sm underline">
+            {t('startShopping')}
+          </Link>
+          <Link href="/order/lookup" className="text-xs underline text-muted-fg">
+            비회원으로 주문하셨나요? 주문 조회
+          </Link>
+        </div>
       </div>
     );
   }
@@ -212,6 +220,12 @@ export function MyOrdersClient({ orders }: Props) {
             setReviewOrderId(null);
           }}
         />
+      ) : null}
+
+      {reorderError ? (
+        <p role="alert" className="mb-3 text-sm text-danger border border-danger rounded-md px-3 py-2">
+          {reorderError}
+        </p>
       ) : null}
 
       <ul className="flex flex-col gap-4">
@@ -259,6 +273,29 @@ export function MyOrdersClient({ orders }: Props) {
                     <p className="text-xs text-muted-fg">외 {rest}건</p>
                   )}
                 </div>
+
+                {/* 배송 추적 (#10) — SHIPPED/DELIVERED 운송장 링크 */}
+                {order.trackingNumber ? (
+                  <div className="border-t border-border pt-3">
+                    {(() => {
+                      const url = courierTrackingUrl(order.courier, order.trackingNumber);
+                      return url ? (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-[44px] items-center text-sm text-ink underline underline-offset-2"
+                        >
+                          {order.courier} · {order.trackingNumber} · 배송조회
+                        </a>
+                      ) : (
+                        <p className="text-sm text-muted-fg">
+                          {order.courier} · {order.trackingNumber}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                ) : null}
 
                 {/* 인쇄파일 링크 */}
                 {order.items.some((item) => item.printFileUrl) && (
