@@ -1,9 +1,11 @@
 /**
- * Print rendering unit tests (frame_skills §3.1, §8 FE-07/08).
+ * Print rendering unit tests (photo-only renderer — product decision
+ * 2026-06-13).
  *
- * The renderer is pure: it consumes buffers + a transform and emits a PNG
- * buffer. We feed it small synthetic photo + frame buffers built with sharp
- * and assert on the geometry of the output (pixel dims + bleed presence).
+ * The renderer is pure: it consumes the client-baked crop buffer + the print
+ * geometry (inner_rect, variant mm, per-product bleed) and emits a 300dpi PNG.
+ * Orientation is derived from the baked crop's own aspect. We feed it small
+ * synthetic crops built with sharp and assert on the output geometry.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -12,7 +14,6 @@ import {
   BLEED_MM,
   mmToPx,
   renderPrintFile,
-  type InnerRectNorm,
 } from '@/lib/render/print';
 
 // ---------- Helpers ----------
@@ -20,69 +21,16 @@ import {
 async function makeSolidPhoto(
   width: number,
   height: number,
-  color: { r: number; g: number; b: number },
+  color: { r: number; g: number; b: number } = { r: 255, g: 0, b: 0 },
 ): Promise<Buffer> {
   return sharp({
-    create: {
-      width,
-      height,
-      channels: 4,
-      background: { ...color, alpha: 1 },
-    },
+    create: { width, height, channels: 4, background: { ...color, alpha: 1 } },
   })
     .png()
     .toBuffer();
 }
 
-/**
- * Build a frame PNG: opaque border, transparent interior matching innerRect.
- * The frame PNG is rendered as-is in the editor and stretched to inner-print
- * dimensions in the renderer; for tests we just need real RGBA bytes.
- */
-async function makeFrame(
-  width: number,
-  height: number,
-  innerRect: InnerRectNorm,
-  borderColor: { r: number; g: number; b: number },
-): Promise<Buffer> {
-  // Start with a solid border colour, then punch a transparent rectangle
-  // through it at innerRect. The simplest way: composite a transparent rect.
-  const irX = Math.round(innerRect.x * width);
-  const irY = Math.round(innerRect.y * height);
-  const irW = Math.round(innerRect.w * width);
-  const irH = Math.round(innerRect.h * height);
-
-  // Make a transparent inner patch.
-  const transparentInner = await sharp({
-    create: {
-      width: irW,
-      height: irH,
-      channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    },
-  })
-    .png()
-    .toBuffer();
-
-  return sharp({
-    create: {
-      width,
-      height,
-      channels: 4,
-      background: { ...borderColor, alpha: 1 },
-    },
-  })
-    .composite([
-      {
-        input: transparentInner,
-        left: irX,
-        top: irY,
-        blend: 'dest-out', // erase the inner rect on the base.
-      },
-    ])
-    .png()
-    .toBuffer();
-}
+const FULL = { x: 0, y: 0, w: 1, h: 1 };
 
 // ---------- mmToPx (FE-07) ----------
 
@@ -95,152 +43,125 @@ describe('mmToPx', () => {
     expect(mmToPx(152)).toBe(1795);
   });
 
-  it('rounds half-pixel values', () => {
-    // 1mm = 11.811... px → 12
-    expect(mmToPx(1)).toBe(12);
-  });
-
-  it('BLEED_MM is the 2mm industry standard', () => {
+  it('BLEED_MM default is the 2mm industry standard', () => {
     expect(BLEED_MM).toBe(2);
   });
 });
 
-// ---------- renderPrintFile geometry (FE-07) ----------
+// ---------- Photo-only output dimensions ----------
 
-describe('renderPrintFile — output dimensions', () => {
-  it('produces a 4×6 print at 1252×1842 px (inner 1205×1795 + 47px bleed each side)', async () => {
-    const photo = await makeSolidPhoto(200, 200, { r: 255, g: 0, b: 0 });
-    const frame = await makeFrame(
-      200,
-      250,
-      { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      { r: 0, g: 0, b: 0 },
-    );
-
+describe('renderPrintFile — output dimensions (photo-only)', () => {
+  it('4×6 portrait, full window, no bleed → 1205×1795 px', async () => {
     const out = await renderPrintFile({
-      photoBuffer: photo,
-      frameBuffer: frame,
-      innerRect: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      cropTransform: { x: 300, y: 450, scale: 1.0, rotation: 0 },
-      stageSize: { w: 600, h: 900 },
+      photoBuffer: await makeSolidPhoto(400, 600), // portrait crop
+      innerRect: FULL,
       variant: { widthMm: 102, heightMm: 152 },
+      bleedMm: 0,
     });
+    expect(out.widthPx).toBe(mmToPx(102));
+    expect(out.heightPx).toBe(mmToPx(152));
 
-    // mmToPx(102 + 2*2) = mmToPx(106) = round(106/25.4*300) = round(1252.0) = 1252
-    // mmToPx(152 + 2*2) = mmToPx(156) = round(156/25.4*300) = round(1842.5) = 1843 — but we
-    // compose innerW + 2*bleedPx (with bleedPx = mmToPx(2) = round(23.62) = 24),
-    // so totalW = 1205 + 48 = 1253 and totalH = 1795 + 48 = 1843. Either is
-    // within ±1px depending on rounding order; assert via the same code path.
-    expect(out.widthPx).toBe(mmToPx(102) + 2 * mmToPx(2));
-    expect(out.heightPx).toBe(mmToPx(152) + 2 * mmToPx(2));
-
-    // Decode the PNG to confirm metadata agrees.
     const meta = await sharp(out.buffer).metadata();
     expect(meta.width).toBe(out.widthPx);
     expect(meta.height).toBe(out.heightPx);
     expect(meta.format).toBe('png');
   });
 
-  it('produces an 11×14 print at the expected mm-derived dimensions', async () => {
-    // 11×14 inch ≈ 279×356 mm.
-    const photo = await makeSolidPhoto(200, 200, { r: 0, g: 200, b: 0 });
-    const frame = await makeFrame(
-      200,
-      250,
-      { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      { r: 60, g: 60, b: 60 },
-    );
-
+  it('4×6 LANDSCAPE crop swaps the canvas to wide → 1795×1205 px', async () => {
+    // Same variant (stored portrait 102×152) but the baked crop is landscape.
+    // Orientation must come from the crop's aspect, not the raw variant.
     const out = await renderPrintFile({
-      photoBuffer: photo,
-      frameBuffer: frame,
-      innerRect: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      cropTransform: { x: 300, y: 400, scale: 1.0, rotation: 0 },
-      stageSize: { w: 600, h: 800 },
-      variant: { widthMm: 279, heightMm: 356 },
-    });
-
-    expect(out.widthPx).toBe(mmToPx(279) + 2 * mmToPx(2));
-    expect(out.heightPx).toBe(mmToPx(356) + 2 * mmToPx(2));
-  });
-});
-
-// ---------- Rotation handling ----------
-
-describe('renderPrintFile — rotation', () => {
-  it('does not throw for a 90° rotated photo, output dims preserved', async () => {
-    // Non-square photo so rotation has a visible effect on the bounding box
-    // of the photo layer (canvas dims should still match the variant).
-    const photo = await makeSolidPhoto(300, 150, { r: 0, g: 0, b: 255 });
-    const frame = await makeFrame(
-      200,
-      250,
-      { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      { r: 0, g: 0, b: 0 },
-    );
-
-    const out = await renderPrintFile({
-      photoBuffer: photo,
-      frameBuffer: frame,
-      innerRect: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      cropTransform: { x: 300, y: 450, scale: 1.0, rotation: 90 },
-      stageSize: { w: 600, h: 900 },
+      photoBuffer: await makeSolidPhoto(600, 400), // landscape crop
+      innerRect: FULL,
       variant: { widthMm: 102, heightMm: 152 },
+      bleedMm: 0,
     });
+    expect(out.widthPx).toBe(mmToPx(152)); // wide
+    expect(out.heightPx).toBe(mmToPx(102));
+  });
 
-    // Canvas dims always come from the variant, never from the rotated photo.
-    expect(out.widthPx).toBe(mmToPx(102) + 2 * mmToPx(2));
-    expect(out.heightPx).toBe(mmToPx(152) + 2 * mmToPx(2));
+  it('per-product bleed expands the canvas on every side', async () => {
+    const out = await renderPrintFile({
+      photoBuffer: await makeSolidPhoto(400, 600),
+      innerRect: FULL,
+      variant: { widthMm: 102, heightMm: 152 },
+      bleedMm: 2,
+    });
+    expect(out.widthPx).toBe(mmToPx(102 + 2 * 2)); // mmToPx(106) = 1252
+    expect(out.heightPx).toBe(mmToPx(152 + 2 * 2)); // mmToPx(156) = 1843
+  });
+
+  it('bleed 0 ("정사이즈") prints exactly the inner-window physical size', async () => {
+    // Matted frame: inner window is 80% of the frame.
+    const out = await renderPrintFile({
+      photoBuffer: await makeSolidPhoto(400, 600),
+      innerRect: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
+      variant: { widthMm: 102, heightMm: 152 },
+      bleedMm: 0,
+    });
+    expect(out.widthPx).toBe(mmToPx(0.8 * 102));
+    expect(out.heightPx).toBe(mmToPx(0.8 * 152));
+  });
+
+  it('11×14 portrait, full window, 2mm bleed → mm-derived dims', async () => {
+    const out = await renderPrintFile({
+      photoBuffer: await makeSolidPhoto(800, 1000),
+      innerRect: FULL,
+      variant: { widthMm: 279, heightMm: 356 },
+      bleedMm: 2,
+    });
+    expect(out.widthPx).toBe(mmToPx(279 + 4));
+    expect(out.heightPx).toBe(mmToPx(356 + 4));
   });
 });
 
-// ---------- Bleed presence (FE-08) ----------
+// ---------- Degenerate input ----------
 
-describe('renderPrintFile — bleed', () => {
-  it('extends the canvas so the outer 2mm band has opaque pixels (no transparent strip)', async () => {
-    // Build the smallest reasonable test case so we can decode raw pixels.
-    const photo = await makeSolidPhoto(100, 100, { r: 255, g: 0, b: 0 });
-    const frame = await makeFrame(
-      100,
-      100,
-      { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      { r: 30, g: 30, b: 30 },
-    );
+describe('renderPrintFile — invalid geometry', () => {
+  it('throws on a zero-area inner_rect instead of emitting a 1×1px print', async () => {
+    await expect(
+      renderPrintFile({
+        photoBuffer: await makeSolidPhoto(400, 600),
+        innerRect: { x: 0, y: 0, w: 0, h: 1 },
+        variant: { widthMm: 102, heightMm: 152 },
+        bleedMm: 0,
+      }),
+    ).rejects.toThrow(/non-positive print size/);
+  });
+});
+
+// ---------- White background (alpha flattened) ----------
+
+describe('renderPrintFile — opaque output', () => {
+  it('flattens any alpha so the print has no transparent pixels', async () => {
+    // A crop with a transparent corner (e.g. baked rotation) must print white.
+    const withAlpha = await sharp({
+      create: { width: 300, height: 400, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    })
+      .png()
+      .toBuffer();
 
     const out = await renderPrintFile({
-      photoBuffer: photo,
-      frameBuffer: frame,
-      innerRect: { x: 0.1, y: 0.1, w: 0.8, h: 0.8 },
-      cropTransform: { x: 50, y: 50, scale: 1.0, rotation: 0 },
-      stageSize: { w: 100, h: 100 },
-      variant: { widthMm: 25, heightMm: 25 },
+      photoBuffer: withAlpha,
+      innerRect: FULL,
+      variant: { widthMm: 102, heightMm: 152 },
+      bleedMm: 0,
     });
 
-    // Decode to raw RGBA pixels and probe a pixel inside the bleed band.
     const { data, info } = await sharp(out.buffer)
       .ensureAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
-    const bleedPx = mmToPx(BLEED_MM);
-    // Top-left of the bleed band (always inside the extended region).
-    const px = (y: number, x: number): number =>
-      data[(y * info.width + x) * info.channels];
     const alphaAt = (y: number, x: number): number =>
       data[(y * info.width + x) * info.channels + 3];
-
-    // Outermost pixel should be opaque (extend({ extendWith: 'copy' }) copies
-    // edge pixels including their alpha — our inner canvas is fully opaque
-    // white, so alpha === 255 across the bleed).
     expect(alphaAt(0, 0)).toBe(255);
-    expect(alphaAt(0, info.width - 1)).toBe(255);
-    expect(alphaAt(info.height - 1, 0)).toBe(255);
     expect(alphaAt(info.height - 1, info.width - 1)).toBe(255);
-
-    // And the bleed band's pixel should match the corresponding edge pixel
-    // of the inner area (i.e. it was copied, not left transparent/black).
-    // Compare red channel of (0, bleedPx) to (bleedPx, bleedPx) within ±2.
-    const rOuter = px(0, bleedPx);
-    const rInnerEdge = px(bleedPx, bleedPx);
-    expect(Math.abs(rOuter - rInnerEdge)).toBeLessThanOrEqual(2);
+    // Flattened transparent → white.
+    const r = data[0];
+    const g = data[1];
+    const b = data[2];
+    expect(r).toBe(255);
+    expect(g).toBe(255);
+    expect(b).toBe(255);
   });
 });

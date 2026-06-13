@@ -65,12 +65,13 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const { data: variants, error: vErr } = await supabase
     .from('product_variants')
     .select(
-      'id, is_active, price, product_id, size_label, color_label, color_code, products(name)',
+      'id, is_active, price, product_id, size_label, color_label, color_code, products(name, bleed_mm)',
     )
     .in('id', variantIds);
   if (vErr) {
     throw new CreateOrderError('INVALID_VARIANT', vErr.message);
   }
+  type ProductJoin = { name: string; bleed_mm: number | string | null };
   type VariantWithProduct = {
     id: string;
     is_active: boolean;
@@ -79,7 +80,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     size_label: string;
     color_label: string;
     color_code: string;
-    products: { name: string } | { name: string }[] | null;
+    products: ProductJoin | ProductJoin[] | null;
   };
   const variantById = new Map(
     ((variants ?? []) as VariantWithProduct[]).map((v) => [v.id, v]),
@@ -205,9 +206,16 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const itemRows = input.cartItems.map((item) => {
     const v = variantById.get(item.variantId as string)!;
     // Supabase join returns object (one-to-one) or array depending on schema.
-    const productName = Array.isArray(v.products)
-      ? (v.products[0]?.name ?? '')
-      : (v.products?.name ?? '');
+    const product = Array.isArray(v.products) ? v.products[0] : v.products;
+    const productName = product?.name ?? '';
+    // Freeze the per-product bleed so the render reproduces the baked crop's
+    // exact size even if admin later edits products.bleed_mm.
+    const rawBleed = product?.bleed_mm;
+    const bleedNum = typeof rawBleed === 'string' ? Number(rawBleed) : rawBleed;
+    const bleedMm =
+      typeof bleedNum === 'number' && Number.isFinite(bleedNum) && bleedNum >= 0
+        ? bleedNum
+        : 0;
     const snapshot: OrderItemSnapshot = {
       productId: item.productId,
       variantId: item.variantId,
@@ -216,6 +224,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       sizeLabel: v.size_label,
       colorLabel: v.color_label,
       unitPrice: v.price,
+      bleedMm,
     };
     const frameAssetId = frameByKey.get(`${v.product_id}|${v.color_code}`) ?? null;
     return {
