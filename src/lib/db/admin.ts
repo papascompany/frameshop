@@ -6,6 +6,7 @@ import 'server-only';
 import { cache } from 'react';
 import { asBrand } from '@/types/common';
 import type {
+  CategoryId,
   CurationId,
   FrameAssetId,
   ProductId,
@@ -13,15 +14,17 @@ import type {
 } from '@/types/common';
 import type {
   AdminUser,
+  CategoryFormInput,
   CurationInput,
   FrameAssetInput,
   ImportReport,
   ProductFormInput,
   VariantInput,
 } from '@/types/admin';
-import type { FrameAsset, Product } from '@/types/product';
+import type { Category, FrameAsset, Product } from '@/types/product';
 import type { Curation } from '@/types/curation';
 import {
+  mapCategory,
   mapCuration,
   mapFrameAsset,
   mapProduct,
@@ -140,6 +143,72 @@ export async function toggleProductActive(
     .update({ is_active: active })
     .eq('id', id as string);
   if (error) throw new Error(`toggleProductActive: ${error.message}`);
+}
+
+// ---------- Categories (상품 라인) ----------
+
+/** Admin-only: ALL categories (incl. inactive), flat, ordered by sort_order. */
+export async function getAllCategoriesAdmin(): Promise<Category[]> {
+  await requireAdmin();
+  const supabase = getServiceRoleSupabase();
+  const { data, error } = await supabase
+    .from('categories')
+    .select('id, slug, name, parent_id, sort_order, is_active')
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`getAllCategoriesAdmin: ${error.message}`);
+  return (data ?? []).map(mapCategory);
+}
+
+export async function upsertCategory(
+  input: CategoryFormInput & { id?: CategoryId },
+): Promise<Category> {
+  await requireAdmin();
+  const supabase = getServiceRoleSupabase();
+  const row = {
+    slug: input.slug,
+    name: input.name,
+    parent_id: (input.parentId ?? null) as string | null,
+    sort_order: input.sortOrder,
+    is_active: input.isActive,
+  };
+  const result = input.id
+    ? await supabase.from('categories').update(row).eq('id', input.id as string).select().single()
+    : await supabase.from('categories').insert(row).select().single();
+  if (result.error || !result.data) {
+    throw new Error(`upsertCategory: ${result.error?.message ?? 'no row'}`);
+  }
+  return mapCategory(result.data);
+}
+
+export async function toggleCategoryActive(
+  id: CategoryId,
+  active: boolean,
+): Promise<void> {
+  await requireAdmin();
+  const supabase = getServiceRoleSupabase();
+  const { error } = await supabase
+    .from('categories')
+    .update({ is_active: active })
+    .eq('id', id as string);
+  if (error) throw new Error(`toggleCategoryActive: ${error.message}`);
+}
+
+export async function deleteCategory(id: CategoryId): Promise<void> {
+  await requireAdmin();
+  const supabase = getServiceRoleSupabase();
+  const { error } = await supabase
+    .from('categories')
+    .delete()
+    .eq('id', id as string);
+  if (error) {
+    // products.category_id REFERENCES categories ON DELETE RESTRICT — a category
+    // that still has products cannot be deleted. Surface a friendly message.
+    if (/foreign key|violates|23503/i.test(error.message)) {
+      throw new Error('이 카테고리에 속한 상품이 있어 삭제할 수 없습니다. 비활성화를 사용하세요.');
+    }
+    throw new Error(`deleteCategory: ${error.message}`);
+  }
 }
 
 // ---------- Frame assets ----------

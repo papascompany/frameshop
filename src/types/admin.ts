@@ -75,6 +75,29 @@ export const productFormSchema = z.object({
   bleedMm: z.number().min(0).max(50),
 });
 
+// ---------- Category admin inputs ----------
+
+export type CategoryFormInput = {
+  slug: string;
+  name: string;
+  parentId: CategoryId | null;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export const categoryFormSchema = z.object({
+  // URL segment (/catalog/<slug>) — lowercase alphanumeric + dashes only.
+  slug: z
+    .string()
+    .min(1)
+    .max(40)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, '소문자/숫자/하이픈만 사용하세요 (예: premium-frame)'),
+  name: z.string().min(1).max(40),
+  parentId: z.string().min(1).nullable(),
+  sortOrder: z.number().int().nonnegative(),
+  isActive: z.boolean(),
+});
+
 // ---------- Frame admin inputs ----------
 
 export type FrameAssetInput = {

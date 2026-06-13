@@ -88,6 +88,12 @@ const IconArrowLeft = () => (
   </svg>
 );
 
+const IconTag = () => (
+  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden>
+    <path fillRule="evenodd" d="M5.5 2.75A2.75 2.75 0 0 0 2.75 5.5v3.043c0 .729.29 1.428.805 1.944l6.25 6.25a2.75 2.75 0 0 0 3.89 0l3.043-3.043a2.75 2.75 0 0 0 0-3.89l-6.25-6.25a2.75 2.75 0 0 0-1.944-.805H5.5Zm1.25 4a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5Z" clipRule="evenodd" />
+  </svg>
+);
+
 const NAV_SECTIONS: NavSection[] = [
   {
     items: [
@@ -97,6 +103,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: '상품 관리',
     items: [
+      { href: '/admin/categories', label: '카테고리', icon: <IconTag /> },
       { href: '/admin/products', label: '상품', icon: <IconBox /> },
       { href: '/admin/frames', label: '프레임', icon: <IconFrame /> },
       { href: '/admin/options', label: '옵션', icon: <IconSliders /> },
