@@ -52,7 +52,16 @@ type State = {
    * changes (crop geometry no longer matches).
    */
   entries: EditorPhotoEntry[];
+  /**
+   * Frame orientation. The size SKU (4×6 등) is a physical frame that can hang
+   * either way; 'portrait' = tall, 'landscape' = wide. Auto-matched to the
+   * photo's aspect on load (가로 사진 → 가로 틀). Changing it swaps the crop
+   * aspect, so the tray is cleared (like a size change).
+   */
+  orientation: FrameOrientation;
 };
+
+export type FrameOrientation = 'portrait' | 'landscape';
 
 type Actions = {
   init: (args: {
@@ -63,6 +72,8 @@ type Actions = {
   setPhoto: (photo: Photo) => void;
   /** Drop the active photo without adding it (e.g. start over / after 담기). */
   clearActivePhoto: () => void;
+  /** Switch portrait/landscape. Clears the tray (crop aspect changes). */
+  setOrientation: (o: FrameOrientation) => void;
   setColor: (code: string) => void;
   setSize: (code: string) => void;
   setMatte: (code: 'none' | 'with') => void;
@@ -96,6 +107,7 @@ const initial: State = {
   isProcessing: false,
   confirmedCrop: null,
   entries: [],
+  orientation: 'portrait',
 };
 
 function resolveVariant(state: State, partial: Partial<SelectedOptions>): ProductVariantId | null {
@@ -130,13 +142,34 @@ export const useEditorStore = create<State & Actions>((set) => ({
         : initial.selectedOptions,
     });
   },
-  setPhoto: (photo) => set({ photo, photoId: photo.id, confirmedCrop: null }),
+  setPhoto: (photo) =>
+    set((s) => {
+      // #2 가로/세로 자동 매칭: 트레이가 비어 있을 때만 사진 방향으로 틀 방향을
+      // 맞춘다(이미 담은 사진들의 방향을 깨지 않기 위해). 치수를 모르면 유지.
+      let orientation = s.orientation;
+      if (
+        s.entries.length === 0 &&
+        typeof photo.widthPx === 'number' &&
+        typeof photo.heightPx === 'number' &&
+        photo.widthPx > 0 &&
+        photo.heightPx > 0
+      ) {
+        orientation = photo.widthPx > photo.heightPx ? 'landscape' : 'portrait';
+      }
+      return { photo, photoId: photo.id, confirmedCrop: null, orientation };
+    }),
   clearActivePhoto: () =>
     set({
       photo: null,
       photoId: null,
       confirmedCrop: null,
       cropTransform: initial.cropTransform,
+    }),
+  setOrientation: (o) =>
+    set((s) => {
+      if (o === s.orientation) return s;
+      // Swapping the frame aspect invalidates baked crops → clear the tray.
+      return { orientation: o, confirmedCrop: null, entries: [] };
     }),
   setColor: (code) =>
     set((s) => {

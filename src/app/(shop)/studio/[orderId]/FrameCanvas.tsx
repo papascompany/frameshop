@@ -93,7 +93,20 @@ type StageGeom = {
   frameH: number;
 };
 
-function stageGeometryForVariant(variant: ProductVariant | null): StageGeom {
+/** Effective frame mm for the chosen orientation. portrait = tall, landscape = wide. */
+function orientedFrameMm(
+  variant: ProductVariant,
+  orientation: 'portrait' | 'landscape',
+): { wMm: number; hMm: number } {
+  const lo = Math.min(variant.widthMm, variant.heightMm);
+  const hi = Math.max(variant.widthMm, variant.heightMm);
+  return orientation === 'landscape' ? { wMm: hi, hMm: lo } : { wMm: lo, hMm: hi };
+}
+
+function stageGeometryForVariant(
+  variant: ProductVariant | null,
+  orientation: 'portrait' | 'landscape' = 'portrait',
+): StageGeom {
   // Pre-init / unknown — fall back to a square.
   if (!variant || variant.widthMm <= 0 || variant.heightMm <= 0) {
     const padX = Math.round(FRAME_MAX_LONG_EDGE_PX * STAGE_PADDING_RATIO);
@@ -106,7 +119,8 @@ function stageGeometryForVariant(variant: ProductVariant | null): StageGeom {
       frameH: FRAME_MAX_LONG_EDGE_PX,
     };
   }
-  const ratio = variant.widthMm / variant.heightMm;
+  const { wMm, hMm } = orientedFrameMm(variant, orientation);
+  const ratio = wMm / hMm;
   let frameW: number;
   let frameH: number;
   if (ratio >= 1) {
@@ -191,6 +205,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
 ) {
   const selectedColor = useEditorStore((s) => s.selectedOptions.colorCode);
   const selectedVariantId = useEditorStore((s) => s.selectedVariantId);
+  const orientation = useEditorStore((s) => s.orientation);
   const cropTransform = useEditorStore((s) => s.cropTransform);
   const setCropTransform = useEditorStore((s) => s.setCropTransform);
 
@@ -225,7 +240,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
   //       draw outside the canvas pixels, so this is the only reliable way
   //       to keep handles visible across all photo/frame aspect-ratio combos. -----
   const stage = useMemo(() => {
-    const base = stageGeometryForVariant(variant);
+    const base = stageGeometryForVariant(variant, orientation);
     if (!photoImg || !frame) return base;
 
     // inner_rect dimensions in the BASE stage coordinate system
@@ -256,7 +271,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
       frameW: base.frameW,
       frameH: base.frameH,
     };
-  }, [variant, photoImg, frame]);
+  }, [variant, photoImg, frame, orientation]);
 
   const innerRectPx = useMemo(
     () => (frame ? innerRectToStagePx(frame.innerRect, stage) : null),
@@ -289,12 +304,15 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
         // Read the latest committed transform straight from the store so the
         // crop reflects the user's final drag/scale/rotate.
         const ct = useEditorStore.getState().cropTransform;
+        // Use the ORIENTED frame width so the crop's mm→px scale matches the
+        // (possibly swapped) stage geometry.
+        const { wMm } = orientedFrameMm(variant, orientation);
         return generatePrintCrop({
           photoImg,
           cropTransform: ct,
           innerRect: frame.innerRect,
           bleedMm: productDetail.product.bleedMm,
-          frameWidthMm: variant.widthMm,
+          frameWidthMm: wMm,
           stage: {
             frameX: stage.frameX,
             frameY: stage.frameY,
@@ -304,7 +322,7 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
         });
       },
     }),
-    [stage, photoImg, frame, variant, productDetail.product.bleedMm],
+    [stage, photoImg, frame, variant, orientation, productDetail.product.bleedMm],
   );
 
   // ----- Trigger A: photo first loads or photo changes → reset to fit-cover -----
@@ -373,6 +391,31 @@ const FrameCanvas = forwardRef<FrameCanvasHandle, Props>(function FrameCanvas(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame?.id, photoImg, stage.w, stage.h]);
+
+  // ----- Trigger D: orientation flip (가로/세로) → re-fit-cover, re-center -----
+  // The stage aspect swaps but variant/frame/photo ids are unchanged, so none
+  // of A/B/C fire. Flipping is a large aspect change, so reset like a fresh
+  // load: fit-cover centered on the new innerRect.
+  const lastOrientationRef = useRef<'portrait' | 'landscape' | null>(null);
+  useEffect(() => {
+    if (!photoImg || !frame) return;
+    if (lastOrientationRef.current === orientation) return;
+    const previous = lastOrientationRef.current;
+    lastOrientationRef.current = orientation;
+    if (previous === null) return;
+    const r = innerRectToStagePx(frame.innerRect, stage);
+    const fitCover = Math.max(
+      r.w / photoImg.naturalWidth,
+      r.h / photoImg.naturalHeight,
+    );
+    setCropTransform({
+      x: r.x + r.w / 2,
+      y: r.y + r.h / 2,
+      scale: clamp(fitCover, CROP_SCALE_MIN, CROP_SCALE_MAX),
+      rotation: 0,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orientation, photoImg, frame?.id, stage.w, stage.h]);
 
   // ----- Attach the Transformer to the photo node whenever the photo is ready -----
   useEffect(() => {

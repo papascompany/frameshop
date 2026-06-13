@@ -60,6 +60,8 @@ export function StudioClient({
   const setSize = useEditorStore((s) => s.setSize);
   const setMatte = useEditorStore((s) => s.setMatte);
   const setPaper = useEditorStore((s) => s.setPaper);
+  const orientation = useEditorStore((s) => s.orientation);
+  const setOrientation = useEditorStore((s) => s.setOrientation);
   const photo = useEditorStore((s) => s.photo);
   const entries = useEditorStore((s) => s.entries);
   const addEntry = useEditorStore((s) => s.addEntry);
@@ -280,6 +282,17 @@ export function StudioClient({
     setSize(code);
   }
 
+  function handleOrientationChange(o: string) {
+    if (o === orientation) return;
+    if (
+      entries.length > 0 &&
+      !window.confirm(`방향을 변경하면 담은 사진 ${entries.length}종이 초기화됩니다. 계속할까요?`)
+    ) {
+      return;
+    }
+    setOrientation(o as 'portrait' | 'landscape');
+  }
+
   // 결제 가능 여부: 트레이에 사진이 있거나, 편집 중인 사진이 있으면(담기 후 주문).
   const canCheckout = entries.length > 0 || !!photo;
   const checkoutLabel = confirming
@@ -416,6 +429,15 @@ export function StudioClient({
             value={selected.sizeCode}
             onChange={handleSizeChange}
             options={options.sizes.map((s) => ({ value: s.code, label: s.label }))}
+          />
+          <OptionTabs
+            label="방향"
+            value={orientation}
+            onChange={handleOrientationChange}
+            options={[
+              { value: 'portrait', label: '세로형' },
+              { value: 'landscape', label: '가로형' },
+            ]}
           />
           <OptionTabs
             label="액자 색상"
