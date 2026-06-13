@@ -403,7 +403,7 @@ export default async function LandingPage() {
             title={t('masterpieceGallery')}
             eyebrow={t('masterpieceEyebrow')}
             linkLabel={t('viewMasterpieces')}
-            linkHref="/catalog/basic-frame?theme=masterpiece"
+            linkHref="/catalog/masterpiece"
           />
           <MasterpieceGallery tiles={mergedMasterpieceTiles} />
         </Container>
@@ -465,7 +465,7 @@ export default async function LandingPage() {
             title={t('landscapePrints')}
             eyebrow={t('landscapeEyebrow')}
             linkLabel={t('viewLandscape')}
-            linkHref="/catalog/basic-frame?theme=landscape"
+            linkHref="/catalog/landscape"
           />
           {dbCollectionSubtitle && (
             <p className="text-sm text-muted-fg mb-4">{dbCollectionSubtitle}</p>

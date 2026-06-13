@@ -47,18 +47,10 @@ export async function Header() {
           <Link href="/catalog/basic-frame" className="nav-link" prefetch={true}>
             {t('frames')}
           </Link>
-          <Link
-            href="/catalog/basic-frame?theme=masterpiece"
-            className="nav-link"
-            prefetch={true}
-          >
+          <Link href="/catalog/masterpiece" className="nav-link" prefetch={true}>
             {t('masterpiece')}
           </Link>
-          <Link
-            href="/catalog/basic-frame?theme=landscape"
-            className="nav-link"
-            prefetch={true}
-          >
+          <Link href="/catalog/landscape" className="nav-link" prefetch={true}>
             {t('landscape')}
           </Link>
           <Link href="/#how-it-works" className="nav-link" prefetch={true}>
