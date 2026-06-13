@@ -99,7 +99,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // Rate limit per identity (P1-05 fix). Phase 2: swap to Upstash KV.
   const rlKey = userId ?? `anon:${sessionId}`;
-  const rl = checkUploadRate(rlKey);
+  const rl = await checkUploadRate(rlKey);
   if (!rl.ok) {
     return NextResponse.json(
       { ok: false, code: 'RATE_LIMITED', retryAfterSec: rl.retryAfterSec },

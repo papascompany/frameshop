@@ -26,7 +26,7 @@ type GoogleTokenResponse = {
 
 export async function GET(request: NextRequest) {
   // Rate limit the token-exchange to curb code-replay / DB-write spam.
-  const rate = checkRate('oauth_google_cb', getClientIp(request), {
+  const rate = await checkRate('oauth_google_cb', getClientIp(request), {
     max: 10,
     windowMs: 60_000,
   });

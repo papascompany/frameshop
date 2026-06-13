@@ -32,7 +32,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // Throttle to curb orderNo brute-force + Toss-API-quota exhaustion (the money
   // path is already guarded by server-side amount + Toss response validation).
-  const ipRate = checkRate('payment_confirm_ip', getClientIp(request), {
+  const ipRate = await checkRate('payment_confirm_ip', getClientIp(request), {
     max: 20,
     windowMs: 60_000,
   });
@@ -58,7 +58,7 @@ export async function POST(request: Request): Promise<Response> {
 
   // Per-order cap: bounds attempts (with forged paymentKeys) against any single
   // order regardless of IP rotation.
-  const orderRate = checkRate('payment_confirm_order', parsed.data.orderId, {
+  const orderRate = await checkRate('payment_confirm_order', parsed.data.orderId, {
     max: 10,
     windowMs: 10 * 60_000,
   });

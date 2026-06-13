@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Throttle review creation per user (anti-spam / reputation flooding).
-  const rate = checkRate('review_create', user.id, { max: 5, windowMs: 60_000 });
+  const rate = await checkRate('review_create', user.id, { max: 5, windowMs: 60_000 });
   if (!rate.ok) {
     return NextResponse.json(
       { ok: false, error: '리뷰 작성이 너무 잦습니다. 잠시 후 다시 시도해 주세요.' },

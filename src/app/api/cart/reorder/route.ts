@@ -41,7 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const rate = checkRate('cart_reorder', userId as string, { max: 20, windowMs: 60_000 });
+  const rate = await checkRate('cart_reorder', userId as string, { max: 20, windowMs: 60_000 });
   if (!rate.ok) {
     return NextResponse.json(
       { ok: false, code: 'RATE_LIMITED' },

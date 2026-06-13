@@ -73,7 +73,7 @@ export async function POST(request: Request): Promise<Response> {
   // Throttle order creation (each order fans out to DB inserts + render jobs).
   // Key by the most specific identity available so one actor can't flood.
   const rateKey = userId ?? sessionId ?? getClientIp(request);
-  const orderRate = checkRate('order_create', rateKey, { max: 10, windowMs: 60_000 });
+  const orderRate = await checkRate('order_create', rateKey, { max: 10, windowMs: 60_000 });
   if (!orderRate.ok) {
     return NextResponse.json(
       { ok: false, code: 'RATE_LIMITED', message: '주문 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.' },
