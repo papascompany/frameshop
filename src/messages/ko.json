@@ -44,9 +44,18 @@
     },
     "howItWorks": {
       "title": "간단한 3단계",
-      "step1": { "title": "사진 선택", "desc": "소중한 사진을 업로드하세요" },
-      "step2": { "title": "액자 선택", "desc": "다양한 사이즈와 색상에서 선택" },
-      "step3": { "title": "배송", "desc": "집에서 받아보는 갤러리 작품" }
+      "step1": {
+        "title": "사진 선택",
+        "desc": "소중한 사진을 업로드하세요"
+      },
+      "step2": {
+        "title": "액자 선택",
+        "desc": "다양한 사이즈와 색상에서 선택"
+      },
+      "step3": {
+        "title": "배송",
+        "desc": "집에서 받아보는 갤러리 작품"
+      }
     },
     "featuredFrames": "FEATURED FRAMES",
     "featuredFramesEyebrow": "추천 액자",
@@ -106,7 +115,12 @@
     "subtotal": "상품 합계",
     "shippingFee": "배송비",
     "shippingNextStep": "다음 단계에서 계산",
-    "loading": "불러오는 중..."
+    "loading": "불러오는 중...",
+    "selectAll": "전체 선택",
+    "removeSelected": "선택 삭제",
+    "selectedCount": "선택 {selected}/{total}",
+    "pieces": "선택 {count}개",
+    "removeSelectedConfirm": "선택한 {count}개 상품을 장바구니에서 삭제할까요?"
   },
   "checkout": {
     "title": "주문서",

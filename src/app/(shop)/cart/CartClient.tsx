@@ -15,6 +15,7 @@ import {
   getCartSummary,
 } from '@/lib/cart/client';
 import { CHECKOUT_SELECTION_KEY } from '@/lib/cart/selection';
+import { MobileStickyBar } from '@/components/MobileStickyBar';
 import type { CartItem } from '@/types/cart';
 import type { LocalId } from '@/types/common';
 
@@ -68,6 +69,9 @@ export function CartClient() {
   async function removeSelected() {
     const ids = items.filter((i) => selected.has(i.localId as string));
     if (ids.length === 0) return;
+    // #6: guard the destructive bulk delete (default-all-selected means one tap
+    // could wipe the whole cart). Confirm before removing.
+    if (!window.confirm(t('removeSelectedConfirm', { count: ids.length }))) return;
     await Promise.all(ids.map((i) => removeFromCart(i.localId)));
     const removeIds = new Set(ids.map((i) => i.localId as string));
     setItems((curr) => curr.filter((i) => !removeIds.has(i.localId as string)));
@@ -95,7 +99,7 @@ export function CartClient() {
   }
 
   return (
-    <Container size="md" className="py-6 md:py-10">
+    <Container size="md" className="pt-6 pb-28 md:py-10">
       <h1 className="text-xl md:text-2xl font-bold mb-4">{t('title')}</h1>
 
       {loading ? (
@@ -111,23 +115,23 @@ export function CartClient() {
         <>
           {/* 전체 선택 / 선택 삭제 */}
           <div className="flex items-center justify-between mb-3">
-            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none min-h-[44px] py-2">
               <input
                 type="checkbox"
-                className="w-4 h-4"
+                className="w-5 h-5"
                 checked={allSelected}
                 onChange={toggleAll}
-                aria-label="전체 선택"
+                aria-label={t('selectAll')}
               />
-              전체 선택 ({selected.size}/{items.length})
+              {t('selectAll')} ({t('selectedCount', { selected: selected.size, total: items.length })})
             </label>
             <button
               type="button"
               onClick={() => void removeSelected()}
               disabled={selected.size === 0}
-              className="text-sm text-muted-fg underline disabled:opacity-40"
+              className="text-sm text-muted-fg underline disabled:opacity-40 min-h-[44px] px-2"
             >
-              선택 삭제
+              {t('removeSelected')}
             </button>
           </div>
 
@@ -136,14 +140,16 @@ export function CartClient() {
               const checked = selected.has(item.localId as string);
               return (
                 <li key={item.localId}>
-                  <Card padding="sm" className="flex gap-3 items-start">
-                    <input
-                      type="checkbox"
-                      className="w-4 h-4 mt-1 shrink-0"
-                      checked={checked}
-                      onChange={() => toggle(item.localId as string)}
-                      aria-label="상품 선택"
-                    />
+                  <Card padding="sm" className="flex gap-2 items-start">
+                    <label className="shrink-0 grid place-items-center w-11 h-11 -ml-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="w-5 h-5"
+                        checked={checked}
+                        onChange={() => toggle(item.localId as string)}
+                        aria-label="상품 선택"
+                      />
+                    </label>
                     <div
                       className="w-20 h-20 shrink-0 bg-surface-muted bg-cover bg-center"
                       style={{ backgroundImage: `url(${item.previewUrl})` }}
@@ -155,11 +161,12 @@ export function CartClient() {
                         {item.options.matteCode === 'with' ? '매트 있음' : '매트 없음'}
                       </p>
                       <p className="text-xs text-muted-fg">{item.options.paperCode}</p>
-                      <div className="mt-2 flex items-center gap-2">
+                      <div className="mt-2 flex items-center gap-1.5">
                         <button
                           type="button"
                           aria-label="수량 감소"
-                          className="h-8 w-8 border border-border text-base"
+                          className="h-11 w-11 border border-border text-base grid place-items-center disabled:opacity-40"
+                          disabled={item.quantity <= 1}
                           onClick={() =>
                             changeQty(item.localId, Math.max(1, item.quantity - 1))
                           }
@@ -168,14 +175,15 @@ export function CartClient() {
                         </button>
                         <span
                           aria-label={`수량 ${item.quantity}`}
-                          className="min-w-[2ch] text-center tabular-nums"
+                          className="min-w-[2.5ch] text-center tabular-nums"
                         >
                           {item.quantity}
                         </span>
                         <button
                           type="button"
                           aria-label="수량 증가"
-                          className="h-8 w-8 border border-border text-base"
+                          className="h-11 w-11 border border-border text-base grid place-items-center disabled:opacity-40"
+                          disabled={item.quantity >= 99}
                           onClick={() =>
                             changeQty(item.localId, Math.min(99, item.quantity + 1))
                           }
@@ -202,7 +210,7 @@ export function CartClient() {
 
           <Card padding="md" className="mt-6 flex flex-col gap-2">
             <div className="flex justify-between text-sm">
-              <span>{t('subtotal')} ({selectedItems.length}건)</span>
+              <span>{t('subtotal')} · {t('pieces', { count: summary.totalQuantity })}</span>
               <span className="tabular-nums">{summary.subtotal.toLocaleString('ko-KR')}원</span>
             </div>
             <div className="flex justify-between text-sm text-muted-fg">
@@ -216,7 +224,8 @@ export function CartClient() {
             </div>
           </Card>
 
-          <div className="mt-4">
+          {/* 데스크톱: 인라인 결제 버튼 */}
+          <div className="mt-4 hidden md:block">
             <Button
               variant="primary"
               size="lg"
@@ -225,10 +234,31 @@ export function CartClient() {
               onClick={checkoutSelected}
             >
               {selectedItems.length > 0
-                ? `${t('checkout')} (${selectedItems.length}건)`
+                ? `${t('checkout')} (${t('pieces', { count: summary.totalQuantity })})`
                 : t('checkout')}
             </Button>
           </div>
+
+          {/* 모바일: 하단 고정 결제 바 */}
+          <MobileStickyBar>
+            <div className="flex items-center gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] text-mute leading-none mb-0.5">
+                  {t('pieces', { count: summary.totalQuantity })}
+                </p>
+                <PriceTag amount={summary.subtotal} variant="large" />
+              </div>
+              <Button
+                variant="primary"
+                size="lg"
+                className="ml-auto"
+                disabled={selectedItems.length === 0}
+                onClick={checkoutSelected}
+              >
+                {t('checkout')}
+              </Button>
+            </div>
+          </MobileStickyBar>
         </>
       )}
     </Container>

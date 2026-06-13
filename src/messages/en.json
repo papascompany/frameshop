@@ -44,9 +44,18 @@
     },
     "howItWorks": {
       "title": "3 Simple Steps",
-      "step1": { "title": "Choose a Photo", "desc": "Upload your treasured photo" },
-      "step2": { "title": "Pick a Frame", "desc": "Select from various sizes and colors" },
-      "step3": { "title": "Delivery", "desc": "Receive gallery art at your door" }
+      "step1": {
+        "title": "Choose a Photo",
+        "desc": "Upload your treasured photo"
+      },
+      "step2": {
+        "title": "Pick a Frame",
+        "desc": "Select from various sizes and colors"
+      },
+      "step3": {
+        "title": "Delivery",
+        "desc": "Receive gallery art at your door"
+      }
     },
     "featuredFrames": "FEATURED FRAMES",
     "featuredFramesEyebrow": "Featured Frames",
@@ -106,7 +115,12 @@
     "subtotal": "Subtotal",
     "shippingFee": "Shipping",
     "shippingNextStep": "Calculated at next step",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "selectAll": "Select all",
+    "removeSelected": "Remove selected",
+    "selectedCount": "{selected}/{total} selected",
+    "pieces": "{count} selected",
+    "removeSelectedConfirm": "Remove {count} selected item(s) from the cart?"
   },
   "checkout": {
     "title": "Order Form",
