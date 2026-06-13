@@ -52,6 +52,12 @@ const IconArrowRight = () => (
 
 const TILES: Tile[] = [
   {
+    href: '/admin/categories',
+    title: '카테고리',
+    description: '상품 라인 생성 · /catalog/<슬러그>',
+    icon: <IconList />,
+  },
+  {
     href: '/admin/products',
     title: '상품',
     description: '상품 CRUD, 활성 토글',
