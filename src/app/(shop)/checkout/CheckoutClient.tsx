@@ -24,6 +24,8 @@ import type {
 import type { Order } from '@/types/order';
 import { envPublic } from '@/lib/env-public';
 import { PostcodeButton } from '@/components/PostcodeButton';
+import { MobileStickyBar } from '@/components/MobileStickyBar';
+import { tossErrorCopy } from '@/lib/payment/error-copy';
 
 type Props = {
   shippingMethods: ShippingMethodConfig[];
@@ -66,6 +68,8 @@ export function CheckoutClient({ shippingMethods }: Props) {
   }));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  // Inline failure message near the pay button (replaces alert()).
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const summary = getCartSummary(items);
   const activeMethod = useMemo(
@@ -83,7 +87,16 @@ export function CheckoutClient({ shippingMethods }: Props) {
   const total = summary.subtotal + shippingFee;
 
   function setOrderer<K extends keyof CheckoutFormData['orderer']>(k: K, v: CheckoutFormData['orderer'][K]) {
-    setForm((f) => ({ ...f, orderer: { ...f.orderer, [k]: v } }));
+    setForm((f) => {
+      const orderer = { ...f.orderer, [k]: v };
+      // #13: keep recipient in sync while "주문인과 동일" is checked so the
+      // shipping name/phone never go stale after editing the orderer.
+      const shipping =
+        f.shipping.sameAsOrderer && (k === 'name' || k === 'phone')
+          ? { ...f.shipping, name: orderer.name, phone: orderer.phone }
+          : f.shipping;
+      return { ...f, orderer, shipping };
+    });
   }
   function setShipping<K extends keyof CheckoutFormData['shipping']>(k: K, v: CheckoutFormData['shipping'][K]) {
     setForm((f) => ({ ...f, shipping: { ...f.shipping, [k]: v } }));
@@ -120,9 +133,11 @@ export function CheckoutClient({ shippingMethods }: Props) {
     const validation = validateCheckoutForm(form);
     if (!validation.ok) {
       setErrors(validation.errors);
+      setSubmitError('입력 내용을 다시 확인해 주세요.');
       return;
     }
     setErrors({});
+    setSubmitError(null);
     setSubmitting(true);
     try {
       const res = await fetch('/api/orders', {
@@ -147,7 +162,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
       });
       const body = (await res.json()) as { ok: boolean; order?: Order; message?: string };
       if (!body.ok || !body.order) {
-        alert(`주문 생성에 실패했습니다: ${body.message ?? '오류'}`);
+        setSubmitError('주문 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.');
         return;
       }
       // Persist order id for the success page lookup and clear cart.
@@ -166,7 +181,9 @@ export function CheckoutClient({ shippingMethods }: Props) {
       // requestPayment redirects on success — fallback if SDK no-ops.
       await clearCart(items.map((i) => i.localId));
     } catch (err) {
-      alert(err instanceof Error ? err.message : '결제 요청 실패');
+      // Toss SDK throws with a code on user-cancel / failure — map to Korean.
+      const code = (err as { code?: string } | null)?.code;
+      setSubmitError(tossErrorCopy(code, err instanceof Error ? err.message : null));
     } finally {
       setSubmitting(false);
     }
@@ -178,7 +195,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
 
   return (
     <form
-      className="flex flex-col gap-6 md:grid md:grid-cols-[1fr_340px] md:gap-6 md:items-start"
+      className="flex flex-col gap-6 md:grid md:grid-cols-[1fr_340px] md:gap-6 md:items-start pb-24 md:pb-0"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
@@ -356,8 +373,35 @@ export function CheckoutClient({ shippingMethods }: Props) {
 
       </div>{/* 좌측 컬럼 끝 */}
 
-      {/* 우측: 주문 요약 + 결제 버튼 */}
+      {/* 우측: 주문 상품 + 주문 요약 + 결제 버튼 */}
       <div className="flex flex-col gap-4 mt-4 md:mt-0">
+      {/* #7 주문 상품 요약 — 결제 직전 무엇을 사는지 확인 */}
+      <Card padding="md">
+        <h2 className="font-semibold mb-3">주문 상품 ({items.length}건)</h2>
+        <ul className="flex flex-col gap-2">
+          {items.map((item) => (
+            <li key={item.localId} className="flex items-center gap-3">
+              <div
+                className="w-12 h-12 shrink-0 bg-surface-muted bg-cover bg-center rounded"
+                style={{ backgroundImage: `url(${item.previewUrl})` }}
+                aria-hidden
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs truncate">
+                  {item.options.sizeCode} / {item.options.colorCode}
+                </p>
+                <p className="text-xs text-muted-fg tabular-nums">
+                  {item.quantity}장 × {item.price.toLocaleString('ko-KR')}원
+                </p>
+              </div>
+              <span className="text-sm tabular-nums">
+                {(item.price * item.quantity).toLocaleString('ko-KR')}원
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
       {/* Total */}
       <Card padding="md" className="flex flex-col gap-2">
         <div className="flex justify-between text-sm">
@@ -379,10 +423,45 @@ export function CheckoutClient({ shippingMethods }: Props) {
         </div>
       </Card>
 
-      <Button type="submit" variant="primary" size="lg" fullWidth loading={submitting} disabled={submitting || items.length === 0}>
+      {submitError ? (
+        <p role="alert" className="text-sm text-danger border border-danger rounded-md px-3 py-2">
+          {submitError}
+        </p>
+      ) : null}
+
+      {/* 데스크톱: 인라인 결제 버튼 */}
+      <Button
+        type="submit"
+        variant="primary"
+        size="lg"
+        fullWidth
+        loading={submitting}
+        disabled={submitting || items.length === 0}
+        className="hidden md:flex"
+      >
         {t('pay')}
       </Button>
       </div>{/* 우측 컬럼 끝 */}
+
+      {/* 모바일: 하단 고정 결제 바 (총액 + 결제) */}
+      <MobileStickyBar>
+        <div className="flex items-center gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] text-mute leading-none mb-0.5">{t('totalAmount')}</p>
+            <PriceTag amount={total} variant="large" />
+          </div>
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting || items.length === 0}
+            className="ml-auto"
+          >
+            {t('pay')}
+          </Button>
+        </div>
+      </MobileStickyBar>
     </form>
   );
 }
