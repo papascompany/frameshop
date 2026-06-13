@@ -17,7 +17,7 @@ import 'server-only';
 
 export const UPLOAD_RATE_PER_MIN = 10;
 const WINDOW_MS = 60_000;
-const PRUNE_INTERVAL_MS = 5 * 60_000; // prune stale entries every 5 min
+const PRUNE_INTERVAL_MS = 60_000; // prune stale entries every 60s (bounds memory growth)
 
 type Bucket = { count: number; windowStart: number };
 const buckets = new Map<string, Bucket>();

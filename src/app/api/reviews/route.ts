@@ -11,6 +11,7 @@ import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
 import { createReview, getOrderReview } from '@/lib/db/reviews';
 import { isSameOrigin } from '@/lib/security/same-origin';
+import { checkRate } from '@/lib/ratelimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,15 @@ export async function POST(request: NextRequest) {
 
   if (!user) {
     return NextResponse.json({ ok: false, error: '로그인이 필요합니다.' }, { status: 401 });
+  }
+
+  // Throttle review creation per user (anti-spam / reputation flooding).
+  const rate = checkRate('review_create', user.id, { max: 5, windowMs: 60_000 });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { ok: false, error: '리뷰 작성이 너무 잦습니다. 잠시 후 다시 시도해 주세요.' },
+      { status: 429, headers: { 'Retry-After': String(rate.retryAfterSec) } },
+    );
   }
 
   let body: unknown;

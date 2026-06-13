@@ -6,11 +6,22 @@ import { CART_QUANTITY_MAX, CART_QUANTITY_MIN } from '@/types/cart';
 import { removeCartItem, updateCartQuantity } from '@/lib/db/cart';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { isSameOrigin } from '@/lib/security/same-origin';
+import { checkRate } from '@/lib/ratelimit';
 
 async function getUserId(): Promise<UserId | null> {
   const supabase = await getServerSupabase();
   const { data } = await supabase.auth.getUser();
   return data.user?.id ? asBrand<UserId>(data.user.id) : null;
+}
+
+/** Per-user cart-mutation throttle (shared by PATCH/DELETE). null = allowed. */
+function cartRateLimited(userId: UserId): Response | null {
+  const rate = checkRate('cart_write', userId as string, { max: 60, windowMs: 60_000 });
+  if (rate.ok) return null;
+  return NextResponse.json(
+    { ok: false, code: 'RATE_LIMITED' },
+    { status: 429, headers: { 'Retry-After': String(rate.retryAfterSec) } },
+  );
 }
 
 export async function PATCH(
@@ -27,6 +38,8 @@ export async function PATCH(
   if (!userId) {
     return NextResponse.json({ ok: false, code: 'UNAUTHENTICATED' }, { status: 401 });
   }
+  const limited = cartRateLimited(userId);
+  if (limited) return limited;
   const { localId } = await context.params;
   let body: { quantity?: number };
   try {
@@ -56,6 +69,8 @@ export async function DELETE(
   if (!userId) {
     return NextResponse.json({ ok: false, code: 'UNAUTHENTICATED' }, { status: 401 });
   }
+  const limited = cartRateLimited(userId);
+  if (limited) return limited;
   const { localId } = await context.params;
   await removeCartItem(userId, asBrand<LocalId>(localId));
   return NextResponse.json({ ok: true });

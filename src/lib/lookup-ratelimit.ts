@@ -15,7 +15,7 @@ import 'server-only';
 
 const MAX_ATTEMPTS = 10;
 const WINDOW_MS = 15 * 60_000; // 15 minutes
-const PRUNE_INTERVAL_MS = 5 * 60_000;
+const PRUNE_INTERVAL_MS = 60_000; // prune every 60s (bounds memory growth)
 
 type Bucket = { count: number; windowStart: number };
 const buckets = new Map<string, Bucket>();

@@ -34,6 +34,16 @@ const BUCKET = 'photos';
 // Sharp's `format` strings for inputs we accept.
 const ALLOWED_SHARP_FORMATS = new Set(['jpeg', 'png', 'webp', 'heif']);
 
+// Pixel-bomb guard: a small (<50MB) but extreme-dimension image can decompress
+// to gigabytes of RGBA and OOM the function. Legitimate uploads are client-
+// resized to LONG_EDGE_RESIZE_PX (2400), so a 40-megapixel / 12000px-per-side
+// cap is generous for real photos while blocking decompression bombs. Sharp's
+// own default limit (~268MP) is far too high for our use, so we pass an
+// explicit `limitInputPixels` to every decode.
+const MAX_INPUT_PIXELS = 40_000_000; // ≈ 6325×6325
+const MAX_EDGE_PX = 12_000;
+const SHARP_INPUT_OPTS = { limitInputPixels: MAX_INPUT_PIXELS } as const;
+
 export async function POST(request: Request): Promise<Response> {
   if (!isSameOrigin(request)) {
     return NextResponse.json(
@@ -108,7 +118,7 @@ export async function POST(request: Request): Promise<Response> {
   let detectedWidth: number | undefined;
   let detectedHeight: number | undefined;
   try {
-    const meta = await sharp(bytes).metadata();
+    const meta = await sharp(bytes, SHARP_INPUT_OPTS).metadata();
     detectedFormat = meta.format;
     detectedWidth = meta.width;
     detectedHeight = meta.height;
@@ -118,6 +128,21 @@ export async function POST(request: Request): Promise<Response> {
         ok: false,
         code: 'INVALID_IMAGE_FORMAT',
         message: err instanceof Error ? err.message : 'unknown',
+      },
+      { status: 400 },
+    );
+  }
+  // Reject pixel bombs: extreme dimensions decode to huge RGBA buffers (OOM DoS).
+  if (
+    (detectedWidth ?? 0) > MAX_EDGE_PX ||
+    (detectedHeight ?? 0) > MAX_EDGE_PX ||
+    (detectedWidth ?? 0) * (detectedHeight ?? 0) > MAX_INPUT_PIXELS
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: 'IMAGE_TOO_LARGE',
+        message: `이미지 해상도가 너무 큽니다: ${detectedWidth ?? '?'}×${detectedHeight ?? '?'}`,
       },
       { status: 400 },
     );
@@ -152,7 +177,7 @@ export async function POST(request: Request): Promise<Response> {
   // aspect ratio; both axes are bounded by THUMB_LONG_EDGE_PX.
   let thumbBuffer: Buffer;
   try {
-    thumbBuffer = await sharp(bytes)
+    thumbBuffer = await sharp(bytes, SHARP_INPUT_OPTS)
       .rotate() // auto-orient via EXIF
       .resize(THUMB_LONG_EDGE_PX, THUMB_LONG_EDGE_PX, {
         fit: 'inside',

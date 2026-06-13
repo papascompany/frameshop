@@ -25,6 +25,8 @@ import type { UserId } from '@/types/common';
 import { createOrder } from '@/lib/db/order';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { isSameOrigin } from '@/lib/security/same-origin';
+import { checkRate } from '@/lib/ratelimit';
+import { getClientIp } from '@/lib/security/client-ip';
 import { z } from 'zod';
 
 const GUEST_COOKIE_NAME = 'fs-guest-sid';
@@ -67,6 +69,17 @@ export async function POST(request: Request): Promise<Response> {
   const cookieStore = await cookies();
   const guestSidFromCookie = cookieStore.get(GUEST_COOKIE_NAME)?.value ?? null;
   const sessionId = guestSidFromCookie ?? parsed.data.sessionId ?? null;
+
+  // Throttle order creation (each order fans out to DB inserts + render jobs).
+  // Key by the most specific identity available so one actor can't flood.
+  const rateKey = userId ?? sessionId ?? getClientIp(request);
+  const orderRate = checkRate('order_create', rateKey, { max: 10, windowMs: 60_000 });
+  if (!orderRate.ok) {
+    return NextResponse.json(
+      { ok: false, code: 'RATE_LIMITED', message: '주문 요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.' },
+      { status: 429, headers: { 'Retry-After': String(orderRate.retryAfterSec) } },
+    );
+  }
 
   const input: CreateOrderInput = {
     cartItems: parsed.data.cartItems as unknown as CreateOrderInput['cartItems'],

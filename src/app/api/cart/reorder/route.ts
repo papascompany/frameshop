@@ -16,6 +16,7 @@ import type { UserId } from '@/types/common';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getOrder } from '@/lib/db/order';
 import { isSameOrigin } from '@/lib/security/same-origin';
+import { checkRate } from '@/lib/ratelimit';
 
 async function getUserId(): Promise<UserId | null> {
   const supabase = await getServerSupabase();
@@ -37,6 +38,14 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json(
       { ok: false, code: 'UNAUTHENTICATED' },
       { status: 401 },
+    );
+  }
+
+  const rate = checkRate('cart_reorder', userId as string, { max: 20, windowMs: 60_000 });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { ok: false, code: 'RATE_LIMITED' },
+      { status: 429, headers: { 'Retry-After': String(rate.retryAfterSec) } },
     );
   }
 
