@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { Container } from '@/components/layout/Container';
 import { PriceTag } from '@/components/PriceTag';
 import { Button } from '@/components/ui/Button';
-import { getProductDetail } from '@/lib/db/product';
+import { getProductDetail, getProductOptions } from '@/lib/db/product';
 import { asBrand } from '@/types/common';
 import type { ProductId } from '@/types/common';
 import { StartEditorButton } from './StartEditorButton';
@@ -80,14 +80,33 @@ export default async function ProductPage({
 }) {
   const { id } = await params;
   let detail: Awaited<ReturnType<typeof getProductDetail>> = null;
+  let options: Awaited<ReturnType<typeof getProductOptions>> | null = null;
   try {
-    detail = await getProductDetail(asBrand<ProductId>(id));
+    [detail, options] = await Promise.all([
+      getProductDetail(asBrand<ProductId>(id)),
+      getProductOptions(asBrand<ProductId>(id)).catch(() => null),
+    ]);
   } catch (err) {
     console.warn('getProductDetail failed:', err);
   }
   if (!detail) notFound();
 
   const t = await getTranslations('product');
+
+  // #11: size → starting price chips so the shopper sees options + price
+  // BEFORE entering the editor (no commit blind).
+  const sizePrices = options
+    ? options.sizes
+        .map((s) => {
+          const prices = Object.values(options.variantsByKey)
+            .filter((v) => v.sizeCode === s.code)
+            .map((v) => v.price);
+          return prices.length > 0
+            ? { code: s.code, label: s.label, from: Math.min(...prices) }
+            : null;
+        })
+        .filter((x): x is { code: string; label: string; from: number } => x !== null)
+    : [];
 
   const hero = detail.images.gallery[0] ?? detail.images.thumbnail[0] ?? null;
   const thumbnailUrl =
@@ -150,6 +169,26 @@ export default async function ProductPage({
             </div>
 
             <PriceTag amount={detail.startingPrice} showFrom variant="large" />
+
+            {/* #11: 사이즈별 시작가 — 진입 전 옵션/가격 확인 */}
+            {sizePrices.length > 0 ? (
+              <div>
+                <p className="text-xs text-muted-fg mb-1.5">사이즈별 가격</p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {sizePrices.map((s) => (
+                    <li
+                      key={s.code}
+                      className="inline-flex items-baseline gap-1.5 rounded-full border border-hairline px-3 py-1.5 text-xs"
+                    >
+                      <span className="font-medium">{s.label}</span>
+                      <span className="text-muted-fg tabular-nums">
+                        {s.from.toLocaleString('ko-KR')}원~
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             <p className="text-sm leading-relaxed whitespace-pre-line">
               {detail.product.description}

@@ -1,10 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { formatPhone } from '@/lib/checkout/validate';
+import { courierTrackingUrl } from '@/lib/shipping/courier';
+import { ORDER_STATUSES, type OrderStatus } from '@/types/order';
 
 type LookupResult = {
   orderNo: string;
@@ -26,17 +30,18 @@ type LookupResult = {
   }>;
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  CREATED: '주문 접수',
-  PAID: '결제 완료',
-  PREPARING: '제작 중',
-  SHIPPED: '배송 중',
-  DELIVERED: '배송 완료',
-  CANCELLED: '취소',
-};
-
 export function OrderLookupClient() {
-  const [orderNo, setOrderNo] = useState('');
+  const searchParams = useSearchParams();
+  const tStatus = useTranslations('order.status');
+  // #9: drive labels off the canonical order.status.* keys so a status can
+  // never leak as a raw English code (the old local map missed IN_PRODUCTION/REFUNDED).
+  function statusLabel(status: string): string {
+    return (ORDER_STATUSES as readonly string[]).includes(status)
+      ? tStatus(status as OrderStatus)
+      : status;
+  }
+  // Prefill the order number from ?orderNo= (e.g. the payment-fail recovery link).
+  const [orderNo, setOrderNo] = useState(() => searchParams?.get('orderNo') ?? '');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,30 +85,41 @@ export function OrderLookupClient() {
 
   return (
     <div className="flex flex-col gap-4">
-      <Card padding="md" className="flex flex-col gap-3">
-        <Input
-          label="주문번호"
-          value={orderNo}
-          onChange={(e) => setOrderNo(e.target.value)}
-          placeholder="20260512-0001"
-        />
-        <Input
-          label="전화번호"
-          value={phone}
-          onChange={(e) => setPhone(formatPhone(e.target.value))}
-          inputMode="tel"
-        />
-        <Button variant="primary" onClick={lookup} disabled={loading}>
-          {loading ? '조회 중…' : '조회'}
-        </Button>
-        {error ? <p className="text-sm text-red-500">{error}</p> : null}
+      <Card padding="md">
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void lookup();
+          }}
+          noValidate
+        >
+          <Input
+            label="주문번호"
+            value={orderNo}
+            onChange={(e) => setOrderNo(e.target.value)}
+            placeholder="20260512-0001"
+            hint="예: 20260512-0001"
+          />
+          <Input
+            label="전화번호"
+            value={phone}
+            onChange={(e) => setPhone(formatPhone(e.target.value))}
+            inputMode="tel"
+            autoComplete="tel"
+          />
+          <Button type="submit" variant="primary" loading={loading} disabled={loading}>
+            {loading ? '조회 중…' : '조회'}
+          </Button>
+          {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
+        </form>
       </Card>
 
       {result ? (
         <Card padding="md" className="flex flex-col gap-3 text-sm">
           <div className="flex justify-between font-semibold">
             <span>주문번호: {result.orderNo}</span>
-            <span>{STATUS_LABEL[result.status] ?? result.status}</span>
+            <span>{statusLabel(result.status)}</span>
           </div>
           <div className="text-muted-fg">
             주문일: {new Date(result.createdAt).toLocaleDateString('ko-KR')}
@@ -139,9 +155,23 @@ export function OrderLookupClient() {
               <hr className="border-muted" />
               <div>
                 <p className="font-medium">배송 정보</p>
-                <p className="text-muted-fg">
-                  {result.courier} · {result.trackingNumber}
-                </p>
+                {(() => {
+                  const url = courierTrackingUrl(result.courier, result.trackingNumber);
+                  return url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-[44px] items-center text-ink underline underline-offset-2"
+                    >
+                      {result.courier} · {result.trackingNumber} · 배송조회
+                    </a>
+                  ) : (
+                    <p className="text-muted-fg">
+                      {result.courier} · {result.trackingNumber}
+                    </p>
+                  );
+                })()}
               </div>
             </>
           ) : null}

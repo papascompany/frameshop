@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getTranslations } from 'next-intl/server';
+import { OrderNoCopy } from './OrderNoCopy';
 
 export default async function OrderSuccessPage({
   searchParams,
@@ -31,7 +32,7 @@ export default async function OrderSuccessPage({
         <h1 className="text-2xl font-bold mb-2">{t('title')}</h1>
         {sp.orderNo ? (
           <p className="text-sm mb-4">
-            {t('orderNo')} <span className="font-mono font-medium">{sp.orderNo}</span>
+            {t('orderNo')} <OrderNoCopy orderNo={sp.orderNo} />
           </p>
         ) : null}
 
@@ -40,6 +41,9 @@ export default async function OrderSuccessPage({
             <p className="font-medium mb-1">{t('guestNotice')}</p>
             <p className="text-muted-fg">
               {t('guestLookupHint')}
+            </p>
+            <p className="mt-2 text-xs text-ink font-medium">
+              ※ 비회원 주문은 주문번호로 조회합니다. 주문번호를 꼭 저장해 주세요.
             </p>
             <Link
               href={`/order/lookup${sp.orderNo ? `?orderNo=${sp.orderNo}` : ''}`}
