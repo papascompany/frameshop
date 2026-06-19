@@ -189,3 +189,4 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 - 2026-05-12: Supabase 연결 — access token으로 `acxsxjmqgvkceqahwkpz` link, db push 12개 마이그레이션 적용 (002 pg_trgm 순서 fix 포함), storage buckets + 시드 데이터 적용 (categories 1 / products 1 / variants 4 / shipping_methods 3 / buckets 2).
 - 2026-05-12: `.env.local`에 SUPABASE_URL/anon/service_role 채움. `npm run dev` (port 3001) 8개 라우트 모두 200 OK.
 - 2026-05-12: Toss 결제 연동은 사용자 결정으로 Phase 1 마지막으로 연기 → GitHub Issue #2 등록.
+- 2026-06-19: [x] Backend: admin orders actions + CSV export 완료 — markDelivered/cancel/refund 액션에 notifyDelivered/notifyCancelled/notifyRefunded 연결(fire-and-forget), saveOrderMemoAction(trim+200자 cap, 빈문자열=null), bulkUpdateTrackingAction(orderNo 해석→SHIPPED 전환→notifyShipped, per-row ok/error), GET /api/admin/orders/export(UTF-8 BOM CSV, 13개 한글 컬럼, RFC4180 이스케이프). tsc 클린(소스), 29 테스트 통과.

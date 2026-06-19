@@ -10,7 +10,13 @@ const PAGE_SIZE = 20;
 export default async function AdminOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    page?: string;
+    q?: string;
+    from?: string;
+    to?: string;
+  }>;
 }) {
   await requireAdmin();
 
@@ -21,7 +27,19 @@ export default async function AdminOrdersPage({
       : null;
   const page = Math.max(1, Number(sp.page ?? '1') || 1);
 
-  const result = await getAllOrdersPaged({ page, pageSize: PAGE_SIZE, status });
+  // 통합검색어/기간 필터 (빈 문자열은 null 로 정규화 → DB 필터 미적용).
+  const q = sp.q?.trim() ? sp.q.trim() : null;
+  const from = sp.from?.trim() ? sp.from.trim() : null;
+  const to = sp.to?.trim() ? sp.to.trim() : null;
+
+  const result = await getAllOrdersPaged({
+    page,
+    pageSize: PAGE_SIZE,
+    status,
+    q,
+    from,
+    to,
+  });
 
   return (
     <div className="space-y-4">
@@ -36,6 +54,9 @@ export default async function AdminOrdersPage({
         pageSize={result.pageSize}
         hasMore={result.hasMore}
         status={status}
+        q={q}
+        from={from}
+        to={to}
       />
     </div>
   );
