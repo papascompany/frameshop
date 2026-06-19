@@ -146,6 +146,15 @@ export type Order = {
   courier: string | null;
   orderer: Orderer;
   shipping: ShippingAddress;
+  /**
+   * Orderer-level free-form note (size change / payment request), distinct from
+   * shipping.memo (courier instructions). Depends on migration 029; mapped
+   * undefined-safe so reads work even if 029 is unapplied. Max 200 chars (app).
+   *
+   * Optional on the type so existing Order literals (fixtures, callers built
+   * before 029) keep compiling; mapOrder always populates it as string | null.
+   */
+  orderMemo?: string | null;
   createdAt: IsoTimestamp;
   paidAt: IsoTimestamp | null;
   shippedAt: IsoTimestamp | null;

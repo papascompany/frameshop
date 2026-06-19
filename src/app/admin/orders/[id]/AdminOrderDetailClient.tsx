@@ -14,9 +14,17 @@ import {
   markDeliveredAction,
   cancelOrderAction,
   refundOrderAction,
+  saveOrderMemoAction,
 } from '../actions';
+import { cn } from '@/lib/cn';
 
 type BadgeVariant = 'default' | 'accent' | 'dark' | 'success' | 'warning';
+
+/** Orderer-level memo cap — mirrors saveOrderMemoAction / setOrderMemo. */
+const ORDER_MEMO_MAX = 200;
+
+/** 저장 진행 상태. idle 외에는 인라인 피드백을 노출한다. */
+type MemoSaveState = 'idle' | 'saving' | 'success' | 'error';
 
 const STATUS_BADGE: Record<OrderStatus, { label: string; variant: BadgeVariant }> = {
   CREATED:       { label: '주문접수', variant: 'default' },
@@ -50,6 +58,14 @@ export function AdminOrderDetailClient({ order }: Props) {
   // its reason text. Requires an explicit confirm + non-empty reason.
   const [pendingAction, setPendingAction] = useState<null | 'cancel' | 'refund'>(null);
   const [reason, setReason] = useState('');
+
+  // 관리자 메모(주문자 레벨 자유 메모). 배송 요청(shipping.memo)과 별개.
+  // order.orderMemo 는 mapOrder 에서 항상 string | null 로 채워진다.
+  const [memo, setMemo] = useState(order.orderMemo ?? '');
+  const [memoSaveState, setMemoSaveState] = useState<MemoSaveState>('idle');
+  const [memoError, setMemoError] = useState<string | null>(null);
+
+  const memoTooLong = memo.length > ORDER_MEMO_MAX;
 
   const badge = STATUS_BADGE[status];
   // CREATED / PAID / IN_PRODUCTION can be cancelled; PAID / DELIVERED can be refunded.
@@ -131,6 +147,23 @@ export function AdminOrderDetailClient({ order }: Props) {
       setReason('');
     } else {
       setError(result.error ?? '처리 실패');
+    }
+  }
+
+  async function handleSaveMemo() {
+    if (memoTooLong) {
+      setMemoSaveState('error');
+      setMemoError(`메모는 최대 ${ORDER_MEMO_MAX}자까지 입력할 수 있습니다.`);
+      return;
+    }
+    setMemoSaveState('saving');
+    setMemoError(null);
+    const result = await saveOrderMemoAction(order.id as string, memo);
+    if (result.ok) {
+      setMemoSaveState('success');
+    } else {
+      setMemoSaveState('error');
+      setMemoError(result.error ?? '메모 저장 실패');
     }
   }
 
@@ -237,6 +270,60 @@ export function AdminOrderDetailClient({ order }: Props) {
             </li>
           ))}
         </ul>
+      </Card>
+
+      {/* 관리자 메모 */}
+      <Card padding="md">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-semibold">관리자 메모</h2>
+          <span
+            className={cn(
+              'text-xs tabular-nums',
+              memoTooLong ? 'text-danger' : 'text-muted-fg',
+            )}
+          >
+            {memo.length}/{ORDER_MEMO_MAX}
+          </span>
+        </div>
+        <p className="text-xs text-muted-fg mb-3">
+          주문자 요청(사이즈 변경, 입금 확인 등)을 기록합니다. 배송 메모와는 별개이며 고객에게 노출되지 않습니다.
+        </p>
+        <textarea
+          value={memo}
+          onChange={(e) => {
+            setMemo(e.target.value);
+            if (memoSaveState !== 'idle') setMemoSaveState('idle');
+            if (memoError) setMemoError(null);
+          }}
+          rows={4}
+          maxLength={ORDER_MEMO_MAX}
+          placeholder="관리자 메모를 입력하세요"
+          disabled={memoSaveState === 'saving'}
+          aria-invalid={memoTooLong ? true : undefined}
+          className={cn(
+            'w-full bg-surface text-foreground placeholder:text-muted-fg',
+            'border border-border rounded-input px-3 py-2 text-sm resize-y',
+            'transition-colors duration-150',
+            'focus:outline-none focus:border-foreground',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
+            memoTooLong && 'border-danger focus:border-danger',
+          )}
+        />
+        <div className="mt-3 flex items-center gap-3">
+          <Button
+            onClick={() => void handleSaveMemo()}
+            loading={memoSaveState === 'saving'}
+            disabled={memoSaveState === 'saving' || memoTooLong}
+          >
+            저장
+          </Button>
+          {memoSaveState === 'success' && (
+            <span className="text-sm text-success">저장되었습니다.</span>
+          )}
+          {memoSaveState === 'error' && (
+            <span className="text-sm text-danger">{memoError ?? '메모 저장 실패'}</span>
+          )}
+        </div>
       </Card>
 
       {/* 상태 전환 */}

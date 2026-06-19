@@ -412,20 +412,127 @@ export async function getOrdersByUser(userId: UserId): Promise<OrderWithItems[]>
   });
 }
 
+// ---------- order list filters (admin) ----------
+
+/** Shared search/date filter args for the admin order list + CSV export. */
+type OrderListFilters = {
+  status?: OrderStatus | null;
+  /** Free-text: matches order_no OR orderer name/phone/email (case-insensitive). */
+  q?: string | null;
+  /** ISO date/datetime — created_at >= from (inclusive) when set. */
+  from?: string | null;
+  /** ISO date/datetime — created_at <= to (inclusive) when set. */
+  to?: string | null;
+};
+
+/**
+ * Escape a user search term for safe use inside a PostgREST `.or()` filter
+ * string. PostgREST splits `.or()` on commas and treats `*`/`%` as wildcards;
+ * an unescaped comma would let a search box inject extra OR predicates, and a
+ * `*` would broaden the match unexpectedly. We strip the structural chars and
+ * wrap the remainder in `*…*` for a contains-style ILIKE.
+ *
+ * Returns null when nothing meaningful is left, so the caller can skip the
+ * filter entirely rather than matching `**` (everything).
+ */
+function buildOrSearchPattern(raw: string): string | null {
+  // Drop characters that have meaning in the PostgREST filter grammar so the
+  // term is treated as a literal substring, never as filter structure.
+  const cleaned = raw.replace(/[,()%*\\]/g, ' ').trim();
+  if (cleaned.length === 0) return null;
+  return `*${cleaned}*`;
+}
+
+/**
+ * Apply status/q/from/to filters to an `orders` query builder. Mutates nothing;
+ * returns the new builder. Shared by getAllOrdersPaged and getOrdersForExport so
+ * the paginated list and the CSV export always agree on what matches.
+ *
+ * `orderer` is a JSONB column ({ name, phone, email }); we match its fields with
+ * the `orderer->>field.ilike.*term*` PostgREST path syntax inside `.or()`.
+ */
+function applyOrderFilters<
+  Q extends {
+    eq(col: string, val: string): Q;
+    or(filter: string): Q;
+    gte(col: string, val: string): Q;
+    lte(col: string, val: string): Q;
+  },
+>(query: Q, filters: OrderListFilters): Q {
+  let q = query;
+  if (filters.status) {
+    q = q.eq('status', filters.status);
+  }
+  if (filters.q) {
+    const pattern = buildOrSearchPattern(filters.q);
+    if (pattern) {
+      q = q.or(
+        [
+          `order_no.ilike.${pattern}`,
+          `orderer->>name.ilike.${pattern}`,
+          `orderer->>phone.ilike.${pattern}`,
+          `orderer->>email.ilike.${pattern}`,
+        ].join(','),
+      );
+    }
+  }
+  if (filters.from) {
+    q = q.gte('created_at', filters.from);
+  }
+  if (filters.to) {
+    // A date-only `to` (YYYY-MM-DD) compared against a timestamp would resolve to
+    // 00:00:00 and exclude the whole end day. Extend it to end-of-day so the
+    // selected end date is inclusive.
+    const to = /^\d{4}-\d{2}-\d{2}$/.test(filters.to)
+      ? `${filters.to}T23:59:59.999`
+      : filters.to;
+    q = q.lte('created_at', to);
+  }
+  return q;
+}
+
+/** Fetch order_items for the given order ids, grouped by order_id. */
+async function loadItemsByOrderId(
+  supabase: ReturnType<typeof getServiceRoleSupabase>,
+  orderIds: string[],
+  label: string,
+): Promise<Map<string, OrderItem[]>> {
+  const byOrderId = new Map<string, OrderItem[]>();
+  if (orderIds.length === 0) return byOrderId;
+
+  const { data: itemRows, error: itemErr } = await supabase
+    .from('order_items')
+    .select('*')
+    .in('order_id', orderIds);
+  if (itemErr) throw new Error(`${label} items: ${itemErr.message}`);
+
+  for (const row of itemRows ?? []) {
+    const r = row as { order_id: string };
+    const existing = byOrderId.get(r.order_id) ?? [];
+    existing.push(mapOrderItem(row));
+    byOrderId.set(r.order_id, existing);
+  }
+  return byOrderId;
+}
+
 // ---------- getAllOrdersPaged (admin) ----------
 // (replaces the former getAllOrders 100-row hard cap — see below)
 
 /**
- * 페이지네이션 + 서버사이드 상태 필터 (관리자 주문 목록).
+ * 페이지네이션 + 서버사이드 상태/검색/기간 필터 (관리자 주문 목록).
  *
  * 기존 getAllOrders(100건 하드캡 + 클라이언트 필터)는 주문이 100건을 넘으면
  * 오래된 주문이 보이지 않고 탭 필터도 잘린 100건 안에서만 동작했다. 이 함수는
- * status 를 DB 에서 필터하고 range 로 페이지를 끊어 모든 주문에 접근 가능하게 한다.
+ * status/검색어(q)/기간(from,to)을 DB 에서 필터하고 range 로 페이지를 끊어
+ * 모든 주문에 접근 가능하게 한다.
  */
 export async function getAllOrdersPaged(args: {
   page?: number;
   pageSize?: number;
   status?: OrderStatus | null;
+  q?: string | null;
+  from?: string | null;
+  to?: string | null;
 }): Promise<{
   items: OrderWithItems[];
   total: number;
@@ -436,17 +543,20 @@ export async function getAllOrdersPaged(args: {
   const supabase = getServiceRoleSupabase();
   const page = Math.max(1, args.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, args.pageSize ?? 20));
-  const from = (page - 1) * pageSize;
-  const to = from + pageSize - 1;
+  const rangeFrom = (page - 1) * pageSize;
+  const rangeTo = rangeFrom + pageSize - 1;
 
   let query = supabase
     .from('orders')
     .select('*', { count: 'exact' })
     .order('created_at', { ascending: false });
-  if (args.status) {
-    query = query.eq('status', args.status);
-  }
-  query = query.range(from, to);
+  query = applyOrderFilters(query, {
+    status: args.status,
+    q: args.q,
+    from: args.from,
+    to: args.to,
+  });
+  query = query.range(rangeFrom, rangeTo);
 
   const { data: orderRows, count, error } = await query;
   if (error) throw new Error(`getAllOrdersPaged: ${error.message}`);
@@ -458,26 +568,104 @@ export async function getAllOrdersPaged(args: {
   }
 
   const orderIds = rows.map((r) => (r as { id: string }).id);
-  const { data: itemRows, error: itemErr } = await supabase
-    .from('order_items')
-    .select('*')
-    .in('order_id', orderIds);
-  if (itemErr) throw new Error(`getAllOrdersPaged items: ${itemErr.message}`);
-
-  const itemsByOrderId = new Map<string, OrderItem[]>();
-  for (const row of itemRows ?? []) {
-    const r = row as { order_id: string };
-    const existing = itemsByOrderId.get(r.order_id) ?? [];
-    existing.push(mapOrderItem(row));
-    itemsByOrderId.set(r.order_id, existing);
-  }
+  const itemsByOrderId = await loadItemsByOrderId(
+    supabase,
+    orderIds,
+    'getAllOrdersPaged',
+  );
 
   const items = rows.map((row) => {
     const r = row as { id: string };
     return { ...mapOrder(row), items: itemsByOrderId.get(r.id) ?? [] };
   });
 
-  return { items, total, page, pageSize, hasMore: from + items.length < total };
+  return {
+    items,
+    total,
+    page,
+    pageSize,
+    hasMore: rangeFrom + items.length < total,
+  };
+}
+
+// ---------- getOrdersForExport (admin CSV) ----------
+
+/** Hard ceiling on a single CSV export so one request can't pull the whole table. */
+const EXPORT_MAX_ROWS = 5000;
+
+/**
+ * 동일한 status/q/from/to 필터를 적용해 페이지네이션 없이 주문을 가져온다 (CSV 내보내기용).
+ * 최신순, 최대 5000건으로 상한을 둔다.
+ */
+export async function getOrdersForExport(args: {
+  status?: OrderStatus | null;
+  q?: string | null;
+  from?: string | null;
+  to?: string | null;
+}): Promise<OrderWithItems[]> {
+  const supabase = getServiceRoleSupabase();
+
+  let query = supabase
+    .from('orders')
+    .select('*')
+    .order('created_at', { ascending: false });
+  query = applyOrderFilters(query, args);
+  query = query.range(0, EXPORT_MAX_ROWS - 1);
+
+  const { data: orderRows, error } = await query;
+  if (error) throw new Error(`getOrdersForExport: ${error.message}`);
+
+  const rows = orderRows ?? [];
+  if (rows.length === 0) return [];
+
+  const orderIds = rows.map((r) => (r as { id: string }).id);
+  const itemsByOrderId = await loadItemsByOrderId(
+    supabase,
+    orderIds,
+    'getOrdersForExport',
+  );
+
+  return rows.map((row) => {
+    const r = row as { id: string };
+    return { ...mapOrder(row), items: itemsByOrderId.get(r.id) ?? [] };
+  });
+}
+
+// ---------- order memo (isolated; migration 029) ----------
+
+/**
+ * Read the orderer-level free-form memo. ISOLATED query on orders.order_memo so
+ * the rest of the order pipeline keeps working even if migration 029 is not yet
+ * applied. Returns null when the column/value is absent.
+ */
+export async function getOrderMemo(orderId: OrderId): Promise<string | null> {
+  const supabase = getServiceRoleSupabase();
+  const { data, error } = await supabase
+    .from('orders')
+    .select('order_memo')
+    .eq('id', orderId as string)
+    .maybeSingle();
+  if (error) throw new Error(`getOrderMemo: ${error.message}`);
+  const memo = (data as { order_memo?: string | null } | null)?.order_memo;
+  return memo ?? null;
+}
+
+/**
+ * Write the orderer-level free-form memo (max 200 chars, app-enforced).
+ * ISOLATED single-column update so it never disturbs the shared order SELECT.
+ * Passing null clears the memo.
+ */
+export async function setOrderMemo(
+  orderId: OrderId,
+  memo: string | null,
+): Promise<void> {
+  const trimmed = memo == null ? null : memo.slice(0, 200);
+  const supabase = getServiceRoleSupabase();
+  const { error } = await supabase
+    .from('orders')
+    .update({ order_memo: trimmed })
+    .eq('id', orderId as string);
+  if (error) throw new Error(`setOrderMemo: ${error.message}`);
 }
 
 // ---------- attach paymentKey (used by confirm route) ----------
