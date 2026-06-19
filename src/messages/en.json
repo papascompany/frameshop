@@ -131,6 +131,9 @@
     "shippingMethod": "Shipping Method",
     "shippingAddress": "Shipping Address",
     "sameAsOrderer": "Same as orderer",
+  "savedAddress": "Saved addresses",
+  "savedAddressSelect": "Choose a saved address",
+  "savedAddressDefault": "Default address",
     "recipient": "Recipient",
     "phone": "Phone",
     "zipCode": "Zip Code",
@@ -182,6 +185,7 @@
   "account": {
     "title": "My Page",
     "orders": "My Orders",
+    "addresses": "Manage Addresses",
     "noOrders": "No orders found.",
     "startShopping": "Start Shopping",
     "reorder": "Reorder",

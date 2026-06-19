@@ -23,6 +23,8 @@ import { canTransition, formatOrderNo } from '../order/state';
 import { calculateShippingFee } from '../shipping/calc';
 import { getShippingMethods } from './shipping';
 import { getServiceRoleSupabase } from '../supabase/service';
+import { tossClient } from '../payment/toss';
+import { notifyCancelled } from '../notify';
 
 // ---------- generateOrderNo (atomic RPC) ----------
 
@@ -679,4 +681,146 @@ export async function attachPaymentKey(
     .from('orders')
     .update({ payment_id: paymentKey as string })
     .eq('id', orderId as string);
+}
+
+// ---------- customer self-service (Phase B-1) ----------
+
+/** Result shape for customer-initiated order mutations — errors are values. */
+type CustomerActionResult = { ok: boolean; error?: string };
+
+/**
+ * 고객 본인 주문취소 (배송 전: CREATED / PAID 만 허용).
+ *
+ * 관리자 cancelOrderAction 과 동일한 환불-우선 로직을 쓰되, requireAdmin 대신
+ * 호출 user 의 소유권(order.userId === userId)으로 게이트한다. 결제가 있는
+ * 주문이면 Toss 환불을 먼저 수행하고, 환불 실패 시 상태를 바꾸지 않는다
+ * (돈이 돌아가지 않았는데 CANCELLED 로 마킹하는 것을 방지).
+ */
+export async function customerCancelOrder(
+  orderId: OrderId,
+  userId: UserId,
+  reason = '고객 요청',
+): Promise<CustomerActionResult> {
+  let order: OrderWithItems | null;
+  try {
+    order = await getOrder(orderId as string);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : '주문을 불러오지 못했습니다.',
+    };
+  }
+  if (!order) {
+    return { ok: false, error: '주문을 찾을 수 없습니다.' };
+  }
+
+  // Ownership: the order must belong to the authenticated caller. Guest orders
+  // (userId null) can never be cancelled through this customer path.
+  if (order.userId == null || (order.userId as string) !== (userId as string)) {
+    return { ok: false, error: '본인 주문만 취소할 수 있습니다.' };
+  }
+
+  if (order.status !== 'CREATED' && order.status !== 'PAID') {
+    return {
+      ok: false,
+      error:
+        '배송 준비 중이거나 이미 처리된 주문은 직접 취소할 수 없습니다. 고객센터로 문의해 주세요.',
+    };
+  }
+
+  const trimmedReason = reason.trim() || '고객 요청';
+
+  // Refund first when the order carries a payment. CREATED orders have none.
+  // On refund failure we abort BEFORE the state transition so we never mark an
+  // order CANCELLED while the customer's money is still held.
+  if (order.paymentId) {
+    try {
+      await tossClient.cancel({
+        paymentKey: order.paymentId,
+        cancelReason: trimmedReason,
+      });
+    } catch (err) {
+      return {
+        ok: false,
+        error: `결제 취소(환불) 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      };
+    }
+  }
+
+  try {
+    // Use the RESOLVED order.id — `orderId` may be an orderNo (the client sends
+    // the human order number), but transitionTo matches on the UUID id. Passing
+    // an orderNo here would update 0 rows AFTER the refund already ran.
+    await transitionTo(order.id, 'CANCELLED', { reason: trimmedReason });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : '주문 취소 처리에 실패했습니다.',
+    };
+  }
+
+  // Fire-and-forget customer notification (same pattern as admin cancel).
+  void notifyCancelled(order, trimmedReason);
+
+  return { ok: true };
+}
+
+/**
+ * 구매확정 (배송완료 DELIVERED 후 고객이 수령 확인).
+ *
+ * confirmed_at 을 now() 로 set 한다. 이미 확정된 주문이면 멱등적으로 ok 반환.
+ * confirmed_at 컬럼(migration 033)이 아직 미적용이면 UPDATE 가 실패할 수 있으므로
+ * try/catch 로 감싸 그 경우에만 graceful error 를 돌려준다. ORDER_STATUSES 는
+ * FROZEN 이라 상태 전환 없이 timestamptz 만 갱신한다.
+ */
+export async function confirmPurchase(
+  orderId: OrderId,
+  userId: UserId,
+): Promise<CustomerActionResult> {
+  let order: OrderWithItems | null;
+  try {
+    order = await getOrder(orderId as string);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : '주문을 불러오지 못했습니다.',
+    };
+  }
+  if (!order) {
+    return { ok: false, error: '주문을 찾을 수 없습니다.' };
+  }
+
+  if (order.userId == null || (order.userId as string) !== (userId as string)) {
+    return { ok: false, error: '본인 주문만 구매확정할 수 있습니다.' };
+  }
+
+  if (order.status !== 'DELIVERED') {
+    return {
+      ok: false,
+      error: '배송완료된 주문만 구매확정할 수 있습니다.',
+    };
+  }
+
+  // Idempotent: already confirmed → success without touching the row.
+  if (order.confirmedAt != null) {
+    return { ok: true };
+  }
+
+  // Isolated single-column update. Wrapped so an unapplied migration 033
+  // (missing confirmed_at column) degrades to a graceful error instead of
+  // throwing through the customer action boundary.
+  try {
+    const supabase = getServiceRoleSupabase();
+    const { error } = await supabase
+      .from('orders')
+      .update({ confirmed_at: new Date().toISOString() })
+      .eq('id', order.id as string);
+    if (error) {
+      return { ok: false, error: '구매확정 처리에 실패했습니다.' };
+    }
+  } catch {
+    return { ok: false, error: '구매확정 처리에 실패했습니다.' };
+  }
+
+  return { ok: true };
 }

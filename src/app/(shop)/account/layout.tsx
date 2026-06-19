@@ -14,6 +14,7 @@ export default async function AccountLayout({ children }: { children: ReactNode 
 
   const NAV_ITEMS = [
     { href: '/account/orders', label: t('orders') },
+    { href: '/account/addresses', label: t('addresses') },
   ];
 
   return (

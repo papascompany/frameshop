@@ -155,6 +155,16 @@ export type Order = {
    * before 029) keep compiling; mapOrder always populates it as string | null.
    */
   orderMemo?: string | null;
+  /**
+   * Purchase-confirmation timestamp (구매확정). Null until the customer confirms
+   * a DELIVERED order; once set, the order is finalized. Depends on migration
+   * 033; mapped undefined-safe so reads work even if 033 is unapplied.
+   *
+   * Optional on the type so existing Order literals (fixtures, callers built
+   * before 033) keep compiling; mapOrder always populates it as
+   * IsoTimestamp | null.
+   */
+  confirmedAt?: IsoTimestamp | null;
   createdAt: IsoTimestamp;
   paidAt: IsoTimestamp | null;
   shippedAt: IsoTimestamp | null;

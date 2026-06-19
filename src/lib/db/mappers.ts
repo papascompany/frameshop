@@ -150,6 +150,8 @@ type OrderRow = {
   shipping: ShippingAddress;
   /** migration 029 — may be absent on rows from before it was applied. */
   order_memo?: string | null;
+  /** migration 033 — may be absent on rows from before it was applied. */
+  confirmed_at?: string | null;
   created_at: string;
   paid_at: string | null;
   shipped_at: string | null;
@@ -315,6 +317,8 @@ export const mapOrder = (row: OrderRow): Order => ({
   shipping: row.shipping,
   // undefined-safe: column may not exist yet (migration 029 unapplied).
   orderMemo: row.order_memo ?? null,
+  // undefined-safe: column may not exist yet (migration 033 unapplied).
+  confirmedAt: row.confirmed_at ?? null,
   createdAt: row.created_at,
   paidAt: row.paid_at,
   shippedAt: row.shipped_at,

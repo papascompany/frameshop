@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { PriceTag } from '@/components/PriceTag';
@@ -22,6 +23,7 @@ import type {
   ShippingMethodConfig,
 } from '@/types/shipping';
 import type { Order } from '@/types/order';
+import type { UserAddress } from '@/types/address';
 import { envPublic } from '@/lib/env-public';
 import { PostcodeButton } from '@/components/PostcodeButton';
 import { MobileStickyBar } from '@/components/MobileStickyBar';
@@ -71,6 +73,67 @@ export function CheckoutClient({ shippingMethods }: Props) {
   // Inline failure message near the pay button (replaces alert()).
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Saved addresses (logged-in members only). The GET endpoint returns 401 for
+  // guests, so an empty list naturally means "no selector" — guests are
+  // unaffected. This only *prefills* the existing form; the submit payload and
+  // the manual-entry flow are untouched.
+  const [savedAddresses, setSavedAddresses] = useState<UserAddress[]>([]);
+  const [pickedAddressId, setPickedAddressId] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/account/addresses', { credentials: 'same-origin' })
+      .then(async (res) => {
+        if (!res.ok) return null; // 401 (guest) / 500 → no selector
+        return (await res.json()) as { ok: boolean; addresses?: UserAddress[] };
+      })
+      .then((body) => {
+        if (cancelled || !body?.ok || !body.addresses) return;
+        setSavedAddresses(body.addresses);
+      })
+      .catch(() => {
+        /* network error → silently fall back to manual entry */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Fill the shipping form from a chosen saved address. Clears
+   *  "주문인과 동일" since picking an address overrides the recipient. */
+  function applySavedAddress(addressId: string) {
+    setPickedAddressId(addressId);
+    const addr = savedAddresses.find((a) => a.id === addressId);
+    if (!addr) return;
+    setForm((f) => ({
+      ...f,
+      shipping: {
+        ...f.shipping,
+        sameAsOrderer: false,
+        name: addr.recipientName,
+        phone: addr.phone,
+        zip: addr.zip,
+        addr1: addr.addr1,
+        addr2: addr.addr2,
+        memo: addr.memo,
+      },
+    }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      for (const k of [
+        'shipping.name',
+        'shipping.phone',
+        'shipping.zip',
+        'shipping.addr1',
+        'shipping.addr2',
+        'shipping.memo',
+      ]) {
+        delete next[k];
+      }
+      return next;
+    });
+  }
+
   const summary = getCartSummary(items);
   const activeMethod = useMemo(
     () => shippingMethods.find((m) => m.code === form.shippingMethod) ?? null,
@@ -103,6 +166,9 @@ export function CheckoutClient({ shippingMethods }: Props) {
   }
 
   function toggleSameAsOrderer(checked: boolean) {
+    // Choosing "주문인과 동일" overrides recipient/phone, so the saved-address
+    // selection no longer reflects the form — clear the selector's value.
+    if (checked) setPickedAddressId('');
     setForm((f) => ({
       ...f,
       shipping: {
@@ -294,6 +360,24 @@ export function CheckoutClient({ shippingMethods }: Props) {
         <Card padding="md">
           <h2 className="font-semibold mb-3">{t('shippingAddress')}</h2>
           <div className="flex flex-col gap-3">
+            {savedAddresses.length > 0 ? (
+              <Select
+                label={t('savedAddress')}
+                placeholder={t('savedAddressSelect')}
+                value={pickedAddressId}
+                onChange={(e) => applySavedAddress(e.target.value)}
+                options={savedAddresses.map((a) => ({
+                  value: a.id,
+                  label: [
+                    a.label || a.recipientName,
+                    a.isDefault ? `(${t('savedAddressDefault')})` : '',
+                    `${a.addr1}${a.addr2 ? ` ${a.addr2}` : ''}`,
+                  ]
+                    .filter(Boolean)
+                    .join(' '),
+                }))}
+              />
+            ) : null}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
@@ -332,6 +416,8 @@ export function CheckoutClient({ shippingMethods }: Props) {
               />
               <PostcodeButton
                 onComplete={(zip, addr1) => {
+                  // Manual postcode edit diverges from any saved address.
+                  setPickedAddressId('');
                   setShipping('zip', zip);
                   setShipping('addr1', addr1);
                 }}

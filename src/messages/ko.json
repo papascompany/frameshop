@@ -131,6 +131,9 @@
     "shippingMethod": "배송 방법",
     "shippingAddress": "배송지",
     "sameAsOrderer": "주문인과 동일",
+  "savedAddress": "저장된 배송지",
+  "savedAddressSelect": "저장된 배송지에서 선택",
+  "savedAddressDefault": "기본 배송지",
     "recipient": "받는 분",
     "phone": "전화번호",
     "zipCode": "우편번호",
@@ -182,6 +185,7 @@
   "account": {
     "title": "마이페이지",
     "orders": "주문 내역",
+    "addresses": "배송지 관리",
     "noOrders": "주문 내역이 없습니다.",
     "startShopping": "쇼핑 시작하기",
     "reorder": "재주문",

@@ -158,6 +158,10 @@ export function MyOrdersClient({ orders }: Props) {
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [reviewOrderId, setReviewOrderId] = useState<string | null>(null);
   const [reviewedIds, setReviewedIds] = useState<Set<string>>(new Set());
+  // 주문취소 / 구매확정 — 진행 중인 주문 id 와 주문별 인라인 메시지.
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<Record<string, string>>({});
 
   function getStatusLabel(status: OrderStatus): string {
     const validKeys: OrderStatus[] = ['CREATED', 'PAID', 'IN_PRODUCTION', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'REFUNDED'];
@@ -190,6 +194,82 @@ export function MyOrdersClient({ orders }: Props) {
       setReorderError('재주문 요청에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setReorderingId(null);
+    }
+  }
+
+  async function handleCancel(orderId: string, orderNo: string) {
+    if (!window.confirm('주문을 취소하시겠습니까? 결제하신 경우 환불됩니다.')) {
+      return;
+    }
+    setCancellingId(orderId);
+    setActionMessage((prev) => {
+      const next = { ...prev };
+      delete next[orderId];
+      return next;
+    });
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(orderNo)}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const body = (await res.json()) as { ok: boolean; message?: string };
+      if (body.ok) {
+        router.refresh();
+      } else {
+        setActionMessage((prev) => ({
+          ...prev,
+          [orderId]:
+            typeof body.message === 'string' && body.message.length > 0
+              ? body.message
+              : '주문 취소에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+        }));
+      }
+    } catch {
+      setActionMessage((prev) => ({
+        ...prev,
+        [orderId]: '주문 취소 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      }));
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  async function handleConfirm(orderId: string) {
+    if (!window.confirm('구매를 확정하시겠습니까? 확정 후에는 취소할 수 없습니다.')) {
+      return;
+    }
+    setConfirmingId(orderId);
+    setActionMessage((prev) => {
+      const next = { ...prev };
+      delete next[orderId];
+      return next;
+    });
+    try {
+      const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const body = (await res.json()) as { ok: boolean; message?: string };
+      if (body.ok) {
+        router.refresh();
+      } else {
+        setActionMessage((prev) => ({
+          ...prev,
+          [orderId]:
+            typeof body.message === 'string' && body.message.length > 0
+              ? body.message
+              : '구매확정에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+        }));
+      }
+    } catch {
+      setActionMessage((prev) => ({
+        ...prev,
+        [orderId]: '구매확정 요청에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      }));
+    } finally {
+      setConfirmingId(null);
     }
   }
 
@@ -232,9 +312,17 @@ export function MyOrdersClient({ orders }: Props) {
         {orders.map((order) => {
           const firstTwo = order.items.slice(0, 2);
           const rest = order.items.length - 2;
-          const isReordering = reorderingId === (order.id as string);
+          const orderId = order.id as string;
+          const isReordering = reorderingId === orderId;
           const isDelivered = order.status === 'DELIVERED';
-          const hasReview = reviewedIds.has(order.id as string);
+          const hasReview = reviewedIds.has(orderId);
+          // 주문취소: 배송 전(CREATED/PAID)만. 구매확정: DELIVERED & 미확정만.
+          const isConfirmed = order.confirmedAt != null;
+          const canCancel = order.status === 'CREATED' || order.status === 'PAID';
+          const canConfirm = isDelivered && !isConfirmed;
+          const isCancelling = cancellingId === orderId;
+          const isConfirming = confirmingId === orderId;
+          const message = actionMessage[orderId];
 
           return (
             <li key={order.id as string}>
@@ -321,7 +409,31 @@ export function MyOrdersClient({ orders }: Props) {
                   <p className="text-sm font-semibold tabular-nums">
                     {order.totalPrice.toLocaleString('ko-KR')}원
                   </p>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap justify-end">
+                    {canCancel ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        loading={isCancelling}
+                        disabled={isCancelling}
+                        onClick={() => void handleCancel(orderId, order.orderNo as string)}
+                      >
+                        주문 취소
+                      </Button>
+                    ) : null}
+                    {isConfirmed ? (
+                      <Badge variant="success">구매확정됨</Badge>
+                    ) : canConfirm ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        loading={isConfirming}
+                        disabled={isConfirming}
+                        onClick={() => void handleConfirm(orderId)}
+                      >
+                        구매확정
+                      </Button>
+                    ) : null}
                     {isDelivered ? (
                       hasReview ? (
                         <Badge variant="success">{t('reviewDone')}</Badge>
@@ -329,7 +441,7 @@ export function MyOrdersClient({ orders }: Props) {
                         <Button
                           size="sm"
                           variant="secondary"
-                          onClick={() => setReviewOrderId(order.id as string)}
+                          onClick={() => setReviewOrderId(orderId)}
                         >
                           {t('writeReview')}
                         </Button>
@@ -340,12 +452,22 @@ export function MyOrdersClient({ orders }: Props) {
                       variant="secondary"
                       loading={isReordering}
                       disabled={isReordering}
-                      onClick={() => void handleReorder(order.id as string)}
+                      onClick={() => void handleReorder(orderId)}
                     >
                       {t('reorder')}
                     </Button>
                   </div>
                 </div>
+
+                {/* 주문취소 / 구매확정 인라인 메시지 */}
+                {message ? (
+                  <p
+                    role="alert"
+                    className="text-sm text-danger border border-danger rounded-md px-3 py-2"
+                  >
+                    {message}
+                  </p>
+                ) : null}
               </Card>
             </li>
           );
