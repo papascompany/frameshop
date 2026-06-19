@@ -190,3 +190,4 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 - 2026-05-12: `.env.local`에 SUPABASE_URL/anon/service_role 채움. `npm run dev` (port 3001) 8개 라우트 모두 200 OK.
 - 2026-05-12: Toss 결제 연동은 사용자 결정으로 Phase 1 마지막으로 연기 → GitHub Issue #2 등록.
 - 2026-06-19: [x] Backend: admin orders actions + CSV export 완료 — markDelivered/cancel/refund 액션에 notifyDelivered/notifyCancelled/notifyRefunded 연결(fire-and-forget), saveOrderMemoAction(trim+200자 cap, 빈문자열=null), bulkUpdateTrackingAction(orderNo 해석→SHIPPED 전환→notifyShipped, per-row ok/error), GET /api/admin/orders/export(UTF-8 BOM CSV, 13개 한글 컬럼, RFC4180 이스케이프). tsc 클린(소스), 29 테스트 통과.
+- 2026-06-19: [x] Phase B-1(고객 주문취소/구매확정/주소록, PR #53) 재배포 트리거 — #53 머지본(2b1caba)에 대한 Vercel auto-deploy가 누락되어 프로덕션 반영용 트리거 커밋. 마이그레이션 032/033 적용 대기.
