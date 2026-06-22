@@ -1,6 +1,6 @@
 # 📦 FrameShop 패키지
 
-> ZZIXX 스타일 액자 주문 SaaS — Claude Code 자율 개발 패키지
+> Z 스타일 액자 주문 SaaS — Claude Code 자율 개발 패키지
 
 ## 📂 포함된 파일
 
