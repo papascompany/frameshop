@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/Card';
@@ -70,6 +70,10 @@ export function CheckoutClient({ shippingMethods }: Props) {
   }));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  // Synchronous re-entrancy guard: the `submitting` state + disabled button can
+  // still be double-fired in the frame before React re-renders. A ref blocks the
+  // second call immediately, preventing a duplicate order/payment.
+  const submittingRef = useRef(false);
   // Inline failure message near the pay button (replaces alert()).
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -202,6 +206,8 @@ export function CheckoutClient({ shippingMethods }: Props) {
       setSubmitError('입력 내용을 다시 확인해 주세요.');
       return;
     }
+    if (submittingRef.current) return; // block a rapid double-submit
+    submittingRef.current = true;
     setErrors({});
     setSubmitError(null);
     setSubmitting(true);
@@ -251,6 +257,7 @@ export function CheckoutClient({ shippingMethods }: Props) {
       const code = (err as { code?: string } | null)?.code;
       setSubmitError(tossErrorCopy(code, err instanceof Error ? err.message : null));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
