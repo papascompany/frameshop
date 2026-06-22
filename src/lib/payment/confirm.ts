@@ -123,6 +123,15 @@ export async function confirmPayment(
     // UNIQUE conflict: handleWebhook already processed this paymentKey.
     // Re-fetch current order state and return idempotent success.
     const current = await getOrder(input.orderId as string);
+    // Fallback render enqueue: the webhook owns rendering in this race, but its
+    // transition/enqueue is best-effort (its errors are swallowed). If the order
+    // is PAID, ensure renders are queued here too. createRenderJob is idempotent
+    // (UNIQUE order_item_id + ignoreDuplicates), so this never double-renders.
+    if (current?.status === 'PAID') {
+      for (const item of current.items) {
+        enqueuePrintRender(item.id);
+      }
+    }
     return {
       ok: true,
       orderNo: current?.orderNo ?? order.orderNo,
@@ -226,7 +235,18 @@ export async function handleWebhook(event: WebhookEvent): Promise<void> {
         console.warn('[notify] webhook notifyNewOrder 예외:', e);
       });
     }
-  } catch {
-    // CANCELLED → PAID etc. are invalid; we already logged the raw payload.
+  } catch (err) {
+    // An invalid transition (e.g. CANCELLED→PAID) is expected and benign — the
+    // raw payload is already persisted. But a real failure (DB error/timeout)
+    // here means the order may be stuck unrendered, so log it for ops/drains
+    // instead of swallowing silently.
+    console.error(
+      JSON.stringify({
+        event: 'webhook_transition_failed',
+        orderNo: event.data.orderId,
+        target,
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 }
