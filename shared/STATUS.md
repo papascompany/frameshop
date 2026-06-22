@@ -191,3 +191,6 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 - 2026-05-12: Toss 결제 연동은 사용자 결정으로 Phase 1 마지막으로 연기 → GitHub Issue #2 등록.
 - 2026-06-19: [x] Backend: admin orders actions + CSV export 완료 — markDelivered/cancel/refund 액션에 notifyDelivered/notifyCancelled/notifyRefunded 연결(fire-and-forget), saveOrderMemoAction(trim+200자 cap, 빈문자열=null), bulkUpdateTrackingAction(orderNo 해석→SHIPPED 전환→notifyShipped, per-row ok/error), GET /api/admin/orders/export(UTF-8 BOM CSV, 13개 한글 컬럼, RFC4180 이스케이프). tsc 클린(소스), 29 테스트 통과.
 - 2026-06-19: [x] Phase B-1(고객 주문취소/구매확정/주소록, PR #53) 재배포 트리거 — #53 머지본(2b1caba)에 대한 Vercel auto-deploy가 누락되어 프로덕션 반영용 트리거 커밋. 마이그레이션 032/033 적용 대기.
+- 2026-06-22: [x] 전체 코드베이스 전수감사(5차원 오케스트레이션+adversarial) → 진짜 결함 3건 수정(#56): 결제 폴백렌더·webhook 로그·체크아웃 중복제출 가드. 오탐 3건 기각. tsc/lint/build/219테스트 GREEN. 라이브.
+- 2026-06-22: [x] 배포 정상화 — git author를 PapasCompany로 설정해 Hobby 비공개레포 배포 차단(storigehub) 완화. #56이 머지만으로 자동 Ready 배포됨(`0c81c01`).
+- 2026-06-22: [📋] **남은/예정 작업은 `docs/BACKLOG.md`(SSOT)로 정리.** 미적용 마이그레이션 029/030/031/032/033 = `shared/BLOCKERS.md BL-010`. 다음: 재주문 수정 / Phase B-2(적립금·부분환불·현금영수증) / 보안 Phase 1-2 / Phase C.
