@@ -24,6 +24,7 @@ import type {
   OrderItemId,
   OrderNo,
   PaymentKey,
+  PhotoId,
   ProductId,
   ProductVariantId,
   UserId,
@@ -119,6 +120,16 @@ export type OrderItemSnapshot = {
    * — the pipeline falls back to the live product value then.
    */
   bleedMm?: number;
+  /**
+   * 선결과제 1 — 원본 사진 보존. `OrderItem.photoUrl` 은 인쇄용 베이크 크롭이라
+   * 원본 사진 참조가 빠져 재주문/재편집이 불가능했다. 주문 생성 시 카트의
+   * 원본 photoId(있으면)를 스냅샷에 동결한다(jsonb라 마이그레이션 불요). 레거시
+   * 주문엔 없으므로 재주문은 photo_url→photos 조회로 폴백한다. 인쇄 경로는 이
+   * 필드를 사용하지 않는다(인쇄는 항상 베이크 크롭 photo_url 기준).
+   */
+  sourcePhotoId?: PhotoId;
+  /** 원본 사진 URL(있으면). 재편집 시 원본을 캔버스에 다시 올리기 위함. */
+  sourcePhotoUrl?: string;
 };
 
 export type OrderItem = {
@@ -253,6 +264,11 @@ export const orderItemSnapshotSchema = z.object({
   sizeLabel: z.string().min(1),
   colorLabel: z.string().min(1),
   unitPrice: z.number().int().nonnegative(),
+  // Optional snapshot extensions (forward-compatible; absent on legacy rows).
+  // bleedMm was previously typed but missing from this schema — close the gap.
+  bleedMm: z.number().nonnegative().optional(),
+  sourcePhotoId: z.string().min(1).optional(),
+  sourcePhotoUrl: z.string().optional(),
 });
 
 export const createOrderInputSchema = z.object({

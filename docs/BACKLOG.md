@@ -37,10 +37,12 @@
 - **taxonomy 결정**: 데이터는 하나(extended), 갤러리월 vs 일반 다조합은 `set_template_id` 유무로 분기
   (좌표 있으면 벽 미니맵, 없으면 그리드). 카탈로그·출시는 분리 — 일반 다조합(P1) 먼저, 갤러리월(P2+) 후.
 - **★ 선결 과제 3건 (P1 착수 전 필수, 현 코드 검증)**:
-  1. **원본 photoId·cropTransform 보존** — 담기 시 베이크 크롭의 새 photoId가 생겨 "같은 사진 멀티사이즈"·
-     재주문이 데이터적으로 불가. `sourcePhotoId`+transform 별도 보존 필요(§2 재주문 BL 근본원인과 동일).
-  2. **세트가·취소 정책 ADR** — 세트 할인 행 귀속·서버 권위 재계산·부분취소 단위를 035 적용 전 동결.
-  3. **확장형 세션 서버 영속화** — studio `[orderId]`는 인메모리 sessionId라 새로고침 시 다라인 소실 → draft 서버저장.
+  1. ✅ **원본 photoId·cropTransform 보존 — 완료(ADR-020, 무마이그레이션).** `cart_items.photo_id`=원본,
+     `crop_transform`=실제변형, `order_items` 스냅샷에 `sourcePhotoId` 동결. **재주문 무동작 BL 동시 해소**(§2).
+     인쇄·CartItem 타입 무변경. tsc/eslint/build/220 tests GREEN.
+  2. ✅ **세트가·취소 정책 — CTO 확정·동결(ADR-021).** 세트할인=행별 비례배분, 취소/환불=세트 단위(원자),
+     부분선택=세트 불가(같이 담긴 단품은 선택 가능). 구현은 P2/P3.
+  3. ⬜ **확장형 세션 서버 영속화** — studio `[orderId]`는 인메모리 sessionId라 새로고침 시 다라인 소실 → draft 서버저장. (미착수)
 - **롤아웃**: P0 기반(비파괴, 034/035 + 스냅샷 v2 ADR) → P1 편집기 MVP(케이스1~4 그리드) →
   P2 세트·어드민 워크스페이스(036/037) → P3 주문 6화면 시각화.
 - **신규 마이그레이션** ⛏️: `034_products_product_type` + `034_cart_projects`, `035_cart_items_project_link`
@@ -51,14 +53,12 @@
 
 ## §2. P1 — 감사 후속 (전수감사에서 보고됨, 미수정)
 
-### BL: 재주문 무동작 (`/api/cart/reorder`)
-- **현상**: 서버는 order_items를 items로 반환하나, 클라이언트(`MyOrdersClient.handleReorder`)가
-  응답을 **무시하고 `/cart`로 이동만** → 재주문이 실질적으로 아무것도 안 함.
-- **근본 원인**: order_items 스냅샷에 `photoId`/원본 사진 정보가 없어 유효한 `CartItem` 재구성 불가
-  (반환 객체가 `photoId:null` + CartItem 스키마 위반).
-- **수정 방향**: (a) 스냅샷에 photoId/사진 참조를 포함하도록 주문 생성 변경 + 재주문 시 cart 재삽입, 또는
-  (b) 재주문을 "동일 상품 재편집" 플로우(스튜디오로 이동 + 사진 재선택)로 재설계. **설계 결정 필요.**
-  → **§1A 선결과제 1(sourcePhotoId 보존)과 동일 근본원인** — 확장형 P0에서 함께 해소 권장.
+### ✅ BL(해결): 재주문 무동작 (`/api/cart/reorder`) — ADR-020에서 해소
+- **원인**: order_items 스냅샷에 원본 photoId 부재 → 유효 `CartItem` 재구성 불가(`photoId:null` 스키마 위반),
+  클라가 응답 무시하고 `/cart` 이동만.
+- **해결(2026-06-23)**: 주문 생성 시 스냅샷에 `sourcePhotoId` 동결 + 재주문 route가 (sourcePhotoId 또는
+  photo_url→photos 역조회로) 유효 `AddToCartInput` 재구성, `MyOrdersClient.handleReorder`가 실제 `addToCart`.
+  레거시 주문도 베이크크롭 URL 역조회로 동작. 복원 불가 항목만 skip + 사용자 고지.
 
 ### 기타(저위험)
 - 리뷰 작성 자격이 `DELIVERED`만 확인 → `confirmed_at`(구매확정) 미연동. 설계 선택(현재는 의도).

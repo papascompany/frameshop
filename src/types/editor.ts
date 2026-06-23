@@ -52,6 +52,16 @@ export type EditorPhotoEntry = {
   previewUrl: string;
   /** Copy count for this photo, 1..99 (그룹사진 = 1장 × N부). */
   quantity: number;
+  /**
+   * 선결과제 1 — 원본 사진 보존. 베이크 크롭(`photo`)은 인쇄 마스터지만, 같은
+   * 사진을 다른 사이즈로 다시 굽거나(확장형) 재주문 시 재편집하려면 원본 사진
+   * 참조가 필요하다. 담기 시점의 원본 photoId/URL과 실제 크롭 변형을 함께 보존한다.
+   * (옵셔널 — 레거시 호출부/베이크 직전 상태와의 하위호환.)
+   */
+  sourcePhotoId?: PhotoId;
+  sourcePhotoUrl?: string;
+  /** 베이크에 사용된 실제 크롭 변형(identity가 아님). 재편집·재주문 복원용. */
+  cropTransform?: CropTransform;
 };
 
 // ---------- Editor state (Zustand store) ----------

@@ -12,9 +12,11 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { asBrand } from '@/types/common';
-import type { UserId } from '@/types/common';
+import type { PhotoId, UserId } from '@/types/common';
+import type { AddToCartInput } from '@/types/cart';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getOrder } from '@/lib/db/order';
+import { getPhotoIdsByOriginalUrl } from '@/lib/db/photo';
 import { isSameOrigin } from '@/lib/security/same-origin';
 import { checkRate } from '@/lib/ratelimit';
 
@@ -76,22 +78,38 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ ok: false, code: 'FORBIDDEN' }, { status: 403 });
   }
 
-  // order_items → AddToCartInput 형식으로 변환.
-  // photoId는 스냅샷에 없으므로 photoUrl로 대체 (CartItem 스키마에서 required).
-  // 기존 snapshot에서 복원 가능한 필드만 담는다.
-  const reorderItems = order.items.map((item) => ({
-    productId: item.snapshot.productId,
-    variantId: item.snapshot.variantId,
-    photoId: null, // 원본 photoId는 스냅샷 미포함 — 클라이언트가 처리
-    photoUrl: item.photoUrl,
-    cropTransform: item.cropTransform,
-    previewUrl: item.photoUrl, // 재주문 시 미리보기 = 원본 사진
-    price: item.snapshot.unitPrice,
-    quantity: item.quantity,
-    options: item.snapshot.options,
-    snapshot: item.snapshot,
-    printFileUrl: item.printFileUrl,
-  }));
+  // order_items → AddToCartInput 변환 (선결과제 1).
+  // photoId 복원: ① 스냅샷의 sourcePhotoId(주문 생성 시 동결한 원본) 우선,
+  // ② 없으면(레거시 주문) 베이크 크롭 photo_url 로 photos.id 를 역조회.
+  // 둘 다 실패하면(원본 사진 정리됨) 그 줄은 건너뛴다 — photoId 는 CartItem 의
+  // NOT-null 필수 필드라 빈 값으로 담으면 /api/cart 검증에서 거부된다.
+  const legacyUrls = order.items
+    .filter((it) => !it.snapshot.sourcePhotoId)
+    .map((it) => it.photoUrl);
+  const idByUrl = await getPhotoIdsByOriginalUrl(legacyUrls);
 
-  return NextResponse.json({ ok: true, items: reorderItems });
+  const reorderItems: AddToCartInput[] = [];
+  let skipped = 0;
+  for (const item of order.items) {
+    const photoId: PhotoId | undefined =
+      item.snapshot.sourcePhotoId ?? idByUrl.get(item.photoUrl);
+    if (!photoId) {
+      skipped += 1;
+      continue;
+    }
+    reorderItems.push({
+      userId: null,
+      productId: item.snapshot.productId,
+      variantId: item.snapshot.variantId,
+      photoId,
+      options: item.snapshot.options,
+      photoUrl: item.photoUrl,
+      cropTransform: item.cropTransform,
+      previewUrl: item.photoUrl,
+      price: item.snapshot.unitPrice,
+      quantity: item.quantity,
+    });
+  }
+
+  return NextResponse.json({ ok: true, items: reorderItems, skipped });
 }

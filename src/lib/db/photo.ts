@@ -6,7 +6,8 @@
  */
 
 import 'server-only';
-import type { SessionId, UserId } from '@/types/common';
+import { asBrand } from '@/types/common';
+import type { PhotoId, SessionId, UserId } from '@/types/common';
 import type { ExifMeta, Photo } from '@/types/photo';
 import { mapPhoto } from './mappers';
 import { getServiceRoleSupabase } from '../supabase/service';
@@ -49,4 +50,29 @@ export async function createPhoto(input: CreatePhotoInput): Promise<Photo> {
     throw new Error(`createPhoto: ${error?.message ?? 'no row'}`);
   }
   return mapPhoto(data);
+}
+
+/**
+ * Resolve photo ids by their `original_url` (exact match). Used by reorder to
+ * recover a valid `photoId` for legacy order items whose snapshot predates
+ * `sourcePhotoId` (선결과제 1) — the baked-crop URL stored on the order row IS a
+ * `photos.original_url`, so it maps back to that photo's id. Returns a Map keyed
+ * by url; urls with no surviving photo row are simply absent.
+ */
+export async function getPhotoIdsByOriginalUrl(
+  urls: string[],
+): Promise<Map<string, PhotoId>> {
+  const out = new Map<string, PhotoId>();
+  const unique = Array.from(new Set(urls.filter((u) => typeof u === 'string' && u.length > 0)));
+  if (unique.length === 0) return out;
+  const supabase = getServiceRoleSupabase();
+  const { data, error } = await supabase
+    .from('photos')
+    .select('id, original_url')
+    .in('original_url', unique);
+  if (error) throw new Error(`getPhotoIdsByOriginalUrl: ${error.message}`);
+  for (const row of (data ?? []) as Array<{ id: string; original_url: string }>) {
+    if (!out.has(row.original_url)) out.set(row.original_url, asBrand<PhotoId>(row.id));
+  }
+  return out;
 }

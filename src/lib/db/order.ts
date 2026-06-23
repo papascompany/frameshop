@@ -227,6 +227,10 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       colorLabel: v.color_label,
       unitPrice: v.price,
       bleedMm,
+      // 선결과제 1: freeze the ORIGINAL photo reference so reorder/re-edit can
+      // reconstruct the line. `item.photoUrl` (→ order_items.photo_url) stays the
+      // baked crop for print; this is provenance only, unused by the render path.
+      sourcePhotoId: item.photoId,
     };
     const frameAssetId = frameByKey.get(`${v.product_id}|${v.color_code}`) ?? null;
     return {

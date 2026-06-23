@@ -315,4 +315,66 @@ Supabase Storage가 항상 https를 서빙하므로 admin 입력/사용자 업�
 
 ---
 
+## ADR-020: 확장형 상품 선결과제 1 — 원본 사진 보존(무마이그레이션) + 스냅샷 v2
+
+**Date:** 2026-06-23
+**Status:** Accepted (구현 완료, 라이브 전 검증 GREEN)
+
+**Context:**
+편집기는 "담기" 시점에 크롭을 굽고 새 photoId 로 재업로드한다(photo-only 베이크 크롭, 2026-06-13 결정).
+그 결과 `cart_items.photo_id` = 베이크 크롭, `order_items` 는 photoId 를 아예 저장하지 않아 **원본 사진
+참조가 카트→주문 어디에도 남지 않았다.** 이 때문에 (a) 재주문 무동작(`/api/cart/reorder` 가 `photoId:null`
+반환 → CartItem 스키마 위반), (b) 확장형의 "같은 사진 다른 사이즈"·재편집 불가.
+
+**Decision:**
+원본 참조를 **기존 컬럼 재활용**으로 보존(신규 마이그레이션 0건). 인쇄 경로 무변경.
+- `cart_items.photo_id` = **원본** 사진 id(베이크크롭 → 원본). `crop_transform` = **실제 변형**(identity→실제).
+  `photo_url` = 베이크 크롭(인쇄 마스터 + 소유권 키) **유지**. 셋 다 기존 컬럼이라 익명/로그인 DB 라운드트립 모두 보존.
+- `order_items.variant_snapshot`(jsonb)에 `sourcePhotoId` 동결(`mapOrderItem` 이 jsonb 전체 통과 → 자동 매핑).
+  `OrderItemSnapshot` 에 `sourcePhotoId?`/`sourcePhotoUrl?` 추가 + 누락 `bleedMm` zod 보강(스냅샷 v2, FROZEN 옵셔널 추가).
+- 재주문: `sourcePhotoId` 우선, 없으면(레거시) `photo_url`→`photos.id` 역조회(`getPhotoIdsByOriginalUrl`)로 photoId 복원.
+  둘 다 실패 시 그 줄만 skip. 클라(`MyOrdersClient`)가 응답 항목을 실제 `addToCart`.
+
+**근거(코드 검증):** 인쇄(`renderPrintFile`/`pipeline.ts`)는 `photo_url`(베이크 크롭)만 사용, `crop_transform` 미사용
+(pipeline 주석 "legacy, unused"). 카트/체크아웃 UI 는 `photoId` 로 렌더 안 함. cleanup cron(013)은 anon 30일
+사진만 삭제, cart/order 참조 무관. → photo_id 의미 변경은 인쇄·렌더·표시 무영향.
+
+**Consequences:**
+- (+) 마이그레이션 없이 익명·로그인 보존. 인쇄 100% 무변경. 재주문 무동작 BL 해소. CartItem 타입 무변경.
+  확장형 "같은 사진 멀티사이즈" 데이터 토대 확보.
+- (-) `cart_items.photo_id` FK(RESTRICT)가 베이크크롭→원본으로 이동(기존에도 베이크크롭이 FK라 회귀 아님).
+  레거시 주문 재주문은 베이크크롭만 복원(원본 transform 미동결) — 재편집은 신규 주문부터.
+- 검증: tsc 0 · eslint 0 · next build OK · 220 tests(신규 1: sourcePhotoId 동결 가드).
+
+**Alternatives Considered:**
+- cart_items 신규 컬럼 `source_photo_id`(035): 마이그레이션 게이트(yohan73 수동) + 미적용 시 로그인 라운드트립 소실 → 기각.
+- CartItem 옵셔널 필드 추가: DB 컬럼 없어 로그인 라운드트립서 소실 → 기각.
+- 베이크-온-담기 폐기 후 인쇄시 베이크: photo-only 파이프라인 재작성 고위험 → 기각.
+
+---
+
+## ADR-021: 확장형 상품 선결과제 2 — 세트 가격·취소 정책(CTO 확정)
+
+**Date:** 2026-06-23
+**Status:** Accepted (정책 동결; 구현은 P2/P3)
+
+**Context:** 세트(묶음=공유 사진풀+N라인)의 할인·취소·선택 정책 미정 시 `order_items` 평면 전개 스키마(035)가
+정책과 충돌 가능 → 적용 전 동결 필요(`docs/specs/extended-product.md` §9-2, §12).
+
+**Decision (CTO 2026-06-23):**
+1. **세트 할인 = 행별 비례배분.** "구성 합산 → 세트 할인 → 세트 합계"(시각화대로). 세트 할인액을 각 `order_items`
+   행 가격에 비례 배분해 **행 가격 합 = 세트가** 유지(015 행당 가격 불변식 보존, 부분환불 산정 정합). 세트가는
+   서버에서 `bundle_rules` 기준 재계산(클라 `setUnitPrice` 불신뢰).
+2. **취소·환불 = 세트 단위(원자).** 세트는 통째로만 취소/환불(라인 부분취소 불가). 기존 B-1 고객취소와 동일 게이트.
+3. **부분선택 = 세트 불가.** 장바구니/체크아웃에서 세트는 전체 단위로만 선택. **단, 같이 담긴 단품(projectId=null)은
+   개별 선택 가능.**
+
+**Consequences:** 세트 가격/취소/환불/선택 로직 단순화(원자). 행별 비례배분으로 부분환불·정산이 행 합계와 항상 일치.
+구현 시 `createOrder` 가 세트가를 서버 권위로 재계산·검증(가격 변조 차단)해야 함.
+
+**Alternatives Considered:** 대표행 할인 귀속(행 합≠세트가 → 부분환불 산정 불가, 기각). 라인 단위 취소(세트 원자성 위배,
+기각). 세트 부분선택 허용(Mixtiles는 1세트/주문 격리 — 단순성 위해 불가로 채택).
+
+---
+
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_

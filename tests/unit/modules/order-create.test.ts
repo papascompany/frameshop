@@ -308,6 +308,19 @@ describe('createOrder — P0-01 (price tampering)', () => {
     // The order_items.price column is also the DB value, not the client's.
     expect(state.insertedItems?.[0]?.price).toBe(30000);
   });
+
+  it('freezes sourcePhotoId from the cart item (선결과제 1)', async () => {
+    const createOrder = await importCreateOrder();
+    await createOrder(makeInput(30000));
+    const snapshot = state.insertedItems?.[0]?.variant_snapshot as {
+      sourcePhotoId?: string;
+      bleedMm?: number;
+    };
+    // The cart line's photoId (the ORIGINAL photo) is frozen into the snapshot so
+    // reorder/re-edit can reconstruct the line; photo_url stays the baked crop.
+    expect(snapshot.sourcePhotoId).toBe(PHOTO_ID);
+    expect(state.insertedItems?.[0]?.photo_url).toBe(OWNED_PHOTO_URL);
+  });
 });
 
 describe('createOrder — P0-03 (photo ownership)', () => {

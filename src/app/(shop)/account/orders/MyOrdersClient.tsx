@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { courierTrackingUrl } from '@/lib/shipping/courier';
+import { addToCart } from '@/lib/cart/client';
+import type { AddToCartInput } from '@/types/cart';
 import type { OrderStatus, OrderWithItems } from '@/types/order';
 
 /**
@@ -182,12 +184,29 @@ export function MyOrdersClient({ orders }: Props) {
       });
       const body = (await res.json()) as {
         ok: boolean;
-        items?: Array<{ productId: string; variantId: string }>;
+        items?: AddToCartInput[];
+        skipped?: number;
         code?: string;
       };
-      if (!body.ok) {
+      if (!body.ok || !body.items) {
         setReorderError('재주문 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
         return;
+      }
+      if (body.items.length === 0) {
+        setReorderError(
+          '이 주문은 다시 담을 수 없습니다. 원본 사진이 만료되었을 수 있어요. 새로 주문해 주세요.',
+        );
+        return;
+      }
+      // 서버가 복원한 각 항목을 실제로 장바구니에 담는다(이전엔 응답을 무시하고
+      // /cart 로 이동만 해 재주문이 무동작이었음 — 선결과제 1로 해소).
+      for (const item of body.items) {
+        await addToCart(item);
+      }
+      if (body.skipped && body.skipped > 0) {
+        setReorderError(
+          `일부 상품(${body.skipped}건)은 원본 사진 만료로 다시 담지 못했습니다. 나머지를 장바구니에 담았습니다.`,
+        );
       }
       router.push('/cart');
     } catch {

@@ -196,7 +196,13 @@ export function StudioClient({
   /** Render + upload the active photo's print crop and push it into the tray.
    *  Returns true on success. */
   async function handleAddToTray(): Promise<boolean> {
-    if (!photo) return false;
+    // Capture the ORIGINAL photo + the real crop transform BEFORE baking, so the
+    // tray entry preserves the source (선결과제 1) even though the uploaded crop
+    // gets a brand-new photoId. Read from the store directly to avoid closure
+    // staleness across the upload await.
+    const sourcePhoto = useEditorStore.getState().photo;
+    const sourceTransform = useEditorStore.getState().cropTransform;
+    if (!sourcePhoto) return false;
     setPlacing(true);
     setUploadError(null);
     try {
@@ -214,6 +220,9 @@ export function StudioClient({
         addEntry({
           photo: body.photo,
           previewUrl: body.photo.thumbUrl ?? body.photo.originalUrl,
+          sourcePhotoId: sourcePhoto.id,
+          sourcePhotoUrl: sourcePhoto.originalUrl,
+          cropTransform: sourceTransform,
         });
         setPhotoSourceTab('upload');
         return true;
@@ -252,10 +261,13 @@ export function StudioClient({
           userId: null,
           productId: productDetail.product.id,
           variantId,
-          photoId: asBrand<PhotoId>(entry.photo.id),
+          // 선결과제 1: photoId = ORIGINAL 사진(있으면). photoUrl 은 그대로
+          // 베이크 크롭(인쇄 마스터 + 소유권 확인 키)이라 인쇄 경로는 무변경.
+          // cropTransform 도 실제 변형을 보존(없으면 identity 폴백).
+          photoId: entry.sourcePhotoId ?? asBrand<PhotoId>(entry.photo.id),
           options: selected,
           photoUrl: entry.photo.originalUrl,
-          cropTransform: { x: 0, y: 0, scale: 1, rotation: 0 },
+          cropTransform: entry.cropTransform ?? { x: 0, y: 0, scale: 1, rotation: 0 },
           previewUrl: entry.previewUrl,
           price,
           quantity: entry.quantity,

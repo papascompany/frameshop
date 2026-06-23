@@ -82,8 +82,16 @@ type Actions = {
   setPreviewDataUrl: (url: string | null) => void;
   setProcessing: (flag: boolean) => void;
   setConfirmedCrop: (photo: Photo | null) => void;
-  /** Push a confirmed photo into the tray (qty 1) and clear the active photo. */
-  addEntry: (entry: { photo: Photo; previewUrl: string }) => void;
+  /** Push a confirmed photo into the tray (qty 1) and clear the active photo.
+   *  `sourcePhotoId`/`sourcePhotoUrl`/`cropTransform` preserve the ORIGINAL photo
+   *  + real crop transform (선결과제 1) so the line can be re-edited/re-ordered. */
+  addEntry: (entry: {
+    photo: Photo;
+    previewUrl: string;
+    sourcePhotoId?: PhotoId;
+    sourcePhotoUrl?: string;
+    cropTransform?: CropTransform;
+  }) => void;
   removeEntry: (entryId: string) => void;
   setEntryQuantity: (entryId: string, quantity: number) => void;
   clearEntries: () => void;
@@ -220,11 +228,19 @@ export const useEditorStore = create<State & Actions>((set) => ({
   setPreviewDataUrl: (url) => set({ previewDataUrl: url }),
   setProcessing: (flag) => set({ isProcessing: flag }),
   setConfirmedCrop: (photo) => set({ confirmedCrop: photo }),
-  addEntry: ({ photo, previewUrl }) =>
+  addEntry: ({ photo, previewUrl, sourcePhotoId, sourcePhotoUrl, cropTransform }) =>
     set((s) => ({
       entries: [
         ...s.entries,
-        { entryId: crypto.randomUUID(), photo, previewUrl, quantity: 1 },
+        {
+          entryId: crypto.randomUUID(),
+          photo,
+          previewUrl,
+          quantity: 1,
+          sourcePhotoId,
+          sourcePhotoUrl,
+          cropTransform,
+        },
       ],
       // Clear the active photo so the canvas is ready for the next one.
       photo: null,
