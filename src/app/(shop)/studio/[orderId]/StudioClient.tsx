@@ -16,9 +16,14 @@ import {
   useEditorTotals,
 } from '@/store/editor';
 import { addToCart } from '@/lib/cart/client';
+import {
+  clearEditorDraft,
+  loadEditorDraft,
+  saveEditorDraft,
+} from '@/lib/editor/draft';
 import { ImageResizeError, resizeImageToMax } from '@/lib/image/resize-client';
 import { asBrand } from '@/types/common';
-import type { PhotoId, ProductId, SessionId } from '@/types/common';
+import type { PhotoId, ProductId, ProductVariantId, SessionId } from '@/types/common';
 import { LONG_EDGE_RESIZE_PX } from '@/types/photo';
 import type { OptionMatrix, ProductDetail } from '@/types/product';
 import type { Photo } from '@/types/photo';
@@ -67,6 +72,8 @@ export function StudioClient({
   const addEntry = useEditorStore((s) => s.addEntry);
   const removeEntry = useEditorStore((s) => s.removeEntry);
   const setEntryQuantity = useEditorStore((s) => s.setEntryQuantity);
+  const clearEntries = useEditorStore((s) => s.clearEntries);
+  const restoreDraft = useEditorStore((s) => s.restoreDraft);
   const selected = useEditorStore((s) => s.selectedOptions);
   const variantId = useEditorStore((s) => s.selectedVariantId);
   const price = useCurrentVariantPrice();
@@ -77,15 +84,52 @@ export function StudioClient({
   const [confirming, setConfirming] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [photoSourceTab, setPhotoSourceTab] = useState<PhotoSourceTab>('upload');
+  // 선결과제 3: 복원된 드래프트 안내 배너(복원 장수)는 스토어에 보관 — rehydrate
+  // 이펙트가 React setState 없이(Next.js 16 react-hooks 규칙) 설정할 수 있도록.
+  const restoredDraftCount = useEditorStore((s) => s.restoredDraftCount);
   const canvasRef = useRef<FrameCanvasHandle | null>(null);
+  const hydratedRef = useRef(false);
+  const productId = productDetail.product.id as string;
 
+  // Init the store, then (once) rehydrate any saved draft for THIS session+product.
+  // Draft is keyed by the stable sessionId so restored crops stay owned by the
+  // same session → checkout photo-ownership 검증 무결성 유지.
   useEffect(() => {
     init({
       productId: productDetail.product.id,
       options,
       defaultVariantId: productDetail.defaultVariantId,
     });
-  }, [init, productDetail, options]);
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    const draft = loadEditorDraft(sessionId, productId);
+    if (draft && draft.entries.length > 0) {
+      // restoreDraft sets restoredDraftCount in the store (external store update
+      // — allowed in an effect, unlike React setState).
+      restoreDraft({
+        entries: draft.entries,
+        selectedOptions: draft.selectedOptions,
+        selectedVariantId: draft.selectedVariantId
+          ? asBrand<ProductVariantId>(draft.selectedVariantId)
+          : null,
+        orientation: draft.orientation,
+      });
+    }
+  }, [init, productDetail, options, sessionId, productId, restoreDraft]);
+
+  // Persist the tray + options whenever they change (lightly debounced so rapid
+  // qty taps don't thrash localStorage). Empty tray clears the draft.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      saveEditorDraft(sessionId, productId, {
+        selectedOptions: selected,
+        selectedVariantId: variantId,
+        orientation,
+        entries,
+      });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [entries, selected, variantId, orientation, sessionId, productId]);
 
   async function handleFile(file: File) {
     setUploading(true);
@@ -273,6 +317,10 @@ export function StudioClient({
           quantity: entry.quantity,
         });
       }
+      // 주문으로 넘어갔으니 편집 세션을 비운다(트레이 + 저장된 드래프트) — 돌아와도
+      // 이미 담은 항목이 되살아나지 않게.
+      clearEntries();
+      clearEditorDraft(sessionId, productId);
       router.push('/cart');
     } finally {
       setConfirming(false);
@@ -331,6 +379,24 @@ export function StudioClient({
         {/* 좌측: 캔버스 / 사진 소스 + 담은 사진 트레이 */}
         <div>
           <h1 className="text-xl font-bold mb-4">{productDetail.product.name}</h1>
+
+          {restoredDraftCount != null && entries.length > 0 ? (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-hairline bg-soft-cloud px-3 py-2 text-sm">
+              <span className="text-mute">
+                이전에 작업하던 사진 <b className="font-medium text-foreground">{restoredDraftCount}장</b>을 불러왔어요.
+              </span>
+              <button
+                type="button"
+                className="shrink-0 underline text-mute hover:text-foreground"
+                onClick={() => {
+                  clearEntries();
+                  clearEditorDraft(sessionId, productId);
+                }}
+              >
+                새로 시작
+              </button>
+            </div>
+          ) : null}
 
           {photo ? (
             <>

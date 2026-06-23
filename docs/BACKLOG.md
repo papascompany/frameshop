@@ -42,7 +42,8 @@
      인쇄·CartItem 타입 무변경. tsc/eslint/build/220 tests GREEN.
   2. ✅ **세트가·취소 정책 — CTO 확정·동결(ADR-021).** 세트할인=행별 비례배분, 취소/환불=세트 단위(원자),
      부분선택=세트 불가(같이 담긴 단품은 선택 가능). 구현은 P2/P3.
-  3. ⬜ **확장형 세션 서버 영속화** — studio `[orderId]`는 인메모리 sessionId라 새로고침 시 다라인 소실 → draft 서버저장. (미착수)
+  3. ✅ **편집 세션 무결성 — 완료(ADR-022).** localStorage 드래프트(키=`(sessionId,productId)`, sessionId 안정 →
+     소유권 무결성 유지), 버전키+안전파싱+7일 TTL, 마운트 복원 배너·결제 시 정리. 서버 드래프트(교차기기·공유)는 P2+로 분리.
 - **롤아웃**: P0 기반(비파괴, 034/035 + 스냅샷 v2 ADR) → P1 편집기 MVP(케이스1~4 그리드) →
   P2 세트·어드민 워크스페이스(036/037) → P3 주문 6화면 시각화.
 - **신규 마이그레이션** ⛏️: `034_products_product_type` + `034_cart_projects`, `035_cart_items_project_link`

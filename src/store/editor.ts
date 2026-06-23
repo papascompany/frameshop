@@ -59,6 +59,13 @@ type State = {
    * aspect, so the tray is cleared (like a size change).
    */
   orientation: FrameOrientation;
+  /**
+   * 선결과제 3: how many entries were just restored from a saved draft, for a
+   * one-time "이어서 작업 중" notice. null = nothing restored. Kept in the store
+   * (not React state) so the rehydrate effect can set it without a React
+   * setState-in-effect (Next.js 16 / React 19 react-hooks rule).
+   */
+  restoredDraftCount: number | null;
 };
 
 export type FrameOrientation = 'portrait' | 'landscape';
@@ -95,6 +102,14 @@ type Actions = {
   removeEntry: (entryId: string) => void;
   setEntryQuantity: (entryId: string, quantity: number) => void;
   clearEntries: () => void;
+  /** Rehydrate a saved draft (선결과제 3) — restores tray + options/orientation
+   *  without touching the option matrix or productId seeded by `init`. */
+  restoreDraft: (draft: {
+    entries: EditorPhotoEntry[];
+    selectedOptions: SelectedOptions;
+    selectedVariantId: ProductVariantId | null;
+    orientation: FrameOrientation;
+  }) => void;
   reset: () => void;
 };
 
@@ -116,6 +131,7 @@ const initial: State = {
   confirmedCrop: null,
   entries: [],
   orientation: 'portrait',
+  restoredDraftCount: null,
 };
 
 function resolveVariant(state: State, partial: Partial<SelectedOptions>): ProductVariantId | null {
@@ -256,7 +272,20 @@ export const useEditorStore = create<State & Actions>((set) => ({
         e.entryId === entryId ? { ...e, quantity: clampQty(quantity) } : e,
       ),
     })),
-  clearEntries: () => set({ entries: [] }),
+  clearEntries: () => set({ entries: [], restoredDraftCount: null }),
+  restoreDraft: ({ entries, selectedOptions, selectedVariantId, orientation }) =>
+    set({
+      entries,
+      selectedOptions,
+      selectedVariantId,
+      orientation,
+      restoredDraftCount: entries.length,
+      // The restored entries are confirmed baked crops; no active photo in flight.
+      photo: null,
+      photoId: null,
+      confirmedCrop: null,
+      cropTransform: initial.cropTransform,
+    }),
   reset: () => set(initial),
 }));
 

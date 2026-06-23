@@ -377,4 +377,39 @@ Supabase Storage가 항상 https를 서빙하므로 admin 입력/사용자 업�
 
 ---
 
+## ADR-022: 확장형 상품 선결과제 3 — 편집 세션 무결성(localStorage 드래프트, sessionId 키)
+
+**Date:** 2026-06-23
+**Status:** Accepted (구현 완료, 검증 GREEN)
+
+**Context:**
+확장형/다건 편집은 사진 업로드·크롭·사이즈 지정에 시간이 걸려, 새로고침·탭닫기·크래시·실수 이탈로
+세션(트레이/photoPool/라인)이 날아가면 작업 손실 + 이탈이 크다. studio `[orderId]` 는 draft order 가
+아니라 클라 식별자라 세션이 전부 Zustand 인메모리였다. CTO가 "서비스 무결성 보장 결정"을 위임.
+
+**핵심 무결성 변수(코드 확정):** 스튜디오 페이지의 `effectiveSessionId = user.id ?? 게스트쿠키(fs-guest-sid)
+?? orderId` 는 새로고침·재진입에도 **안정적**이다(랜덤 orderId 아님). 사진 소유권은 이 sessionId 로 검증되므로,
+드래프트 키를 sessionId 기준으로 잡으면 복원된 트레이의 사진이 동일 세션 소유로 남아 **결제 photo-ownership
+검증이 깨지지 않는다**. (랜덤 orderId 로 키를 잡았다면 복원 시 소유권 불일치로 결제가 깨졌을 것.)
+
+**Decision:**
+**localStorage 드래프트(MVP), 키 = `(sessionId, productId)`.**
+- 저장 대상: 확정 트레이 `entries`(prereq 1 의 sourcePhotoId/cropTransform 포함) + selectedOptions/variant/orientation.
+  사진 본체는 이미 Storage 영속이라 가벼운 세션 상태만 저장.
+- 버전키(`v1`) + 안전파싱(불일치/타productId/손상 → 폐기) + **7일 TTL**(만료 서명URL 좀비 방지).
+- 마운트 시 1회 rehydrate(restoreDraft) → "이전 작업 N장 불러옴 · 새로 시작" 배너. 변경 시 디바운스 저장.
+  결제 성공 시 트레이+드래프트 정리. 복원 카운트는 **zustand 스토어**에 보관(effect 내 React setState 금지 규칙 회피).
+- **서버 드래프트(교차기기·공유링크)는 P2+ 로 분리** — 무결성엔 불필요, 마이그레이션 필요.
+
+**Consequences:**
+- (+) 새로고침·크래시·실수이탈 복원(손실의 ~90%)을 마이그레이션 0·서버 0·익명 지원으로 커버. 소유권 무결성 보존.
+  기존 카트 localStorage(버전키) 패턴과 동일해 일관적.
+- (-) 교차기기/스토리지 초기화/시크릿모드는 미복원(P2+ 서버 드래프트로 보강). 만료 TTL 후 드래프트 폐기.
+- 검증: tsc 0 · eslint 0(Next.js 16 react-hooks `set-state-in-effect` 규칙 준수) · next build OK · 228 tests(신규 8).
+
+**Alternatives Considered:** 서버 draft 테이블(교차기기·공유 가능하나 마이그레이션·anon 소유권·cleanup·서명URL
+수명 관리로 고비용 → MVP 과잉, P2+로 분리). 랜덤 orderId 키(복원 시 소유권 불일치로 결제 깨짐 → 기각).
+
+---
+
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_
