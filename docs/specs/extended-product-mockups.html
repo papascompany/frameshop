@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>확장형 상품 — UI/UX 목업</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<style>
+:root{
+  --color-background-primary:#ffffff;--color-background-secondary:#f6f4ee;--color-background-tertiary:#ece9e1;
+  --color-background-info:#E6F1FB;--color-background-success:#EAF3DE;--color-background-warning:#FAEEDA;--color-background-danger:#FCEBEB;
+  --color-text-primary:#1b1b19;--color-text-secondary:#5F5E5A;--color-text-tertiary:#8a8980;
+  --color-text-info:#0C447C;--color-text-success:#27500A;--color-text-warning:#633806;--color-text-danger:#791F1F;
+  --color-border-tertiary:rgba(0,0,0,0.12);--color-border-secondary:rgba(0,0,0,0.25);--color-border-info:#85B7EB;--color-border-danger:#F09595;
+  --border-radius-md:8px;--border-radius-lg:12px;
+  --font-sans:'Pretendard',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{
+  --color-background-primary:#1f1e1c;--color-background-secondary:#2a2926;--color-background-tertiary:#34332f;
+  --color-background-info:#0C447C;--color-background-success:#27500A;--color-background-warning:#633806;--color-background-danger:#501313;
+  --color-text-primary:#f2f0ea;--color-text-secondary:#b8b6ad;--color-text-tertiary:#8a8980;
+  --color-text-info:#B5D4F4;--color-text-success:#C0DD97;--color-text-warning:#FAC775;--color-text-danger:#F7C1C1;
+  --color-border-tertiary:rgba(255,255,255,0.14);--color-border-secondary:rgba(255,255,255,0.28);--color-border-info:#185FA5;--color-border-danger:#A32D2D;
+}}
+body{margin:0;background:var(--color-background-tertiary);color:var(--color-text-primary);font-family:var(--font-sans);line-height:1.7;-webkit-font-smoothing:antialiased}
+main{max-width:760px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:22px;font-weight:500;margin:0 0 4px}
+h2{font-size:18px;font-weight:500;margin:34px 0 6px}
+p.note{font-size:13px;color:var(--color-text-secondary);margin:0 0 12px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.frame{background:var(--color-background-secondary);border-radius:var(--border-radius-lg);padding:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>확장형 상품 — UI/UX 목업</h1>
+<p class="note">베이직/확장형 분리 설계 제안 · 2026-06-23 · 스펙: docs/specs/extended-product.md</p>
+
+<h2>1. 확장형 편집기 — 사진 풀 → 라인 구성</h2>
+<p class="note">업로드한 사진 풀에서 라인을 만들어 사진마다 다른 사이즈·방향을 한 화면에서 구성. 같은 사진을 여러 사이즈로 추가(케이스 1·4), 같은 사이즈 여러 부(케이스 3), 사진마다 다른 사이즈(케이스 2).</p>
+<div style="padding:0">
+  <div class="frame">
+    <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:0.5px solid var(--color-border-tertiary)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <i class="ti ti-layout-grid" style="font-size:18px;color:var(--color-text-secondary)"></i>
+          <span style="font-size:16px;color:var(--color-text-primary)">거실 갤러리월 만들기</span>
+          <span style="font-size:12px;background:var(--color-background-info);color:var(--color-text-info);padding:2px 8px;border-radius:var(--border-radius-md)">확장형</span>
+        </div>
+        <span style="font-size:12px;color:var(--color-text-tertiary)">사진 풀 → 라인 구성 → 묶음 담기</span>
+      </div>
+      <div style="display:grid;grid-template-columns:186px 1fr">
+        <div style="padding:12px;border-right:0.5px solid var(--color-border-tertiary)">
+          <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:8px">사진 풀 · 3장</div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:6px;height:56px;border:1px dashed var(--color-border-secondary);border-radius:var(--border-radius-md);color:var(--color-text-tertiary);font-size:13px;margin-bottom:10px"><i class="ti ti-upload"></i> 여러 장 업로드</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px"><div style="width:52px;height:38px;background:var(--color-background-tertiary);border-radius:var(--border-radius-md);display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div><div><div style="font-size:13px;color:var(--color-text-primary)">사진 A</div><span style="font-size:11px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:var(--border-radius-md)">가로 자동</span></div></div>
+            <div style="display:flex;align-items:center;gap:8px"><div style="width:38px;height:52px;background:var(--color-background-tertiary);border-radius:var(--border-radius-md);display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div><div><div style="font-size:13px;color:var(--color-text-primary)">사진 B</div><span style="font-size:11px;background:#EEEDFE;color:#26215C;padding:1px 6px;border-radius:var(--border-radius-md)">세로 자동</span></div></div>
+            <div style="display:flex;align-items:center;gap:8px"><div style="width:52px;height:38px;background:var(--color-background-tertiary);border-radius:var(--border-radius-md);display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div><div><div style="font-size:13px;color:var(--color-text-primary)">사진 C</div><span style="font-size:11px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:var(--border-radius-md)">가로 자동</span></div></div>
+          </div>
+          <div style="margin-top:10px;font-size:11px;color:var(--color-text-tertiary);line-height:1.5">풀의 사진을 끌어 라인을 만듭니다. 한 사진을 여러 라인에 재사용할 수 있어요.</div>
+        </div>
+        <div style="padding:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;color:var(--color-text-secondary)">내 구성 · 4라인</span><span style="font-size:12px;color:var(--color-text-info);display:flex;align-items:center;gap:4px"><i class="ti ti-copy"></i> 모든 라인에 사이즈 일괄적용</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:center;gap:10px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:8px 10px"><div style="width:46px;height:34px;background:var(--color-background-tertiary);border-radius:6px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div><div style="flex:1"><div style="font-size:14px;color:var(--color-text-primary)">사진 A · 가로 16×20</div><div style="display:flex;gap:5px;margin-top:3px"><span style="font-size:11px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:var(--border-radius-md)">↔ 가로</span><span style="font-size:11px;color:var(--color-text-tertiary)">무광 · 파인아트</span></div></div><div style="display:flex;align-items:center;gap:6px;color:var(--color-text-secondary);font-size:13px"><i class="ti ti-minus"></i><span style="color:var(--color-text-primary)">1</span><i class="ti ti-plus"></i></div><div style="width:74px;text-align:right;font-size:14px;color:var(--color-text-primary)">₩38,000</div></div>
+            <div style="display:flex;align-items:center;gap:10px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:8px 10px"><div style="width:46px;height:34px;background:var(--color-background-tertiary);border-radius:6px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div><div style="flex:1"><div style="display:flex;align-items:center;gap:6px"><span style="font-size:14px;color:var(--color-text-primary)">사진 A · 가로 11×14</span><span style="font-size:11px;background:#FAEEDA;color:#633806;padding:1px 6px;border-radius:var(--border-radius-md)">같은 사진</span></div><div style="display:flex;gap:5px;margin-top:3px"><span style="font-size:11px;background:#E6F1FB;color:#0C447C;padding:1px 6px;border-radius:var(--border-radius-md)">↔ 가로</span><span style="font-size:11px;color:var(--color-text-tertiary)">다른 사이즈로 추가</span></div></div><div style="display:flex;align-items:center;gap:6px;color:var(--color-text-secondary);font-size:13px"><i class="ti ti-minus"></i><span style="color:var(--color-text-primary)">1</span><i class="ti ti-plus"></i></div><div style="width:74px;text-align:right;font-size:14px;color:var(--color-text-primary)">₩28,000</div></div>
+            <div style="display:flex;align-items:center;gap:10px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:8px 10px"><div style="width:34px;height:46px;background:var(--color-background-tertiary);border-radius:6px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div><div style="flex:1"><div style="display:flex;align-items:center;gap:6px"><span style="font-size:14px;color:var(--color-text-primary)">사진 B · 세로 8×10</span><span style="font-size:11px;background:#EAF3DE;color:#27500A;padding:1px 6px;border-radius:var(--border-radius-md)">같은 사이즈 2부</span></div><div style="display:flex;gap:5px;margin-top:3px"><span style="font-size:11px;background:#EEEDFE;color:#26215C;padding:1px 6px;border-radius:var(--border-radius-md)">↕ 세로</span><span style="font-size:11px;color:var(--color-text-tertiary)">무광 · 글로시</span></div></div><div style="display:flex;align-items:center;gap:6px;color:var(--color-text-secondary);font-size:13px"><i class="ti ti-minus"></i><span style="color:var(--color-text-primary)">2</span><i class="ti ti-plus"></i></div><div style="width:74px;text-align:right;font-size:14px;color:var(--color-text-primary)">₩36,000</div></div>
+            <div style="display:flex;align-items:center;gap:10px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:8px 10px"><div style="width:34px;height:46px;background:var(--color-background-tertiary);border-radius:6px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div><div style="flex:1"><div style="font-size:14px;color:var(--color-text-primary)">사진 C · 세로 11×14</div><div style="display:flex;gap:5px;margin-top:3px"><span style="font-size:11px;background:#EEEDFE;color:#26215C;padding:1px 6px;border-radius:var(--border-radius-md)">↕ 세로</span><span style="font-size:11px;color:var(--color-text-tertiary)">사진마다 다른 사이즈</span></div></div><div style="display:flex;align-items:center;gap:6px;color:var(--color-text-secondary);font-size:13px"><i class="ti ti-minus"></i><span style="color:var(--color-text-primary)">1</span><i class="ti ti-plus"></i></div><div style="width:74px;text-align:right;font-size:14px;color:var(--color-text-primary)">₩30,000</div></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)">
+        <div style="display:flex;gap:6px;flex-wrap:wrap"><span style="font-size:12px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 9px;border-radius:var(--border-radius-md)">가로 2 · 세로 2</span><span style="font-size:12px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 9px;border-radius:var(--border-radius-md)">4종 · 5점</span></div>
+        <div style="display:flex;align-items:center;gap:12px"><span style="font-size:14px;color:var(--color-text-primary)">합계 ₩132,000</span><span style="font-size:13px;background:var(--color-background-info);color:var(--color-text-info);padding:7px 14px;border-radius:var(--border-radius-md);display:flex;align-items:center;gap:6px"><i class="ti ti-shopping-bag-plus"></i> 장바구니에 묶음으로 담기</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>2. 장바구니 — 단품 vs 묶음(세트 카드)</h2>
+<p class="note">단품은 한 줄, 묶음은 세트 카드(썸네일 그리드 + 구성 펼침 + 세트가). 세트는 장바구니→결제→주문조회까지 한 덩어리로 유지.</p>
+<div style="display:flex;flex-direction:column;gap:12px">
+  <div style="display:flex;align-items:center;gap:12px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px 14px">
+    <input type="checkbox" checked style="width:16px;height:16px">
+    <div style="width:48px;height:48px;background:var(--color-background-tertiary);border-radius:var(--border-radius-md);display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="color:var(--color-text-tertiary)"></i></div>
+    <div style="flex:1"><div style="font-size:14px;color:var(--color-text-primary)">우리 강아지 · 가로 8×10</div><div style="font-size:12px;color:var(--color-text-tertiary);margin-top:2px">단품 · 내추럴 프레임 · 무광</div></div>
+    <span style="font-size:12px;background:var(--color-background-secondary);color:var(--color-text-secondary);padding:3px 9px;border-radius:var(--border-radius-md)">단품</span>
+    <div style="display:flex;align-items:center;gap:6px;color:var(--color-text-secondary);font-size:13px"><i class="ti ti-minus"></i><span style="color:var(--color-text-primary)">1</span><i class="ti ti-plus"></i></div>
+    <div style="width:80px;text-align:right;font-size:14px;color:var(--color-text-primary)">₩22,000</div>
+  </div>
+  <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-info);border-radius:var(--border-radius-lg);overflow:hidden">
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--color-background-info)">
+      <input type="checkbox" checked style="width:16px;height:16px">
+      <div style="display:grid;grid-template-columns:repeat(2,18px);grid-template-rows:repeat(2,18px);gap:2px"><div style="background:var(--color-background-primary);border-radius:3px"></div><div style="background:var(--color-background-primary);border-radius:3px"></div><div style="background:var(--color-background-primary);border-radius:3px"></div><div style="background:var(--color-background-primary);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--color-text-info)">+1</div></div>
+      <div style="flex:1"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:14px;color:var(--color-text-info)">거실 갤러리월</span><span style="font-size:11px;background:var(--color-background-primary);color:var(--color-text-info);padding:1px 7px;border-radius:var(--border-radius-md)">묶음 · 4종 5점</span></div><div style="font-size:12px;color:var(--color-text-info);margin-top:2px;opacity:0.85">가로 2 · 세로 2 · 사진 3장</div></div>
+      <span style="font-size:12px;color:var(--color-text-info);display:flex;align-items:center;gap:4px">구성 펼치기 <i class="ti ti-chevron-down"></i></span>
+      <div style="width:90px;text-align:right"><div style="font-size:14px;color:var(--color-text-info)">₩132,000</div></div>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px 9px 42px;border-top:0.5px solid var(--color-border-tertiary)"><input type="checkbox" checked style="width:14px;height:14px"><div style="width:38px;height:28px;background:var(--color-background-tertiary);border-radius:5px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="font-size:14px;color:var(--color-text-tertiary)"></i></div><div style="flex:1;font-size:13px;color:var(--color-text-primary)">사진 A · 가로 16×20 ↔</div><span style="font-size:12px;color:var(--color-text-tertiary)">1부</span><div style="width:80px;text-align:right;font-size:13px;color:var(--color-text-secondary)">₩38,000</div></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px 9px 42px;border-top:0.5px solid var(--color-border-tertiary)"><input type="checkbox" checked style="width:14px;height:14px"><div style="width:38px;height:28px;background:var(--color-background-tertiary);border-radius:5px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="font-size:14px;color:var(--color-text-tertiary)"></i></div><div style="flex:1;font-size:13px;color:var(--color-text-primary)">사진 A · 가로 11×14 <span style="font-size:11px;background:#FAEEDA;color:#633806;padding:0 6px;border-radius:var(--border-radius-md)">같은 사진</span></div><span style="font-size:12px;color:var(--color-text-tertiary)">1부</span><div style="width:80px;text-align:right;font-size:13px;color:var(--color-text-secondary)">₩28,000</div></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px 9px 42px;border-top:0.5px solid var(--color-border-tertiary)"><input type="checkbox" checked style="width:14px;height:14px"><div style="width:28px;height:38px;background:var(--color-background-tertiary);border-radius:5px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="font-size:14px;color:var(--color-text-tertiary)"></i></div><div style="flex:1;font-size:13px;color:var(--color-text-primary)">사진 B · 세로 8×10 <span style="font-size:11px;background:#EAF3DE;color:#27500A;padding:0 6px;border-radius:var(--border-radius-md)">2부</span></div><span style="font-size:12px;color:var(--color-text-tertiary)">2부</span><div style="width:80px;text-align:right;font-size:13px;color:var(--color-text-secondary)">₩36,000</div></div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 14px 9px 42px;border-top:0.5px solid var(--color-border-tertiary)"><input type="checkbox" checked style="width:14px;height:14px"><div style="width:28px;height:38px;background:var(--color-background-tertiary);border-radius:5px;display:flex;align-items:center;justify-content:center"><i class="ti ti-photo" style="font-size:14px;color:var(--color-text-tertiary)"></i></div><div style="flex:1;font-size:13px;color:var(--color-text-primary)">사진 C · 세로 11×14 ↕</div><span style="font-size:12px;color:var(--color-text-tertiary)">1부</span><div style="width:80px;text-align:right;font-size:13px;color:var(--color-text-secondary)">₩30,000</div></div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:0.5px solid var(--color-border-tertiary);background:var(--color-background-secondary)"><span style="font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:5px"><i class="ti ti-truck-delivery"></i> 가장 늦은 제작 건 기준 출고</span><span style="font-size:12px;color:var(--color-text-tertiary)">세트는 장바구니→결제→주문조회까지 한 덩어리</span></div>
+  </div>
+</div>
+
+<h2>3. 어드민 — 한 페이지 상품 워크스페이스</h2>
+<p class="note">유형 게이트(베이직/확장형)가 좌측 단계 탭을 분기. 확장형 전용으로 구성규칙·세트템플릿 2탭 추가. 우측은 선택 탭의 설정 폼.</p>
+<div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:0.5px solid var(--color-border-tertiary)">
+    <div style="display:flex;align-items:center;gap:8px"><i class="ti ti-settings" style="font-size:18px;color:var(--color-text-secondary)"></i><span style="font-size:16px;color:var(--color-text-primary)">상품 편집 · 거실 갤러리월</span></div>
+    <div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;color:var(--color-text-tertiary)">유형</span><div style="display:flex;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);overflow:hidden"><span style="font-size:12px;padding:5px 12px;color:var(--color-text-secondary)">베이직</span><span style="font-size:12px;padding:5px 12px;background:var(--color-background-info);color:var(--color-text-info)">확장형</span></div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:210px 1fr">
+    <div style="padding:10px;border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;gap:3px">
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--border-radius-md);color:var(--color-text-secondary)"><i class="ti ti-adjustments"></i><span style="font-size:13px">0 · 유형 게이트</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--border-radius-md);color:var(--color-text-secondary)"><i class="ti ti-file-description"></i><span style="font-size:13px">1 · 속성</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--border-radius-md);color:var(--color-text-secondary)"><i class="ti ti-frame"></i><span style="font-size:13px">2 · 프레임/편집기</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--border-radius-md);color:var(--color-text-secondary)"><i class="ti ti-table"></i><span style="font-size:13px">3 · 옵션매트릭스</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--border-radius-md);background:var(--color-background-info)"><i class="ti ti-adjustments-check" style="color:var(--color-text-info)"></i><span style="font-size:13px;color:var(--color-text-info)">4 · 구성규칙</span><span style="margin-left:auto;font-size:10px;background:var(--color-background-primary);color:var(--color-text-info);padding:0 6px;border-radius:var(--border-radius-md)">확장</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--border-radius-md);color:var(--color-text-secondary)"><i class="ti ti-layout-grid-add"></i><span style="font-size:13px">5 · 세트템플릿</span><span style="margin-left:auto;font-size:10px;background:var(--color-background-secondary);color:var(--color-text-tertiary);padding:0 6px;border-radius:var(--border-radius-md)">확장</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--border-radius-md);color:var(--color-text-secondary)"><i class="ti ti-box-seam"></i><span style="font-size:13px">6 · 주문연결/보관함</span></div>
+    </div>
+    <div style="padding:14px 16px">
+      <div style="font-size:14px;color:var(--color-text-primary);margin-bottom:3px">확장형 구성규칙</div>
+      <div style="font-size:12px;color:var(--color-text-tertiary);margin-bottom:12px">규칙 1행 = 주문 검증 기준. 고객 편집기와 서버가 같은 규칙을 공유합니다.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:4px">최소 구성 수</div><div style="height:34px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);display:flex;align-items:center;padding:0 10px;font-size:13px;color:var(--color-text-primary)">1</div></div>
+        <div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:4px">최대 구성 수</div><div style="height:34px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);display:flex;align-items:center;padding:0 10px;font-size:13px;color:var(--color-text-primary)">12</div></div>
+      </div>
+      <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:4px">허용 사이즈</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"><span style="font-size:12px;background:var(--color-background-info);color:var(--color-text-info);padding:4px 10px;border-radius:var(--border-radius-md)">8×10 <i class="ti ti-check"></i></span><span style="font-size:12px;background:var(--color-background-info);color:var(--color-text-info);padding:4px 10px;border-radius:var(--border-radius-md)">11×14 <i class="ti ti-check"></i></span><span style="font-size:12px;background:var(--color-background-info);color:var(--color-text-info);padding:4px 10px;border-radius:var(--border-radius-md)">16×20 <i class="ti ti-check"></i></span><span style="font-size:12px;background:var(--color-background-secondary);color:var(--color-text-tertiary);padding:4px 10px;border-radius:var(--border-radius-md)">24×36</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)"><span style="font-size:13px;color:var(--color-text-primary)">사이즈 혼합 허용</span><span style="font-size:11px;background:var(--color-background-success);color:var(--color-text-success);padding:2px 10px;border-radius:var(--border-radius-md)">켜짐</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)"><span style="font-size:13px;color:var(--color-text-primary)">가로·세로 혼합 허용</span><span style="font-size:11px;background:var(--color-background-success);color:var(--color-text-success);padding:2px 10px;border-radius:var(--border-radius-md)">켜짐</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)"><span style="font-size:13px;color:var(--color-text-primary)">같은 사진 재사용 허용</span><span style="font-size:11px;background:var(--color-background-success);color:var(--color-text-success);padding:2px 10px;border-radius:var(--border-radius-md)">켜짐</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:4px">가격 전략</div><div style="height:34px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);display:flex;align-items:center;justify-content:space-between;padding:0 10px;font-size:13px;color:var(--color-text-primary)">구성 합산 + 세트 할인 <i class="ti ti-chevron-down" style="color:var(--color-text-tertiary)"></i></div></div>
+        <div><div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:4px">세트 할인율</div><div style="height:34px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);display:flex;align-items:center;padding:0 10px;font-size:13px;color:var(--color-text-primary)">10%</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>4. 롤아웃 로드맵 + 선결 과제</h2>
+<p class="note">Phase 1 착수 전 3가지 선결 과제(현 코드 검증으로 확인)를 해결해야 차별 기능이 출시 시점에 작동.</p>
+<div style="border:0.5px solid var(--color-border-danger);background:var(--color-background-danger);border-radius:var(--border-radius-lg);padding:12px 14px;margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px"><i class="ti ti-alert-triangle" style="color:var(--color-text-danger)"></i><span style="font-size:14px;color:var(--color-text-danger)">선결 과제 · Phase 1 착수 전 해결</span></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <div style="background:var(--color-background-primary);border-radius:var(--border-radius-md);padding:9px 11px"><div style="font-size:13px;color:var(--color-text-primary);margin-bottom:3px">원본 photoId·크롭 보존</div><div style="font-size:11px;color:var(--color-text-secondary);line-height:1.5">담기 시 새 photoId 생성 → sourcePhotoId·transform 별도 보존해야 "같은 사진 멀티사이즈"·재주문 성립</div></div>
+    <div style="background:var(--color-background-primary);border-radius:var(--border-radius-md);padding:9px 11px"><div style="font-size:13px;color:var(--color-text-primary);margin-bottom:3px">세트가·취소 정책 ADR</div><div style="font-size:11px;color:var(--color-text-secondary);line-height:1.5">세트 할인을 행당 가격·서버 재계산과 조화, 부분취소 금액 귀속을 035 적용 전 동결</div></div>
+    <div style="background:var(--color-background-primary);border-radius:var(--border-radius-md);padding:9px 11px"><div style="font-size:13px;color:var(--color-text-primary);margin-bottom:3px">세션 서버 영속화</div><div style="font-size:11px;color:var(--color-text-secondary);line-height:1.5">확장형 인메모리 세션 소실 방지 → draft 서버저장을 MVP와 동시 상향</div></div>
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">
+  <div style="border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden"><div style="padding:9px 11px;background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;color:var(--color-text-primary)">P0 · 기반</div><div style="font-size:11px;color:var(--color-text-tertiary)">비파괴 · 회귀 0</div></div><div style="padding:10px 11px;font-size:11px;color:var(--color-text-secondary);line-height:1.6">product_type 판별자<br>cart_items projectId(null)<br>project.ts · 카트 v2 마이그레이터<br>adminNav SSOT<br><span style="display:inline-block;margin-top:6px;font-size:10px;background:var(--color-background-info);color:var(--color-text-info);padding:1px 7px;border-radius:var(--border-radius-md)">034·035</span> <span style="font-size:10px;background:var(--color-background-success);color:var(--color-text-success);padding:1px 7px;border-radius:var(--border-radius-md)">위험 낮음</span></div></div>
+  <div style="border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden"><div style="padding:9px 11px;background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;color:var(--color-text-primary)">P1 · 확장형 편집기</div><div style="font-size:11px;color:var(--color-text-tertiary)">1~4 케이스 MVP</div></div><div style="padding:10px 11px;font-size:11px;color:var(--color-text-secondary);line-height:1.6">옵션을 라인 단위로<br>사진 풀 + 라인 빌더<br>+추가/교체 · 일괄적용<br>묶음 담기 변환점<br><span style="display:inline-block;margin-top:6px;font-size:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:1px 7px;border-radius:var(--border-radius-md)">마이그 없음</span> <span style="font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 7px;border-radius:var(--border-radius-md)">위험 중</span></div></div>
+  <div style="border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden"><div style="padding:9px 11px;background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;color:var(--color-text-primary)">P2 · 세트·어드민</div><div style="font-size:11px;color:var(--color-text-tertiary)">템플릿 · 워크스페이스</div></div><div style="padding:10px 11px;font-size:11px;color:var(--color-text-secondary);line-height:1.6">set_templates · bundle_rules<br>한 페이지 워크스페이스 6탭<br>cart_projects 헤더<br>세트 가격·검증<br><span style="display:inline-block;margin-top:6px;font-size:10px;background:var(--color-background-info);color:var(--color-text-info);padding:1px 7px;border-radius:var(--border-radius-md)">036·037</span> <span style="font-size:10px;background:var(--color-background-warning);color:var(--color-text-warning);padding:1px 7px;border-radius:var(--border-radius-md)">위험 중</span></div></div>
+  <div style="border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden"><div style="padding:9px 11px;background:var(--color-background-secondary);border-bottom:0.5px solid var(--color-border-tertiary)"><div style="font-size:13px;color:var(--color-text-primary)">P3 · 주문 시각화</div><div style="font-size:11px;color:var(--color-text-tertiary)">6화면 일관</div></div><div style="padding:10px 11px;font-size:11px;color:var(--color-text-secondary);line-height:1.6">그룹핑 뷰모델 헬퍼<br>세트 카드 · 구성 펼침<br>주문 평면 전개 · 매퍼<br>세트 재주문 · ZIP<br><span style="display:inline-block;margin-top:6px;font-size:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:1px 7px;border-radius:var(--border-radius-md)">마이그 없음</span> <span style="font-size:10px;background:var(--color-background-success);color:var(--color-text-success);padding:1px 7px;border-radius:var(--border-radius-md)">위험 낮음</span></div></div>
+</div>
+
+</main>
+</body>
+</html>
