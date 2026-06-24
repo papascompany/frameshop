@@ -125,6 +125,12 @@
 - **마이그레이션 적용 불가**: §1 참조 — CTO 수동 적용.
 - **인쇄 렌더**: photo-only(베이크 크롭 정규화). 상품별 블리드(`products.bleed_mm`, admin 설정).
   자세한 사양은 `docs/frame_skills.md` + 메모 `project-print-pipeline-baked-crop-mismatch`.
+- **데모/접근(2026-06-24 점검)**: 고객 흐름은 인증 없이 **프로덕션 별칭 공개**(`frameshop-snowy`). 단
+  생성형/프리뷰 URL(`*-yohans-projects-*.vercel.app`)은 **Vercel SSO 보호** → 데모는 별칭만. 앱 로그인
+  게이트는 `/admin`만.
+- **⚠️ 결제 미구성(런칭 전 과제)**: 프로덕션 Toss 클라이언트 키 = `test_ck_placeholder`(유효 키 아님) →
+  "결제하기" 위젯 에러로 주문 완주 불가. Toss 테스트키(`test_ck_…` + `TOSS_SECRET_KEY`) 또는 라이브키
+  설정 필요. 데모는 체크아웃 폼까지만 정상.
 
 ---
 
