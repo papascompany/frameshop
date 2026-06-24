@@ -155,7 +155,7 @@ NAV/TILES/BOTTOM_NAV 3중복 하드코딩을 `src/lib/admin/adminNav.ts` 단일 
 
 | Phase | 범위 | 핵심 산출물 | 마이그레이션 | 위험 |
 |---|---|---|---|---|
-| **P0 · 기반(비파괴)** | product_type 분기 + 평면 라인 호환. 회귀 0 | 034/035, `project.ts`, CartItem 옵셔널+카트 v2 마이그레이터, OrderItemSnapshot 보강, adminNav SSOT, **스냅샷 v2 ADR**, 베이직 회귀 테스트 | 034·035 | 낮음 |
+| **P0 · 기반(비파괴)** ✅완료 | product_type 분기 + 평면 라인 호환. 회귀 0 | 034/035, `project.ts`, CartItem 옵셔널+카트 v2 마이그레이터, OrderItemSnapshot 보강(ADR-020 선반영), adminNav SSOT, **스냅샷/계약 ADR-023**, 회귀 테스트 | 034·035 | 낮음 |
 | **P1 · 확장형 편집기 MVP** | 한 세션에서 CTO 1~4(그리드 모드) | 옵션 라인 단위화, `PhotoPoolPanel`/`LineList`, +추가/교체·일괄적용·복제, 묶음 담기 변환점, 해상도 가드, '여러 장 만들기' CTA | 없음 | 중 |
 | **P2 · 세트·어드민** | set_templates 프리셋 + 워크스페이스 + 규칙 검증 | 036/037, `/admin/products/[id]` 6탭, 슬롯 빌더(벽/그리드), bundle_rules 폼, cart_projects 헤더+그룹 배치 API, ProjectPricing | 036·037 | 중 |
 | **P3 · 주문 시각화** | 단품/묶음 구분을 6화면 일관 | 그룹핑 뷰모델 헬퍼, CartProjectCard/OrderProjectCard/LineItemRow, createOrder 평면 전개, getOrder 매퍼, reorder 세트 복원, 세트 ZIP | 없음 | 낮음~중 |
@@ -195,8 +195,10 @@ NAV/TILES/BOTTOM_NAV 3중복 하드코딩을 `src/lib/admin/adminNav.ts` 단일 
 ## 10. 리스크 (요약)
 
 - FROZEN 계약(cart/order/editor.ts) 옵셔널 변경 → **ADR 선승인 게이트**(P0가 여기 직렬 의존).
-- 미적용 029~033 위에 034~037이 쌓임 → 번호는 029~033 다음으로 부여(충돌 회피), 적용 순서 CTO 명시.
-  `product_type` 부재 시 `mapProduct`가 깨지므로 graceful degrade가 아니라 **034 적용이 P0 게이트**.
+- 미적용 029~033 위에 034~037이 쌓임 → 번호는 029~033 다음으로 부여(충돌 회피), 적용 순서 CTO 명시
+  (가이드 `docs/MIGRATIONS-APPLY.md`). ~~`product_type` 부재 시 `mapProduct`가 깨지므로 034 적용이 P0
+  게이트~~ → **해소(ADR-023)**: `mapProduct`가 부재/NULL→'single' 폴백, catalog 명시 SELECT 미변경,
+  카트 DB 경로 미변경 → **034/035 는 비게이트(적용해도/안 해도 앱 무변화)**. 035 진짜 게이트는 P1(라인 저장).
 - 2계층 식별(projectId+localId)로 동기화 복잡 → 그룹 단위 배치 upsert/DELETE API + `syncCartOnLogin` 그룹 전송.
 - photoPool jsonb는 photos FK 밖 → 고아 사진 앱 레벨 정리(주문 확정 시 참조 photoId만 FK 동결).
 - 베이직 회귀 → photoPool/lines 미사용 시 현행 경로 유지 + 라인 담을 때 옵션 스냅샷 동결 + 회귀 테스트.

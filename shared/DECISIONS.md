@@ -412,4 +412,61 @@ Supabase Storage가 항상 https를 서빙하므로 admin 입력/사용자 업�
 
 ---
 
+## ADR-023: 확장형 상품 P0 — 비파괴 기반(034/035 graceful, 추가형 계약, adminNav SSOT)
+
+**Date:** 2026-06-24
+**Status:** Accepted (구현 완료, 검증 GREEN)
+
+**Context:**
+확장형 상품(프로젝트/세트 집합) P1 편집기를 짓기 전, `docs/specs/extended-product.md` §8 의
+P0(비파괴 기반)을 깐다. P0 는 FROZEN 계약(`Product`/`CartItem`/`common.ts`)에 옵셔널 추가가
+필요하고 신규 마이그레이션 034/035 를 동반한다. 스펙 §10 은 "`product_type` 부재 시 `mapProduct`
+가 깨지므로 graceful degrade 가 아니라 **034 적용이 P0 게이트**"라고 적었으나, 034/035 는
+yohan73 계정에서 CTO 가 수동 적용해야 하고(BL-010 제약) 적용 시점이 불확실하다. 비파괴
+마이그레이션의 적용 여부에 앱 가동을 묶으면 운영 리스크가 크다.
+
+**Decision:**
+**034/035 를 "적용해도/안 해도 앱이 정상"인 비게이트(non-gating)로 설계한다.** 격리/폴백:
+1. **product_type(034) — `mapProduct` graceful 폴백.** `ProductRow.product_type?` 옵셔널,
+   `mapProduct` 가 `row.product_type === 'extended' ? 'extended' : 'single'` 로 매핑한다. 부재/
+   NULL/예상외 값은 전부 `'single'`(현행 단품 경로). 상품 SELECT 는 `product.ts` 가 `select('*')`
+   라 034 적용 시 컬럼이 자동 유입되고, catalog 의 **명시적 컬럼 목록엔 product_type 을 추가하지
+   않아** 미적용 시에도 쿼리가 깨지지 않는다. `Product.productType?` 는 옵셔널(기존 리터럴/픽스처
+   무파손), 분기 코드는 `=== 'extended'` 로 판정 → undefined/single 이 안전한 현행 경로로 떨어짐.
+2. **프로젝트 링크(035) — 카트 DB 경로 무변경.** `cart_items` SELECT/UPSERT 가 명시적 컬럼
+   목록이라, 새 컬럼(project_id/project_seq/orientation)을 **추가하지 않으면** 035 미적용에서도
+   카트가 정상. P0 엔 확장형 라인을 만드는 코드(편집기)가 없으므로 DB 경로를 건드릴 필요가 없다.
+   035 의 실제 게이트는 P1 편집기다(라인을 생성·저장하는 시점).
+3. **추가형 타입 계약(옵셔널만).** `common.ts`에 `CartProjectId`/`ProjectLocalId` 브랜드 추가(런타임
+   영향 0). `product.ts`에 `PRODUCT_TYPES`/`ProductType`/`productTypeSchema`. 신규 `src/types/project.ts`
+   = 확장형 도메인 SSOT(`Orientation`/`ProjectKind`/`ProjectPhotoRef`/`ProjectPricing`/`CartProject`).
+   `CartItem`에 옵셔널 `projectId?`/`projectSeq?`/`orientation?` + zod 동기화. 타입 DAG 는
+   `cart.ts → project.ts → product.ts → common`(런타임 순환 없음 — project.ts 는 `CartItem` 을
+   **타입 전용**으로만 import).
+4. **카트 localStorage v1→v2 무손실 마이그레이터.** 키 `frameshop.cart.v1`→`v2`. v2 스키마가 v1 의
+   상위집합(신규 필드 옵셔널)이라, `storage.ts`가 v2 부재 시 v1 을 1회 승격하고 v1 키를 폐기(최대 1회
+   실행). `clearLocalCart`도 v1 잔재를 함께 정리.
+5. **adminNav SSOT.** 사이드바/모바일하단바/홈타일 3중복 라우트 목록을 `src/lib/admin/adminNav.ts`
+   (순수 데이터)로 일원화. 아이콘은 표면별 글리프/크기가 달라 각 컴포넌트가 `AdminNavKey` 로 키잉한
+   로컬 맵 유지(렌더 동일 보존).
+
+**Consequences:**
+- (+) 034/035 적용 여부와 무관하게 현행 단품 경로 100% 유지(회귀 0). CTO 가 적용 시점을 자유롭게
+  고를 수 있고, 미적용 중에도 배포 가능. 확장형 P1 의 타입/저장 토대 확보.
+- (+) 스펙 §10 의 "034=P0 하드게이트"를 graceful 로 해소(비파괴 마이그레이션을 앱 가동과 분리).
+- (-) 034 미적용 동안 카탈로그가 모든 상품을 `single` 로 본다(의도된 폴백 — 확장형 SKU 가 아직 없음).
+  catalog 의 명시적 SELECT 가 product_type 을 읽으려면 034 적용 확인 후 P1 에서 컬럼 추가 필요.
+- (-) 035 의 cart_items/order_items 신규 컬럼은 P0 코드가 쓰지 않으므로, P1 착수 시 035 적용을
+  전제로 카트 DB 경로(SELECT/UPSERT)에 컬럼을 더해야 한다(그 시점이 035 의 진짜 게이트).
+- 검증: `tsc` 0 · `eslint src tests --max-warnings=0` 0 · `next build` OK · `vitest` 239 passed(신규 11:
+  카트 v1→v2 마이그레이션 6 + mapProduct 폴백 5).
+
+**Alternatives Considered:**
+- 034 하드게이트(스펙 원안): 비파괴 마이그레이션에 앱 가동을 묶음 → 적용 지연 시 배포 차단. 기각.
+- product_type 을 `Product` 필수 필드로: 모든 Product 리터럴/픽스처 수정 + 미적용 시 매핑 파손. 기각.
+- 035 컬럼을 P0 부터 카트 SELECT/UPSERT 에 추가: 035 미적용 시 카트 쿼리 즉시 파손(격리 위배). 기각.
+- cart 키 무변경(필드만 옵셔널 추가): 동작은 하나 버전 추적 부재 → 스펙의 명시적 v2 마이그레이터 채택.
+
+---
+
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_

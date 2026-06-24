@@ -21,8 +21,12 @@
 | `033_orders_confirmed_at` | 구매확정 (Phase B-1) | 라이브, 컬럼 대기 | `ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;` |
 | `031_user_points` | 적립금 (B-2에서 wiring) | 미연결 | 파일 참조 |
 | `030_orders_shipping_surcharge` | 제주/도서산간 추가배송비 | 미연결 | 파일 참조 |
+| `034_products_product_type` | 확장형 기반: product_type + cart_projects | 라이브(graceful, 무변화) | 파일 참조 |
+| `035_cart_items_project_link` | 확장형 기반: cart/order 프로젝트 링크 | 라이브(graceful, 무변화) | 파일 참조 |
 
-→ **다음 세션 첫 액션 권장**: CTO에게 029/032/033 적용을 안내하고 적용 후 메모·주소록·구매확정이 런타임에서 동작하는지 검증.
+→ **적용 가이드(순서·검증쿼리·롤백)**: `docs/MIGRATIONS-APPLY.md` (CTO 전달용 단일 문서).
+→ **권장**: 029/032/033 먼저 적용(라이브 기능 즉시 활성화). 034/035 는 P1 직전 적용(지금 적용해도 앱 무변화 — ADR-023 graceful).
+→ 적용 후 메모·주소록·구매확정이 런타임에서 동작하는지 검증.
 
 ---
 
@@ -46,8 +50,16 @@
      소유권 무결성 유지), 버전키+안전파싱+7일 TTL, 마운트 복원 배너·결제 시 정리. 서버 드래프트(교차기기·공유)는 P2+로 분리.
 - **롤아웃**: P0 기반(비파괴, 034/035 + 스냅샷 v2 ADR) → P1 편집기 MVP(케이스1~4 그리드) →
   P2 세트·어드민 워크스페이스(036/037) → P3 주문 6화면 시각화.
-- **신규 마이그레이션** ⛏️: `034_products_product_type` + `034_cart_projects`, `035_cart_items_project_link`
-  + `035_order_items_project`, `036_set_templates`, `037_bundle_rules` (전부 비파괴 NULL/신규, 029~033 다음 번호).
+- **✅ P0 기반 — 완료(ADR-023, 배포 대기 커밋).** 034/035 SQL 작성(`supabase/migrations/`, CTO 적용 가이드
+  `docs/MIGRATIONS-APPLY.md`) · `src/types/project.ts` 신설(확장형 도메인 SSOT) · `product_type` plumbing
+  graceful 폴백(`mapProduct` 부재/NULL→'single', 034 비게이트) · CartItem 옵셔널 묶음필드 + localStorage
+  v1→v2 무손실 마이그레이터 · `adminNav.ts` SSOT(사이드바/하단바/타일 3중복 통합). 검증 GREEN(tsc·eslint·
+  build·239 tests). **034/035 는 적용해도/안 해도 앱 무변화** — 035 의 진짜 게이트는 P1(라인 저장 시점).
+- **신규 마이그레이션** ⛏️: `034_products_product_type`(+cart_projects) ✅작성, `035_cart_items_project_link`
+  (+order_items 컬럼) ✅작성, `036_set_templates`, `037_bundle_rules` (전부 비파괴 NULL/신규, 029~033 다음 번호).
+- **다음(P1)**: 확장형 편집기 MVP — 옵션 라인 단위화, `PhotoPoolPanel`/`LineList`, +추가/교체·일괄적용·복제,
+  묶음 담기 변환점. **착수 시 035 적용 전제**로 카트 DB SELECT/UPSERT 에 project 컬럼 추가(P0 에선 미변경).
+  베이직(single) 경로 회귀 0 유지.
 - **CTO 결정 필요**: 세트 부분선택/취소 단위/할인 분배/프리셋 우선순위/마이그레이션 적용 시점/카탈로그 분리(스펙 §12).
 
 ---

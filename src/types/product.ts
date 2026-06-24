@@ -22,6 +22,15 @@ import type {
 
 // ---------- Enums / unions ----------
 
+/**
+ * 확장형 상품 분기축(ADR-023, migration 034). `single` = 현행 단품(사진1 → 사이즈1),
+ * `extended` = 멀티포토·혼합 사이즈/방향·세트. catalog/editor/검증의 1차 분기축이다.
+ * `Product.productType` 은 옵셔널이며 `mapProduct` 가 부재/NULL 을 'single' 로 폴백하므로
+ * migration 034 미적용 상태에서도 안전하다(현행 = single).
+ */
+export const PRODUCT_TYPES = ['single', 'extended'] as const;
+export type ProductType = (typeof PRODUCT_TYPES)[number];
+
 export const MATTE_CODES = ['none', 'with'] as const;
 export type MatteCode = (typeof MATTE_CODES)[number];
 
@@ -64,6 +73,14 @@ export type Product = {
   sortOrder: number;
   /** Print bleed in mm added around inner_rect when generating the print crop. */
   bleedMm: number;
+  /**
+   * 확장형 상품 분기축(ADR-023, migration 034). single = 현행 단품, extended = 묶음/세트.
+   * Optional on the type so existing Product literals (fixtures, callers built before
+   * 034) keep compiling; `mapProduct` always populates it (부재/NULL → 'single' 폴백).
+   * 분기 코드는 `product.productType === 'extended'` 로 판정 → undefined/single 은 안전한
+   * 현행 경로로 떨어진다.
+   */
+  productType?: ProductType;
   createdAt: IsoTimestamp;
 };
 
@@ -182,6 +199,7 @@ export const innerRectSchema = z.object({
   h: z.number().min(0).max(1),
 });
 
+export const productTypeSchema = z.enum(PRODUCT_TYPES);
 export const matteCodeSchema = z.enum(MATTE_CODES);
 export const paperCodeSchema = z.enum(PAPER_CODES);
 export const productImageTypeSchema = z.enum(PRODUCT_IMAGE_TYPES);

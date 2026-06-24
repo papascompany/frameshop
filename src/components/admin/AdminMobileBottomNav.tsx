@@ -3,6 +3,11 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
+import {
+  adminBottomNavItems,
+  isAdminNavActive,
+  type AdminNavKey,
+} from '@/lib/admin/adminNav';
 
 const IconGrid = () => (
   <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden>
@@ -34,27 +39,23 @@ const IconGear = () => (
   </svg>
 );
 
-const BOTTOM_NAV = [
-  { href: '/admin', label: '대시보드', icon: <IconGrid /> },
-  { href: '/admin/products', label: '상품', icon: <IconBox /> },
-  { href: '/admin/orders', label: '주문', icon: <IconList /> },
-  { href: '/admin/curation', label: '큐레이션', icon: <IconSparkles /> },
-  { href: '/admin/settings', label: '설정', icon: <IconGear /> },
-];
+// Bottom-nav surface icons, keyed by the adminNav SSOT keys (subset, max 5).
+const ICONS: Partial<Record<AdminNavKey, React.ReactNode>> = {
+  dashboard: <IconGrid />,
+  products: <IconBox />,
+  orders: <IconList />,
+  curation: <IconSparkles />,
+  settings: <IconGear />,
+};
 
 export function AdminMobileBottomNav() {
   const pathname = usePathname();
 
-  function isActive(href: string) {
-    if (href === '/admin') return pathname === '/admin';
-    return pathname.startsWith(href);
-  }
-
   return (
     <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 h-16 bg-canvas border-t border-hairline">
       <ul className="flex h-full">
-        {BOTTOM_NAV.map((item) => {
-          const active = isActive(item.href);
+        {adminBottomNavItems().map((item) => {
+          const active = isAdminNavActive(pathname, item.href);
           return (
             <li key={item.href} className="flex-1">
               <Link
@@ -65,7 +66,7 @@ export function AdminMobileBottomNav() {
                 )}
               >
                 <span className={active ? 'text-ink' : 'text-stone'}>
-                  {item.icon}
+                  {ICONS[item.key]}
                 </span>
                 {item.label}
               </Link>
