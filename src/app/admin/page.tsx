@@ -1,12 +1,6 @@
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
-
-type Tile = {
-  href: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-};
+import { adminTileItems, type AdminNavKey } from '@/lib/admin/adminNav';
 
 const IconBox = () => (
   <svg viewBox="0 0 20 20" fill="currentColor" width="24" height="24" aria-hidden>
@@ -50,50 +44,17 @@ const IconArrowRight = () => (
   </svg>
 );
 
-const TILES: Tile[] = [
-  {
-    href: '/admin/categories',
-    title: '카테고리',
-    description: '상품 라인 생성 · /catalog/<슬러그>',
-    icon: <IconList />,
-  },
-  {
-    href: '/admin/products',
-    title: '상품',
-    description: '상품 CRUD, 활성 토글',
-    icon: <IconBox />,
-  },
-  {
-    href: '/admin/frames',
-    title: '프레임',
-    description: '컬러별 PNG + inner_rect',
-    icon: <IconFrame />,
-  },
-  {
-    href: '/admin/options',
-    title: '옵션',
-    description: '사이즈/색상/매트/인화지 매트릭스, CSV 일괄 등록',
-    icon: <IconSliders />,
-  },
-  {
-    href: '/admin/orders',
-    title: '주문',
-    description: '주문 조회 및 상태 전이',
-    icon: <IconList />,
-  },
-  {
-    href: '/admin/curation',
-    title: '큐레이션',
-    description: '랜딩 배너/컬렉션/feature',
-    icon: <IconSparkles />,
-  },
-  {
-    href: '/admin/shipping',
-    title: '배송 설정',
-    description: 'STANDARD/PICKUP/QUICK 요금',
-    icon: <IconTruck />,
-  },
-];
+// Tile-surface icons, keyed by the adminNav SSOT keys. Note 카테고리 uses the list
+// glyph here (distinct from the sidebar's tag glyph) — icons stay per-surface.
+const ICONS: Partial<Record<AdminNavKey, React.ReactNode>> = {
+  categories: <IconList />,
+  products: <IconBox />,
+  frames: <IconFrame />,
+  options: <IconSliders />,
+  orders: <IconList />,
+  curation: <IconSparkles />,
+  shipping: <IconTruck />,
+};
 
 function formatDate() {
   return new Date().toLocaleDateString('ko-KR', {
@@ -121,7 +82,7 @@ export default function AdminHomePage() {
           빠른 이동
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {TILES.map((tile) => (
+          {adminTileItems().map((tile) => (
             <Link
               key={tile.href}
               href={tile.href}
@@ -135,11 +96,11 @@ export default function AdminHomePage() {
                 'after:transition-transform after:duration-200 after:origin-left',
               )}
             >
-              <span className="text-ink">{tile.icon}</span>
+              <span className="text-ink">{ICONS[tile.key]}</span>
               <div className="flex-1">
-                <p className="font-semibold text-ink text-sm">{tile.title}</p>
+                <p className="font-semibold text-ink text-sm">{tile.label}</p>
                 <p className="text-xs text-mute mt-0.5 leading-relaxed">
-                  {tile.description}
+                  {tile.tileDescription}
                 </p>
               </div>
               <span className="self-end text-stone group-hover:text-ink transition-colors">

@@ -71,6 +71,11 @@ type ProductRow = {
   sort_order: number;
   /** numeric column — Supabase returns it as number or string depending on driver. */
   bleed_mm?: number | string | null;
+  /**
+   * 확장형 분기축(migration 034). Optional so reads work even if 034 is unapplied —
+   * mapProduct falls back to 'single' (현행 단품 경로) for any absent/non-'extended' value.
+   */
+  product_type?: string | null;
   created_at: string;
 };
 
@@ -226,6 +231,9 @@ export const mapProduct = (row: ProductRow): Product => ({
   isActive: row.is_active,
   sortOrder: row.sort_order,
   bleedMm: row.bleed_mm == null ? 0 : Number(row.bleed_mm),
+  // Graceful fallback: anything but the literal 'extended' (incl. undefined/null
+  // when migration 034 is unapplied) maps to 'single' — the current product path.
+  productType: row.product_type === 'extended' ? 'extended' : 'single',
   createdAt: row.created_at,
 });
 

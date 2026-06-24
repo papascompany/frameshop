@@ -28,6 +28,15 @@ export type PaymentEventId = Brand<string, 'PaymentEventId'>;
 export type UserId = Brand<string, 'UserId'>;
 
 /**
+ * 확장형 상품(ADR-023) — 묶음(프로젝트) 식별자.
+ * `CartProjectId` = cart_projects 서버 PK. `ProjectLocalId` = 클라 생성 UUID로
+ * localStorage ↔ DB dedup(cart_items.local_id ↔ ADR-011 패턴과 동일). 둘 다
+ * 추가 전용(additive) 브랜드라 기존 코드/런타임에 영향 없음.
+ */
+export type CartProjectId = Brand<string, 'CartProjectId'>;
+export type ProjectLocalId = Brand<string, 'ProjectLocalId'>;
+
+/**
  * Client-generated UUID used to dedup cart items between LocalStorage and DB.
  * Distinct from CartItemId (server primary key).
  */

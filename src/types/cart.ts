@@ -12,8 +12,10 @@ import { z } from 'zod';
 import { httpsUrl } from '../lib/validation/url';
 import { selectedOptionsSchema } from './product';
 import { cropTransformSchema } from './editor';
+import { orientationSchema } from './project';
 import type {
   CartItemId,
+  CartProjectId,
   IsoTimestamp,
   LocalId,
   PhotoId,
@@ -23,6 +25,7 @@ import type {
 } from './common';
 import type { SelectedOptions } from './product';
 import type { CropTransform } from './editor';
+import type { Orientation } from './project';
 
 // ---------- Domain types ----------
 
@@ -44,6 +47,16 @@ export type CartItem = {
   /** 1..99 (clamped). */
   quantity: number;
   createdAt: IsoTimestamp;
+  // ----- 확장형 상품 묶음 링크 (ADR-023, migration 035). 전부 옵셔널 — 단품은 미사용 -----
+  /**
+   * 확장형 묶음 헤더(cart_projects) 참조. null/undefined = 레거시 단품(현행 평면 경로).
+   * 같은 projectId 를 가진 여러 CartItem = 한 프로젝트의 라인들(공유 사진풀).
+   */
+  projectId?: CartProjectId | null;
+  /** 프로젝트 내 라인 표시 순번. 단품은 미사용. */
+  projectSeq?: number | null;
+  /** 라인 방향(혼합 방향). 단품은 variant 기하에서 파생되므로 미사용. */
+  orientation?: Orientation | null;
 };
 
 export type CartSummary = {
@@ -61,7 +74,15 @@ export type SyncResult = {
 
 // ---------- Constants ----------
 
-export const CART_LOCAL_STORAGE_KEY = 'frameshop.cart.v1';
+/**
+ * Active LocalStorage cart key. Bumped v1 → v2 when CartItem gained the optional
+ * 확장형 묶음 필드(ADR-023). v2 is a superset of v1 (new fields optional), so the
+ * migration is lossless — `storage.ts` reads the legacy v1 key once and promotes
+ * it into v2 (see CART_LOCAL_STORAGE_KEY_V1).
+ */
+export const CART_LOCAL_STORAGE_KEY = 'frameshop.cart.v2';
+/** Legacy key migrated from on first read. Do not write to this. */
+export const CART_LOCAL_STORAGE_KEY_V1 = 'frameshop.cart.v1';
 export const CART_QUANTITY_MIN = 1;
 export const CART_QUANTITY_MAX = 99;
 
@@ -83,6 +104,10 @@ export const cartItemSchema = z.object({
   price: z.number().int().nonnegative(),
   quantity: z.number().int().min(CART_QUANTITY_MIN).max(CART_QUANTITY_MAX),
   createdAt: z.string(),
+  // 확장형 묶음 링크(ADR-023). 옵셔널·nullable — v1 카트 항목은 이 필드들이 없어도 통과.
+  projectId: z.string().min(1).nullable().optional(),
+  projectSeq: z.number().int().nonnegative().nullable().optional(),
+  orientation: orientationSchema.nullable().optional(),
 });
 
 export const cartSummarySchema = z.object({

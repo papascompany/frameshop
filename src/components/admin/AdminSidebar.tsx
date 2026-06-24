@@ -3,17 +3,12 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/cn';
-
-type NavItem = {
-  href: string;
-  label: string;
-  icon: React.ReactNode;
-};
-
-type NavSection = {
-  title?: string;
-  items: NavItem[];
-};
+import {
+  ADMIN_NAV_SECTIONS,
+  adminNavBySection,
+  isAdminNavActive,
+  type AdminNavKey,
+} from '@/lib/admin/adminNav';
 
 // Inline SVG icons (heroicons style, 20x20 viewBox)
 const IconGrid = () => (
@@ -94,39 +89,22 @@ const IconTag = () => (
   </svg>
 );
 
-const NAV_SECTIONS: NavSection[] = [
-  {
-    items: [
-      { href: '/admin', label: '대시보드', icon: <IconGrid /> },
-    ],
-  },
-  {
-    title: '상품 관리',
-    items: [
-      { href: '/admin/categories', label: '카테고리', icon: <IconTag /> },
-      { href: '/admin/products', label: '상품', icon: <IconBox /> },
-      { href: '/admin/frames', label: '프레임', icon: <IconFrame /> },
-      { href: '/admin/options', label: '옵션', icon: <IconSliders /> },
-    ],
-  },
-  {
-    title: '운영',
-    items: [
-      { href: '/admin/orders', label: '주문', icon: <IconList /> },
-      { href: '/admin/reviews', label: '리뷰', icon: <IconStar /> },
-      { href: '/admin/curation', label: '큐레이션', icon: <IconSparkles /> },
-      { href: '/admin/artworks', label: '명화', icon: <IconPainting /> },
-      { href: '/admin/landing', label: '랜딩 관리', icon: <IconLayout /> },
-    ],
-  },
-  {
-    title: '설정',
-    items: [
-      { href: '/admin/shipping', label: '배송 설정', icon: <IconTruck /> },
-      { href: '/admin/settings', label: '설정', icon: <IconGear /> },
-    ],
-  },
-];
+// Route metadata lives in the adminNav SSOT; icons stay local to this surface
+// (the sidebar uses a tag glyph for 카테고리, distinct from the tiles surface).
+const ICONS: Record<AdminNavKey, React.ReactNode> = {
+  dashboard: <IconGrid />,
+  categories: <IconTag />,
+  products: <IconBox />,
+  frames: <IconFrame />,
+  options: <IconSliders />,
+  orders: <IconList />,
+  reviews: <IconStar />,
+  curation: <IconSparkles />,
+  artworks: <IconPainting />,
+  landing: <IconLayout />,
+  shipping: <IconTruck />,
+  settings: <IconGear />,
+};
 
 type Props = {
   open?: boolean;
@@ -135,11 +113,6 @@ type Props = {
 
 export function AdminSidebar({ open, onClose }: Props) {
   const pathname = usePathname();
-
-  function isActive(href: string) {
-    if (href === '/admin') return pathname === '/admin';
-    return pathname.startsWith(href);
-  }
 
   const sidebarContent = (
     <div className="flex flex-col h-full">
@@ -155,16 +128,16 @@ export function AdminSidebar({ open, onClose }: Props) {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3">
-        {NAV_SECTIONS.map((section, si) => (
-          <div key={si} className={cn(si > 0 && 'mt-4')}>
+        {ADMIN_NAV_SECTIONS.map((section, si) => (
+          <div key={section.id} className={cn(si > 0 && 'mt-4')}>
             {section.title ? (
               <p className="px-2 mb-1 text-[10px] font-semibold tracking-widest uppercase text-stone/60">
                 {section.title}
               </p>
             ) : null}
             <ul className="space-y-0.5">
-              {section.items.map((item) => {
-                const active = isActive(item.href);
+              {adminNavBySection(section.id).map((item) => {
+                const active = isAdminNavActive(pathname, item.href);
                 return (
                   <li key={item.href}>
                     <Link
@@ -178,7 +151,7 @@ export function AdminSidebar({ open, onClose }: Props) {
                       )}
                     >
                       <span className={cn(active ? 'text-ink' : 'text-stone')}>
-                        {item.icon}
+                        {ICONS[item.key]}
                       </span>
                       {item.label}
                     </Link>
