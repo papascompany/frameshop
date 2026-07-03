@@ -1,8 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { requireAdmin } from '@/lib/db/admin';
 import { transitionTo, getOrder, setOrderMemo } from '@/lib/db/order';
+import { reversePointsForOrder } from '@/lib/db/points';
+import { isPartialRefundAvailable } from '@/lib/db/feature-probe';
+import { getServiceRoleSupabase } from '@/lib/supabase/service';
+import { canTransition } from '@/lib/order/state';
 import {
   notifyShipped,
   notifyDelivered,
@@ -12,11 +17,30 @@ import {
 import { tossClient } from '@/lib/payment/toss';
 import { asBrand } from '@/types/common';
 import type { OrderId } from '@/types/common';
+import type { OrderStatus } from '@/types/order';
 
 /** Orderer-level memo cap (app-enforced; mirrors setOrderMemo's slice). */
 const ORDER_MEMO_MAX = 200;
 
 type ActionResult = { ok: boolean; error?: string };
+
+type RefundActionResult = ActionResult & {
+  /** 부분환불 성공 시 누적 환불액(KRW). */
+  refundedAmount?: number;
+  /** 액션 이후 주문 상태 — 누적이 전액에 도달해 전이됐으면 REFUNDED. */
+  status?: OrderStatus;
+};
+
+/** 부분환불 금액: 1원 이상 정수(KRW). 상한(잔여액)은 주문 조회 후 검증. */
+const partialRefundAmountSchema = z.number().int().positive();
+
+/** 결제가 존재하고 아직 종결되지 않아 부분환불이 가능한 상태. */
+const PARTIAL_REFUNDABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
+  'PAID',
+  'IN_PRODUCTION',
+  'SHIPPED',
+  'DELIVERED',
+]);
 
 /**
  * PAID → IN_PRODUCTION 전환.
@@ -166,6 +190,20 @@ export async function cancelOrderAction(
       reason: trimmedReason,
     });
 
+    // FS-EC P1-1(후속): CANCELLED 전이 성공 후 원장 정합 — 사용분 복원 +
+    // 적립분 회수. customerCancelOrder 와 동일 시맨틱: fire-and-forget(실패해도
+    // 취소 주 흐름을 되돌리지 않음, 함수 내부 멱등 + 구조화 로그, never throws),
+    // 게스트 주문(userId null)·031 미적용은 skip.
+    if (
+      order.userId &&
+      ((order.pointsRedeemed ?? 0) > 0 || (order.pointsAccrued ?? 0) > 0)
+    ) {
+      void reversePointsForOrder(order.id, order.userId, {
+        redeemed: order.pointsRedeemed ?? 0,
+        accrued: order.pointsAccrued ?? 0,
+      });
+    }
+
     // Fire-and-forget customer notification (same pattern as shipOrderAction).
     void notifyCancelled(order, trimmedReason);
 
@@ -181,25 +219,42 @@ export async function cancelOrderAction(
 }
 
 /**
- * 주문 환불: PAID / DELIVERED → REFUNDED.
- * Toss 결제 취소(환불)를 먼저 수행한 뒤 상태를 전환한다. 환불에 실패하면
- * 상태를 바꾸지 않는다.
+ * 주문 환불.
+ *
+ * - `opts.cancelAmount` 미지정(기존 호출과 하위호환): 전액 환불 — Toss 전액
+ *   취소 후 PAID / DELIVERED → REFUNDED 전환. 기존 동작 무변경.
+ * - `opts.cancelAmount` 지정: 부분환불(FS-EC-03, migration 038). Toss 부분취소
+ *   성공 후 orders.refunded_amount 에 누적 기록하며, 누적이 total_price 에
+ *   도달하면 REFUNDED 로 전환한다(부분 상태에서는 상태 무변경).
+ *
+ * 두 경로 모두 Toss 취소를 먼저 수행하고, 실패하면 상태/누적액을 바꾸지 않는다.
  */
 export async function refundOrderAction(
   orderId: string,
-  reason: string,
-): Promise<ActionResult> {
+  opts?: { cancelAmount?: number; reason?: string },
+): Promise<RefundActionResult> {
   try {
     await requireAdmin();
   } catch {
     return { ok: false, error: '관리자 권한이 필요합니다.' };
   }
 
-  const trimmedReason = reason.trim();
+  const trimmedReason = (opts?.reason ?? '').trim();
   if (trimmedReason.length === 0) {
     return { ok: false, error: '환불 사유를 입력해주세요.' };
   }
 
+  if (opts?.cancelAmount === undefined) {
+    return fullRefund(orderId, trimmedReason);
+  }
+  return partialRefund(orderId, opts.cancelAmount, trimmedReason);
+}
+
+/** 전액 환불 — 기존 refundOrderAction 로직 그대로(무변경). */
+async function fullRefund(
+  orderId: string,
+  trimmedReason: string,
+): Promise<RefundActionResult> {
   try {
     const order = await getOrder(orderId);
     if (!order) return { ok: false, error: '주문을 찾을 수 없습니다.' };
@@ -223,16 +278,169 @@ export async function refundOrderAction(
       reason: trimmedReason,
     });
 
+    // FS-EC P1-1: 원장 정합 — REFUNDED 전이 성공 후 사용분 복원 + 적립분 회수.
+    // fire-and-forget: 실패해도 환불 주 흐름을 되돌리지 않는다(함수 내부에서
+    // 멱등 처리 + 구조화 로그, never throws). 게스트 주문(userId null)은 포인트
+    // 개념이 없어 skip.
+    if (
+      order.userId &&
+      ((order.pointsRedeemed ?? 0) > 0 || (order.pointsAccrued ?? 0) > 0)
+    ) {
+      void reversePointsForOrder(order.id, order.userId, {
+        redeemed: order.pointsRedeemed ?? 0,
+        accrued: order.pointsAccrued ?? 0,
+      });
+    }
+
     // Fire-and-forget customer notification (same pattern as shipOrderAction).
     void notifyRefunded(order, trimmedReason);
 
     revalidatePath('/admin/orders');
     revalidatePath(`/admin/orders/${orderId}`);
-    return { ok: true };
+    return { ok: true, status: 'REFUNDED' };
   } catch (err) {
     return {
       ok: false,
       error: err instanceof Error ? err.message : '주문 환불 실패',
+    };
+  }
+}
+
+/**
+ * 부분환불(FS-EC-03). 서버 권위 검증: 0 < cancelAmount ≤ totalPrice − 누적액.
+ *
+ * 순서(정합의 핵심): Toss 부분취소 성공 → refunded_amount 누적 UPDATE(이전
+ * 값 일치 조건의 낙관적 잠금 — 동시 환불 경합에서 누적 소실 방지). UPDATE 가
+ * 실패하면 Toss 환불은 이미 집행된 상태이므로 절대 은폐하지 않고 구조화
+ * 로그 + 수동 보정 안내를 반환한다.
+ */
+async function partialRefund(
+  orderId: string,
+  cancelAmount: number,
+  trimmedReason: string,
+): Promise<RefundActionResult> {
+  // 038 미적용이면 명시 에러 — refunded_amount 없이 부분환불하면 누적 추적이
+  // 불가능해 과환불 위험이 생긴다.
+  if (!(await isPartialRefundAvailable())) {
+    return {
+      ok: false,
+      error:
+        '부분환불 기능을 사용할 수 없습니다. 마이그레이션 038(orders.refunded_amount) 적용이 필요합니다.',
+    };
+  }
+
+  const parsedAmount = partialRefundAmountSchema.safeParse(cancelAmount);
+  if (!parsedAmount.success) {
+    return { ok: false, error: '환불 금액은 1원 이상의 정수여야 합니다.' };
+  }
+
+  try {
+    const order = await getOrder(orderId);
+    if (!order) return { ok: false, error: '주문을 찾을 수 없습니다.' };
+    if (!order.paymentId) {
+      return { ok: false, error: '결제 정보가 없어 환불할 수 없습니다.' };
+    }
+    if (!PARTIAL_REFUNDABLE_STATUSES.has(order.status)) {
+      return {
+        ok: false,
+        error: `현재 상태(${order.status})에서는 부분환불할 수 없습니다.`,
+      };
+    }
+
+    const prevRefunded = order.refundedAmount ?? 0;
+    const remaining = order.totalPrice - prevRefunded;
+    if (remaining <= 0) {
+      return { ok: false, error: '이미 전액이 환불된 주문입니다.' };
+    }
+    if (cancelAmount > remaining) {
+      return {
+        ok: false,
+        error: `환불 금액이 잔여 금액(${remaining.toLocaleString('ko-KR')}원)을 초과합니다.`,
+      };
+    }
+
+    try {
+      await tossClient.cancel({
+        paymentKey: order.paymentId,
+        cancelReason: trimmedReason,
+        cancelAmount,
+      });
+    } catch (err) {
+      return {
+        ok: false,
+        error: `결제 부분취소(환불) 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      };
+    }
+
+    const cumulative = prevRefunded + cancelAmount;
+
+    const supabase = getServiceRoleSupabase();
+    const { data: updatedRows, error: updErr } = await supabase
+      .from('orders')
+      .update({ refunded_amount: cumulative })
+      .eq('id', order.id as string)
+      .eq('refunded_amount', prevRefunded)
+      .select('id');
+
+    if (updErr || !updatedRows || updatedRows.length === 0) {
+      // Toss 환불은 이미 집행됨 — 기록 실패를 은폐하면 과환불로 이어진다.
+      console.error(
+        JSON.stringify({
+          event: 'partial_refund_update_failed',
+          ctx: {
+            orderNo: order.orderNo,
+            cancelAmount,
+            prevRefunded,
+            cumulative,
+            message: updErr?.message ?? 'no rows matched (동시 갱신 경합 추정)',
+          },
+        }),
+      );
+      return {
+        ok: false,
+        error:
+          `Toss 부분환불 ${cancelAmount.toLocaleString('ko-KR')}원은 완료되었으나 누적 환불액 기록에 실패했습니다. ` +
+          `주문 ${order.orderNo as string}의 refunded_amount 를 ${cumulative.toLocaleString('ko-KR')}원으로 수동 보정해주세요.`,
+      };
+    }
+
+    let status: OrderStatus = order.status;
+    if (cumulative === order.totalPrice) {
+      if (canTransition(order.status, 'REFUNDED')) {
+        await transitionTo(order.id, 'REFUNDED', { reason: trimmedReason });
+        status = 'REFUNDED';
+        // FS-EC P1-1: 누적이 전액에 도달해 REFUNDED 전이가 성공한 경우에만 원장
+        // 정합(사용분 복원 + 적립분 회수). 부분 상태(누적 < 전액)는 무조정.
+        if (
+          order.userId &&
+          ((order.pointsRedeemed ?? 0) > 0 || (order.pointsAccrued ?? 0) > 0)
+        ) {
+          void reversePointsForOrder(order.id, order.userId, {
+            redeemed: order.pointsRedeemed ?? 0,
+            accrued: order.pointsAccrued ?? 0,
+          });
+        }
+        // Fire-and-forget — 기존 전액환불 플로우와 동일 훅.
+        void notifyRefunded(order, trimmedReason);
+      } else {
+        // 전액에 도달했지만 상태기계상 REFUNDED 전이가 불가한 상태(IN_PRODUCTION,
+        // SHIPPED). 돈은 전부 환불됐으므로 기록만 남기고 상태는 유지한다.
+        console.warn(
+          JSON.stringify({
+            event: 'partial_refund_full_no_transition',
+            ctx: { orderNo: order.orderNo, status: order.status, cumulative },
+          }),
+        );
+      }
+    }
+
+    revalidatePath('/admin/orders');
+    revalidatePath(`/admin/orders/${orderId}`);
+    return { ok: true, refundedAmount: cumulative, status };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : '부분환불 실패',
     };
   }
 }

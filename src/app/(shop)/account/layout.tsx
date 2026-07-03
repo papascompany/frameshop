@@ -14,6 +14,9 @@ export default async function AccountLayout({ children }: { children: ReactNode 
 
   const NAV_ITEMS = [
     { href: '/account/orders', label: t('orders') },
+    // FS-EC-01: i18n 키 추가는 messages/*.json 수정(out-of-scope)이 필요해
+    // 한국어 고정 — 통합 단계에서 account.points 키로 승격.
+    { href: '/account/points', label: '적립금' },
     { href: '/account/addresses', label: t('addresses') },
   ];
 

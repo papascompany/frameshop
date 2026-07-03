@@ -44,11 +44,28 @@ const COURIER_OPTIONS = [
   { value: '로젠',       label: '로젠' },
 ];
 
+/** 현금영수증 식별번호 마스킹 — 마지막 4자리 숫자만 노출(하이픈은 유지). */
+function maskReceiptInfo(info: string | null | undefined): string {
+  if (!info) return '—';
+  const totalDigits = info.replace(/[^0-9]/g, '').length;
+  let seen = 0;
+  return info
+    .split('')
+    .map((ch) => {
+      if (!/[0-9]/.test(ch)) return ch;
+      seen += 1;
+      return seen > totalDigits - 4 ? ch : '*';
+    })
+    .join('');
+}
+
 type Props = {
   order: OrderWithItems;
+  /** 038(orders.refunded_amount) 적용 여부 — false 면 부분환불 UI 비노출. */
+  partialRefundAvailable: boolean;
 };
 
-export function AdminOrderDetailClient({ order }: Props) {
+export function AdminOrderDetailClient({ order, partialRefundAvailable }: Props) {
   const [status, setStatus] = useState(order.status);
   const [courier, setCourier] = useState(order.courier ?? '');
   const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber ?? '');
@@ -56,8 +73,11 @@ export function AdminOrderDetailClient({ order }: Props) {
   const [error, setError] = useState<string | null>(null);
   // Inline cancel/refund flow: null = idle, otherwise the pending action with
   // its reason text. Requires an explicit confirm + non-empty reason.
-  const [pendingAction, setPendingAction] = useState<null | 'cancel' | 'refund'>(null);
+  const [pendingAction, setPendingAction] = useState<null | 'cancel' | 'refund' | 'partial'>(null);
   const [reason, setReason] = useState('');
+  // 부분환불(FS-EC-03): 누적 환불액은 서버 응답으로 동기화한다.
+  const [refunded, setRefunded] = useState(order.refundedAmount ?? 0);
+  const [partialAmount, setPartialAmount] = useState('');
 
   // 관리자 메모(주문자 레벨 자유 메모). 배송 요청(shipping.memo)과 별개.
   // order.orderMemo 는 mapOrder 에서 항상 string | null 로 채워진다.
@@ -71,6 +91,16 @@ export function AdminOrderDetailClient({ order }: Props) {
   // CREATED / PAID / IN_PRODUCTION can be cancelled; PAID / DELIVERED can be refunded.
   const canCancel = status === 'CREATED' || status === 'PAID' || status === 'IN_PRODUCTION';
   const canRefund = status === 'PAID' || status === 'DELIVERED';
+
+  const remaining = order.totalPrice - refunded;
+  // 부분환불: 038 적용 + 결제 존재 + 미종결 상태 + 잔여액 존재.
+  const canPartialRefund =
+    partialRefundAvailable &&
+    Boolean(order.paymentId) &&
+    remaining > 0 &&
+    (status === 'PAID' || status === 'IN_PRODUCTION' || status === 'SHIPPED' || status === 'DELIVERED');
+
+  const hasPrintFiles = order.items.some((item) => item.printFileUrl);
 
   async function handleStartProduction() {
     setLoading(true);
@@ -122,7 +152,7 @@ export function AdminOrderDetailClient({ order }: Props) {
   }
 
   async function handleConfirmCancelOrRefund() {
-    if (!pendingAction) return;
+    if (pendingAction !== 'cancel' && pendingAction !== 'refund') return;
     if (reason.trim().length === 0) {
       setError(pendingAction === 'cancel' ? '취소 사유를 입력해주세요.' : '환불 사유를 입력해주세요.');
       return;
@@ -139,7 +169,7 @@ export function AdminOrderDetailClient({ order }: Props) {
     const result =
       pendingAction === 'cancel'
         ? await cancelOrderAction(order.id as string, reason.trim())
-        : await refundOrderAction(order.id as string, reason.trim());
+        : await refundOrderAction(order.id as string, { reason: reason.trim() });
     setLoading(false);
     if (result.ok) {
       setStatus(pendingAction === 'cancel' ? 'CANCELLED' : 'REFUNDED');
@@ -147,6 +177,46 @@ export function AdminOrderDetailClient({ order }: Props) {
       setReason('');
     } else {
       setError(result.error ?? '처리 실패');
+    }
+  }
+
+  async function handleConfirmPartialRefund() {
+    const amount = Number(partialAmount);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      setError('환불 금액은 1원 이상의 정수여야 합니다.');
+      return;
+    }
+    if (amount > remaining) {
+      setError(`환불 금액이 잔여 금액(${remaining.toLocaleString('ko-KR')}원)을 초과합니다.`);
+      return;
+    }
+    if (reason.trim().length === 0) {
+      setError('환불 사유를 입력해주세요.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `${amount.toLocaleString('ko-KR')}원을 부분환불합니다. 되돌릴 수 없습니다. 계속할까요?`,
+      )
+    ) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    const result = await refundOrderAction(order.id as string, {
+      cancelAmount: amount,
+      reason: reason.trim(),
+    });
+    setLoading(false);
+    if (result.ok) {
+      setRefunded(result.refundedAmount ?? refunded + amount);
+      if (result.status) setStatus(result.status);
+      setPendingAction(null);
+      setPartialAmount('');
+      setReason('');
+    } else {
+      setError(result.error ?? '부분환불 실패');
     }
   }
 
@@ -197,6 +267,22 @@ export function AdminOrderDetailClient({ order }: Props) {
               {order.totalPrice.toLocaleString('ko-KR')}원
             </dd>
           </div>
+          {refunded > 0 && (
+            <>
+              <div>
+                <dt className="text-muted-fg">누적 환불액</dt>
+                <dd className="tabular-nums font-medium text-danger">
+                  {refunded.toLocaleString('ko-KR')}원
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-fg">잔여 금액</dt>
+                <dd className="tabular-nums font-medium">
+                  {remaining.toLocaleString('ko-KR')}원
+                </dd>
+              </div>
+            </>
+          )}
           {(courier || order.courier) && (
             <>
               <div>
@@ -241,9 +327,69 @@ export function AdminOrderDetailClient({ order }: Props) {
         </dl>
       </Card>
 
+      {/* 현금영수증 (039 미적용/미신청이면 receiptType null → 카드 비노출) */}
+      {order.receiptType && (
+        <Card padding="md">
+          <h2 className="font-semibold mb-3">현금영수증</h2>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            <div>
+              <dt className="text-muted-fg">신청 유형</dt>
+              <dd>{order.receiptType === 'income' ? '소득공제' : '지출증빙'}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-fg">식별번호</dt>
+              <dd className="font-mono">{maskReceiptInfo(order.receiptInfo)}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-fg">발급 상태</dt>
+              <dd>
+                {order.receiptIssuedAt ? (
+                  <Badge variant="success">발급완료</Badge>
+                ) : (
+                  <Badge variant="default">미발급</Badge>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-fg">발급 시각</dt>
+              <dd>
+                {order.receiptIssuedAt
+                  ? new Date(order.receiptIssuedAt).toLocaleString('ko-KR')
+                  : '—'}
+              </dd>
+            </div>
+            {order.receiptUrl && (
+              <div className="col-span-2">
+                <dt className="text-muted-fg">영수증</dt>
+                <dd>
+                  <a
+                    href={order.receiptUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    영수증 보기
+                  </a>
+                </dd>
+              </div>
+            )}
+          </dl>
+        </Card>
+      )}
+
       {/* 주문 상품 */}
       <Card padding="md">
-        <h2 className="font-semibold mb-3">주문 상품</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold">주문 상품</h2>
+          {hasPrintFiles && (
+            <a
+              href={`/api/admin/orders/${order.id as string}/zip`}
+              className="text-sm text-accent hover:underline"
+            >
+              인쇄 파일 ZIP 다운로드
+            </a>
+          )}
+        </div>
         <ul className="divide-y divide-border">
           {order.items.map((item) => (
             <li key={item.id as string} className="py-3 flex items-start gap-4">
@@ -393,8 +539,8 @@ export function AdminOrderDetailClient({ order }: Props) {
           </p>
         )}
 
-        {/* 취소 / 환불 */}
-        {(canCancel || canRefund) && (
+        {/* 취소 / 환불 / 부분환불 */}
+        {(canCancel || canRefund || canPartialRefund) && (
           <div className="mt-5 pt-5 border-t border-border">
             {pendingAction === null ? (
               <div className="flex flex-wrap gap-2">
@@ -416,6 +562,59 @@ export function AdminOrderDetailClient({ order }: Props) {
                     환불
                   </Button>
                 )}
+                {canPartialRefund && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => { setPendingAction('partial'); setError(null); }}
+                    disabled={loading}
+                  >
+                    부분환불
+                  </Button>
+                )}
+              </div>
+            ) : pendingAction === 'partial' ? (
+              <div className="space-y-3">
+                <p className="text-sm font-medium">부분환불</p>
+                <p className="text-sm text-muted-fg tabular-nums">
+                  누적 환불액 {refunded.toLocaleString('ko-KR')}원 / 잔여{' '}
+                  {remaining.toLocaleString('ko-KR')}원 (총{' '}
+                  {order.totalPrice.toLocaleString('ko-KR')}원)
+                </p>
+                <Input
+                  label="환불 금액(원)"
+                  type="number"
+                  min={1}
+                  max={remaining}
+                  step={1}
+                  placeholder={`1 ~ ${remaining.toLocaleString('ko-KR')}`}
+                  value={partialAmount}
+                  onChange={(e) => setPartialAmount(e.target.value)}
+                  disabled={loading}
+                />
+                <Input
+                  label="사유"
+                  placeholder="부분환불 사유"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  disabled={loading}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={() => void handleConfirmPartialRefund()}
+                    loading={loading}
+                    disabled={loading}
+                  >
+                    부분환불 확정
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => { setPendingAction(null); setPartialAmount(''); setReason(''); setError(null); }}
+                    disabled={loading}
+                  >
+                    닫기
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">

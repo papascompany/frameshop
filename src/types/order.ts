@@ -80,6 +80,42 @@ export class InvalidStateTransitionError extends Error {
   }
 }
 
+// ---------- Cash receipt (현금영수증, migration 039) ----------
+
+/** orders.receipt_type CHECK 와 1:1. income = 소득공제, proof = 지출증빙. */
+export const CASH_RECEIPT_TYPES = ['income', 'proof'] as const;
+
+export type CashReceiptType = (typeof CASH_RECEIPT_TYPES)[number];
+
+/**
+ * 주문 생성 시 현금영수증 신청 페이로드. `info` 는 식별번호(숫자·하이픈만,
+ * 8~20자) — income 은 휴대폰번호 등, proof 는 사업자등록번호.
+ */
+export type CashReceiptRequest = {
+  type: CashReceiptType;
+  info: string;
+};
+
+/**
+ * 현금영수증 식별번호 마스킹 — 마지막 4자리 숫자 외 전부 '*'(하이픈 유지).
+ * 서버 컴포넌트가 클라이언트 props(RSC 페이로드)로 내리기 전에 호출한다
+ * (FS-EC P2-1, PII 최소화) — 원문 식별번호(휴대폰/사업자번호)가 페이지 소스·
+ * devtools 에 직렬화되지 않는다. 이미 마스킹된 입력에는 멱등.
+ */
+export function maskReceiptInfo(info: string | null | undefined): string | null {
+  if (!info) return null;
+  const totalDigits = info.replace(/[^0-9]/g, '').length;
+  let seen = 0;
+  return info
+    .split('')
+    .map((ch) => {
+      if (!/[0-9]/.test(ch)) return ch;
+      seen += 1;
+      return seen > totalDigits - 4 ? ch : '*';
+    })
+    .join('');
+}
+
 // ---------- People & addresses ----------
 
 export type Orderer = {
@@ -176,6 +212,27 @@ export type Order = {
    * IsoTimestamp | null.
    */
   confirmedAt?: IsoTimestamp | null;
+  /**
+   * FS-EC-00 optional additions. 전부 옵셔널(FROZEN 무파손) — 기존 Order 리터럴/
+   * 픽스처가 그대로 컴파일된다. mapOrder 는 항상 undefined-safe 로 채운다
+   * (해당 마이그레이션 미적용이어도 안전).
+   */
+  /** 부분환불 누적액(KRW). migration 038; mapOrder → 0 폴백. */
+  refundedAmount?: number;
+  /** 현금영수증 신청 유형. migration 039; null = 미신청. mapOrder → null 폴백. */
+  receiptType?: CashReceiptType | null;
+  /** 현금영수증 식별번호(숫자·하이픈). migration 039; mapOrder → null 폴백. */
+  receiptInfo?: string | null;
+  /** Toss cashReceipt 발급 결과 URL. migration 039; mapOrder → null 폴백. */
+  receiptUrl?: string | null;
+  /** Toss cashReceipt 발급 완료 시각. migration 039; mapOrder → null 폴백. */
+  receiptIssuedAt?: IsoTimestamp | null;
+  /** 주문 시 차감한 포인트 스냅샷(totalPrice 는 이미 차감 후). migration 031; → 0 폴백. */
+  pointsRedeemed?: number;
+  /** PAID 시 적립한 포인트 스냅샷(환불 시 회수 근거). migration 031; → 0 폴백. */
+  pointsAccrued?: number;
+  /** 제주/도서산간 추가 배송비 스냅샷(ADR-008). migration 030; → 0 폴백. */
+  surchargeFee?: number;
   createdAt: IsoTimestamp;
   paidAt: IsoTimestamp | null;
   shippedAt: IsoTimestamp | null;
@@ -204,6 +261,14 @@ export type CreateOrderInput = {
    * knows the sessionId "owns" photos in that session.
    */
   sessionId?: string | null;
+  /**
+   * 사용할 적립금(1 point = 1 KRW, 정수 ≥ 0). 서버가 잔액·상한(maxRedeemable)을
+   * 권위 있게 재검증하고, totalPrice 에서 차감한 **최종 금액**을 저장한다(031).
+   * 미지정/0 = 미사용. 회원 전용(userId 필수) — 익명 주문에선 무시/거부.
+   */
+  redeemPoints?: number;
+  /** 현금영수증 신청(migration 039). null/미지정 = 미신청. */
+  receipt?: CashReceiptRequest | null;
 };
 
 export type CreateOrderErrorCode =
@@ -214,7 +279,13 @@ export type CreateOrderErrorCode =
   | 'SHIPPING_FEE_MISMATCH'
   | 'PRICE_MISMATCH'
   /** One or more photos in the cart don't belong to the calling user/session. */
-  | 'PHOTO_OWNERSHIP';
+  | 'PHOTO_OWNERSHIP'
+  /** redeemPoints > 0 인데 포인트 기능 불가(031 미적용/익명/프로필 없음). */
+  | 'POINTS_UNAVAILABLE'
+  /** redeemPoints 가 잔액 또는 maxRedeemable 상한을 초과. */
+  | 'POINTS_INSUFFICIENT'
+  /** receipt 신청인데 현금영수증 기능 불가(039 미적용 등). */
+  | 'RECEIPT_UNAVAILABLE';
 
 export class CreateOrderError extends Error {
   public readonly code: CreateOrderErrorCode;
@@ -256,6 +327,25 @@ export const shippingAddressSchema = z.object({
 
 export const orderStatusSchema = z.enum(ORDER_STATUSES);
 
+export const cashReceiptTypeSchema = z.enum(CASH_RECEIPT_TYPES);
+
+/**
+ * 현금영수증 식별번호: 숫자·하이픈만, 8~20자 (휴대폰/사업자번호 커버).
+ * FS-EC P2-3: 길이 규칙만으로는 "--------"(전부 하이픈)가 통과했다 — 숫자
+ * 최소 8자리를 별도 refine 으로 강제한다.
+ */
+export const cashReceiptRequestSchema = z.object({
+  type: cashReceiptTypeSchema,
+  info: z
+    .string()
+    .min(8)
+    .max(20)
+    .regex(/^[0-9-]+$/, '숫자와 하이픈만 입력해주세요')
+    .refine((v) => v.replace(/[^0-9]/g, '').length >= 8, {
+      message: '숫자를 8자리 이상 입력해주세요',
+    }),
+});
+
 export const orderItemSnapshotSchema = z.object({
   productId: z.string().min(1),
   variantId: z.string().min(1),
@@ -280,6 +370,10 @@ export const createOrderInputSchema = z.object({
   userId: z.string().min(1).nullable().optional(),
   /** Required for anonymous checkout (userId null) to enable photo-ownership check. */
   sessionId: z.string().min(1).max(128).nullable().optional(),
+  /** FS-EC-00: 적립금 사용(서버가 잔액/상한 재검증). 미지정 = 미사용. */
+  redeemPoints: z.number().int().nonnegative().optional(),
+  /** FS-EC-00: 현금영수증 신청. null/미지정 = 미신청. */
+  receipt: cashReceiptRequestSchema.nullable().optional(),
 });
 
 export const transitionMetaSchema = z.object({

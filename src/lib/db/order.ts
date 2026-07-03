@@ -8,6 +8,7 @@ import 'server-only';
 import { asBrand } from '@/types/common';
 import type { OrderId, OrderNo, PaymentKey, UserId } from '@/types/common';
 import {
+  cashReceiptRequestSchema,
   CreateOrderError,
   type CreateOrderInput,
   InvalidStateTransitionError,
@@ -18,9 +19,19 @@ import {
   type OrderWithItems,
   type TransitionMeta,
 } from '@/types/order';
+import { maxRedeemable } from '@/types/points';
 import { mapOrder, mapOrderItem } from './mappers';
 import { canTransition, formatOrderNo } from '../order/state';
 import { calculateShippingFee } from '../shipping/calc';
+import { calcSurcharge, classifyZip } from '../shipping/surcharge';
+import { isReceiptAvailable } from './feature-probe';
+import {
+  accruePointsForOrder,
+  getPointsSummary,
+  redeemPoints,
+  refundRedeemedPoints,
+  reversePointsForOrder,
+} from './points';
 import { getShippingMethods } from './shipping';
 import { getServiceRoleSupabase } from '../supabase/service';
 import { tossClient } from '../payment/toss';
@@ -115,17 +126,86 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     settings,
   );
 
+  // Jeju/remote surcharge (FS-EC-02, ADR-008 snapshot) — recomputed server-side
+  // from the same pure functions the checkout UI uses, never trusted from the
+  // client. With migration 030 unapplied the mapper feeds 0-fallback fees, so
+  // this stays 0 and the column is never written (conditional-spread below).
+  // calculateShippingFee above already threw if the method config is missing.
+  const methodConfig = settings.find(
+    (s) => s.code === input.shippingMethod && s.isActive,
+  );
+  const surchargeFee = methodConfig
+    ? calcSurcharge(classifyZip(input.shipping.zip), methodConfig)
+    : 0;
+
+  // clientShippingFee is the shipping amount the checkout UI showed to the
+  // customer: base fee + surcharge combined (FS-EC-01 sends the sum). Compare
+  // against the same server-side sum. Old clients that send the base fee only
+  // still pass wherever surcharge = 0 (mainland, PICKUP/QUICK, or migration
+  // 030 unapplied → both sides identical).
   if (
     typeof input.clientShippingFee === 'number' &&
-    input.clientShippingFee !== shippingFee
+    input.clientShippingFee !== shippingFee + surchargeFee
   ) {
     throw new CreateOrderError(
       'SHIPPING_FEE_MISMATCH',
-      `client=${input.clientShippingFee} server=${shippingFee}`,
+      `client=${input.clientShippingFee} server=${shippingFee}+${surchargeFee}`,
     );
   }
 
-  const totalPrice = subtotal + shippingFee;
+  // Payable BEFORE points — the redeem cap (maxRedeemable) is defined on it.
+  const payable = subtotal + shippingFee + surchargeFee;
+
+  // Reward points (FS-EC-02) — fail-closed. A redeem request the server cannot
+  // honor must abort the order; silently charging the full amount is forbidden.
+  const redeemRequested = input.redeemPoints ?? 0;
+  if (!Number.isInteger(redeemRequested) || redeemRequested < 0) {
+    throw new CreateOrderError(
+      'POINTS_INSUFFICIENT',
+      `invalid redeemPoints=${redeemRequested}`,
+    );
+  }
+  const redeemUserId = input.userId ?? null;
+  if (redeemRequested > 0) {
+    if (redeemUserId == null) {
+      // 회원 전용 — 익명 주문에는 잔액 개념이 없다.
+      throw new CreateOrderError('POINTS_UNAVAILABLE', 'points require sign-in');
+    }
+    const summary = await getPointsSummary(redeemUserId);
+    if (!summary.available) {
+      throw new CreateOrderError(
+        'POINTS_UNAVAILABLE',
+        'points feature unavailable',
+      );
+    }
+    const cap = maxRedeemable(summary.balance, payable);
+    if (redeemRequested > cap) {
+      throw new CreateOrderError(
+        'POINTS_INSUFFICIENT',
+        `requested=${redeemRequested} max=${cap}`,
+      );
+    }
+  }
+
+  // 031 contract: total_price is stored NET of redeemed points, so the
+  // confirm.ts `order.totalPrice === input.amount` check works unmodified.
+  const totalPrice = payable - redeemRequested;
+
+  // Cash receipt request (FS-EC-02) — re-validate + fail-closed BEFORE any
+  // money moves, so a rejected receipt never strands a points deduction.
+  const receipt = input.receipt ?? null;
+  if (receipt) {
+    const parsedReceipt = cashReceiptRequestSchema.safeParse(receipt);
+    if (!parsedReceipt.success) {
+      throw new CreateOrderError('RECEIPT_UNAVAILABLE', 'invalid receipt payload');
+    }
+    if (!(await isReceiptAvailable())) {
+      throw new CreateOrderError(
+        'RECEIPT_UNAVAILABLE',
+        'receipt feature unavailable',
+      );
+    }
+  }
 
   // P0-03: Verify photo ownership BEFORE writing any rows.
   // Prevents User A from referencing User B's photo URL in their order, which
@@ -159,6 +239,60 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const orderNo = await generateOrderNo(new Date());
 
+  // Money moves here: deduct points via the atomic RPC immediately before the
+  // order INSERT to keep the compensation window minimal. The RPC's
+  // CHECK(points_balance >= 0) is the double-spend guard — a concurrent
+  // overdraw between the balance read above and this call fails the RPC.
+  let pointsDeducted = 0;
+  if (redeemRequested > 0 && redeemUserId != null) {
+    const tx = await redeemPoints(
+      redeemUserId,
+      null, // order row doesn't exist yet — orderNo in description is the link
+      redeemRequested,
+      `주문 ${orderNo} 적립금 사용`,
+    );
+    if (!tx.ok) {
+      throw new CreateOrderError('POINTS_INSUFFICIENT', tx.error);
+    }
+    pointsDeducted = redeemRequested;
+  }
+
+  // Compensating transaction: anything failing after the deduction must give
+  // the points back (ADJUSTMENT +amount). A refund failure is never silent —
+  // structured log for ops follow-up (manual ADJUSTMENT).
+  const compensateRedeem = async (): Promise<void> => {
+    if (pointsDeducted <= 0 || redeemUserId == null) return;
+    try {
+      const refund = await refundRedeemedPoints(
+        redeemUserId,
+        null,
+        pointsDeducted,
+        '주문 생성 실패 환급',
+      );
+      if (!refund.ok) {
+        console.error(
+          JSON.stringify({
+            event: 'points_refund_failed',
+            orderNo,
+            userId: redeemUserId,
+            amount: pointsDeducted,
+            error: refund.error,
+          }),
+        );
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: 'points_refund_failed',
+          orderNo,
+          userId: redeemUserId,
+          amount: pointsDeducted,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  };
+
   const { data: orderRow, error: insErr } = await supabase
     .from('orders')
     .insert({
@@ -170,11 +304,20 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       shipping_method: input.shippingMethod,
       orderer: input.orderer,
       shipping: input.shipping,
+      // Conditional-spread (FS-EC-02): include the new columns only when they
+      // carry a non-default value, so this INSERT still succeeds on a DB where
+      // migrations 030/031/039 are not applied yet (columns absent there).
+      ...(pointsDeducted > 0 ? { points_redeemed: pointsDeducted } : {}),
+      ...(surchargeFee > 0 ? { surcharge_fee: surchargeFee } : {}),
+      ...(receipt
+        ? { receipt_type: receipt.type, receipt_info: receipt.info }
+        : {}),
     })
     .select()
     .single();
 
   if (insErr || !orderRow) {
+    await compensateRedeem();
     throw new CreateOrderError(
       'SEQUENCE_FAILED',
       insErr?.message ?? 'orders insert failed',
@@ -252,6 +395,10 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const { error: oiErr } = await supabase.from('order_items').insert(itemRows);
   if (oiErr) {
+    // The order row exists but is unusable — createOrder throws, so the client
+    // never receives its orderNo and the order can never be paid. Refund the
+    // deducted points instead of stranding them on a dead order.
+    await compensateRedeem();
     throw new CreateOrderError('SEQUENCE_FAILED', oiErr.message);
   }
 
@@ -763,6 +910,18 @@ export async function customerCancelOrder(
     };
   }
 
+  // FS-EC P1-1: settle the points ledger AFTER the successful CANCELLED
+  // transition — restore redeemed points, reclaim accrued ones. Fire-and-forget:
+  // a reversal failure must never undo a cancellation whose PG refund already
+  // executed. reversePointsForOrder is idempotent and never throws (logs its
+  // own failures). `userId` === order.userId (ownership guard above).
+  if ((order.pointsRedeemed ?? 0) > 0 || (order.pointsAccrued ?? 0) > 0) {
+    void reversePointsForOrder(order.id, userId, {
+      redeemed: order.pointsRedeemed ?? 0,
+      accrued: order.pointsAccrued ?? 0,
+    });
+  }
+
   // Fire-and-forget customer notification (same pattern as admin cancel).
   void notifyCancelled(order, trimmedReason);
 
@@ -824,6 +983,34 @@ export async function confirmPurchase(
     }
   } catch {
     return { ok: false, error: '구매확정 처리에 실패했습니다.' };
+  }
+
+  // FS-EC-02: earn 1% on purchase confirmation, AFTER confirmed_at is set.
+  // Accrual failure never rolls the confirmation back — the ledger idempotency
+  // check inside accruePointsForOrder makes an ops retry/backfill safe, whereas
+  // un-confirming a delivered order would be customer-visible damage.
+  // The idempotent early-return above (already confirmed) also prevents a
+  // second accrual through this path. `userId` === order.userId (ownership
+  // guard) — the accrual is credited to the order owner.
+  try {
+    const accrual = await accruePointsForOrder(order.id, userId, order.totalPrice);
+    if (!accrual.ok) {
+      console.error(
+        JSON.stringify({
+          event: 'points_accrual_failed',
+          orderId: order.id,
+          error: accrual.error ?? 'unknown',
+        }),
+      );
+    }
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: 'points_accrual_failed',
+        orderId: order.id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 
   return { ok: true };

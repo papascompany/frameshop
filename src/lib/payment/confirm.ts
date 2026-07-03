@@ -16,6 +16,7 @@ import 'server-only';
 import { asBrand } from '@/types/common';
 import type { OrderNo, PaymentKey } from '@/types/common';
 import type { ConfirmPaymentInput, ConfirmResult, WebhookEvent } from '@/types/payment';
+import type { OrderWithItems } from '@/types/order';
 import { TOSS_STATUS_TO_ORDER_STATUS } from '@/types/payment';
 import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionTo } from '../db/order';
@@ -131,6 +132,9 @@ export async function confirmPayment(
       for (const item of current.items) {
         enqueuePrintRender(item.id);
       }
+      // FS-EC-03: 현금영수증 발급 훅(내부에서 미신청/비현금성/기발급을 스스로
+      // 거른다). fire-and-forget — 결제 플로우에 절대 영향 없음.
+      void issueCashReceiptIfEligible(current, tossResp.method);
     }
     return {
       ok: true,
@@ -153,11 +157,124 @@ export async function confirmPayment(
     console.warn('[notify] notifyNewOrder 예외:', e);
   });
 
+  // FS-EC-03: 현금영수증 발급 훅 — 신청 주문 + 현금성 결제만. fire-and-forget,
+  // 발급 실패는 로그만 남기고 결제 확정 결과에 영향을 주지 않는다.
+  void issueCashReceiptIfEligible(order, tossResp.method);
+
   return {
     ok: true,
     orderNo: asBrand<OrderNo>(input.orderId as string),
     paymentKey: input.paymentKey,
   };
+}
+
+// ---------- Cash receipt hook (FS-EC-03, migration 039) ----------
+
+/**
+ * 현금영수증 발급 대상 결제수단(Toss confirm 응답 `method`). 카드 결제는
+ * 매출전표가 증빙이라 제외 — 계좌이체/가상계좌 등 현금성 결제만 발급한다.
+ * Toss v1 은 한글 라벨을 돌려주지만, 방어적으로 영문 enum 도 허용한다.
+ */
+const CASH_LIKE_METHODS: ReadonlySet<string> = new Set([
+  '계좌이체',
+  '가상계좌',
+  'TRANSFER',
+  'VIRTUAL_ACCOUNT',
+]);
+
+/** orders.receipt_type('income'|'proof') → Toss cash-receipts `type`. */
+const RECEIPT_TYPE_TO_TOSS = {
+  income: '소득공제',
+  proof: '지출증빙',
+} as const;
+
+/** Toss cash-receipts `orderName` — 대표 상품명 + 나머지 건수 요약. */
+function receiptOrderName(order: OrderWithItems): string {
+  const first = order.items[0]?.snapshot.productName ?? '액자 주문';
+  return order.items.length > 1
+    ? `${first} 외 ${order.items.length - 1}건`
+    : first;
+}
+
+/**
+ * PAID 확정 직후 현금영수증 자동 발급 훅.
+ *
+ * 발급 조건(모두 충족 시에만 Toss 호출):
+ *  - 주문 생성 시 현금영수증 신청(receipt_type + receipt_info 존재). 039
+ *    미적용이면 mapOrder 가 null 로 폴백하므로 자연스럽게 스킵(graceful).
+ *  - 아직 미발급(receipt_url/receipt_issued_at null) — 재확정 멱등성.
+ *  - 결제수단이 현금성(CASH_LIKE_METHODS).
+ *
+ * 성공 시 receipt_url/receipt_issued_at 을 조건부 UPDATE(`receipt_issued_at IS
+ * NULL` 가드 — 동시 발급 경합에서도 최초 기록을 덮어쓰지 않는다). 실패는
+ * 구조화 로그만 남기고 절대 throw 하지 않는다(주문 흐름 무영향).
+ */
+export async function issueCashReceiptIfEligible(
+  order: OrderWithItems,
+  method: string | undefined,
+): Promise<void> {
+  if (!order.receiptType || !order.receiptInfo) return;
+  if (order.receiptUrl || order.receiptIssuedAt) return;
+  if (!method || !CASH_LIKE_METHODS.has(method)) return;
+
+  try {
+    const resp = await tossClient.issueCashReceipt({
+      amount: order.totalPrice,
+      orderId: order.orderNo as string,
+      orderName: receiptOrderName(order),
+      customerIdentityNumber: order.receiptInfo,
+      type: RECEIPT_TYPE_TO_TOSS[order.receiptType],
+    });
+
+    const supabase = getServiceRoleSupabase();
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        receipt_url: resp.receiptUrl ?? null,
+        receipt_issued_at: new Date().toISOString(),
+      })
+      .eq('id', order.id as string)
+      .is('receipt_issued_at', null);
+
+    if (error) {
+      // Toss 발급은 성공했으나 기록 실패 — 은폐하지 않고 수동 보정 근거를 남긴다.
+      console.error(
+        JSON.stringify({
+          event: 'cash_receipt_update_failed',
+          ctx: {
+            orderNo: order.orderNo,
+            receiptType: order.receiptType,
+            message: error.message,
+          },
+        }),
+      );
+      return;
+    }
+
+    console.log(
+      JSON.stringify({
+        event: 'cash_receipt_issued',
+        ctx: {
+          orderNo: order.orderNo,
+          receiptType: order.receiptType,
+          method,
+        },
+      }),
+    );
+  } catch (err) {
+    // 식별번호(receiptInfo)는 민감정보 — 로그에 남기지 않는다.
+    console.error(
+      JSON.stringify({
+        event: 'cash_receipt_issue_failed',
+        ctx: {
+          orderNo: order.orderNo,
+          receiptType: order.receiptType,
+          method,
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }),
+    );
+  }
 }
 
 // ---------- Webhook handler ----------

@@ -21,6 +21,11 @@ import {
   loadEditorDraft,
   saveEditorDraft,
 } from '@/lib/editor/draft';
+import {
+  resolveStudioPreselect,
+  type ResolvedStudioPreselect,
+} from '@/lib/wall/preselect';
+import type { StudioPreselect } from '@/lib/wall/deeplink';
 import { ImageResizeError, resizeImageToMax } from '@/lib/image/resize-client';
 import { asBrand } from '@/types/common';
 import type { PhotoId, ProductId, ProductVariantId, SessionId } from '@/types/common';
@@ -45,6 +50,8 @@ type Props = {
   options: OptionMatrix;
   artworks?: StockPhoto[];
   googlePhotosEnabled?: boolean;
+  /** FS-EC-04: 딥링크 프리셀렉트(size/color/orientation). null/absent = 기존 동작. */
+  preselect?: StudioPreselect | null;
 };
 
 // 사진 소스 탭 타입
@@ -56,6 +63,7 @@ export function StudioClient({
   options,
   artworks = [],
   googlePhotosEnabled = false,
+  preselect = null,
 }: Props) {
   const router = useRouter();
   const init = useEditorStore((s) => s.init);
@@ -89,6 +97,13 @@ export function StudioClient({
   const restoredDraftCount = useEditorStore((s) => s.restoredDraftCount);
   const canvasRef = useRef<FrameCanvasHandle | null>(null);
   const hydratedRef = useRef(false);
+  // P1-001 (ADR-022): when a deep-link preselect is applied we SKIP the draft
+  // restore — but the persist effect below would then fire ~300ms after mount
+  // with an EMPTY tray, and saveEditorDraft clears the stored draft on empty
+  // entries, destroying the very draft we promised to keep. While this ref
+  // holds the injected baseline, persistence is suppressed until the user
+  // actually edits (tray gains an entry / options deviate from the baseline).
+  const preselectBaselineRef = useRef<ResolvedStudioPreselect | null>(null);
   const productId = productDetail.product.id as string;
 
   // Init the store, then (once) rehydrate any saved draft for THIS session+product.
@@ -102,6 +117,33 @@ export function StudioClient({
     });
     if (hydratedRef.current) return;
     hydratedRef.current = true;
+    // FS-EC-04: deep-link preselect (포토월 → 스튜디오) — applied ONCE on the
+    // initial mount, only for codes that exist in the option matrix. Injected
+    // directly as INITIAL option state (not via setSize/setOrientation, whose
+    // semantics clear the tray) — the tray is empty at this point, so there
+    // are no side effects. When applied, we skip the draft restore so the
+    // deep-linked options are not overridden (the saved draft stays intact in
+    // localStorage for a later plain visit). Without preselect params this
+    // block is a no-op and the legacy path below runs unchanged.
+    if (preselect) {
+      const st = useEditorStore.getState();
+      const resolved = resolveStudioPreselect(preselect, options, {
+        selectedOptions: st.selectedOptions,
+        selectedVariantId: st.selectedVariantId,
+        orientation: st.orientation,
+      });
+      if (resolved) {
+        useEditorStore.setState({
+          selectedOptions: resolved.selectedOptions,
+          selectedVariantId: resolved.selectedVariantId,
+          orientation: resolved.orientation,
+        });
+        // Suppress draft persistence until the user actually edits, so the
+        // mount-time empty-tray save cannot delete the saved draft (P1-001).
+        preselectBaselineRef.current = resolved;
+        return;
+      }
+    }
     const draft = loadEditorDraft(sessionId, productId);
     if (draft && draft.entries.length > 0) {
       // restoreDraft sets restoredDraftCount in the store (external store update
@@ -115,12 +157,29 @@ export function StudioClient({
         orientation: draft.orientation,
       });
     }
-  }, [init, productDetail, options, sessionId, productId, restoreDraft]);
+  }, [init, productDetail, options, sessionId, productId, restoreDraft, preselect]);
 
   // Persist the tray + options whenever they change (lightly debounced so rapid
   // qty taps don't thrash localStorage). Empty tray clears the draft.
   useEffect(() => {
     const t = setTimeout(() => {
+      // P1-001 (ADR-022): a deep-link preselect entry skipped the draft
+      // restore. Until the user makes a real edit (tray entry added, or
+      // options/orientation deviate from the injected baseline), skip the
+      // save — persisting the pristine empty tray would delete the existing
+      // draft for this (sessionId, productId). Read fresh store state so the
+      // check is immune to closure staleness across the mount re-render.
+      const baseline = preselectBaselineRef.current;
+      if (baseline) {
+        const s = useEditorStore.getState();
+        const untouched =
+          s.entries.length === 0 &&
+          s.selectedOptions === baseline.selectedOptions &&
+          s.selectedVariantId === baseline.selectedVariantId &&
+          s.orientation === baseline.orientation;
+        if (untouched) return;
+        preselectBaselineRef.current = null; // real edit — resume persistence
+      }
       saveEditorDraft(sessionId, productId, {
         selectedOptions: selected,
         selectedVariantId: variantId,

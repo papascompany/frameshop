@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Card } from '@/components/ui/Card';
@@ -11,29 +12,62 @@ import { Badge } from '@/components/ui/Badge';
 import { PriceTag } from '@/components/PriceTag';
 import { getCart, clearCart, getCartSummary } from '@/lib/cart/client';
 import { takeCheckoutSelection } from '@/lib/cart/selection';
-import { formatPhone, validateCheckoutForm } from '@/lib/checkout/validate';
+import { formatPhone } from '@/lib/checkout/validate';
 import { calculateShippingFee } from '@/lib/shipping/calc';
 import { requestPayment } from '@/lib/payment/client';
 import { asBrand } from '@/types/common';
 import type { OrderNo } from '@/types/common';
 import type { CartItem } from '@/types/cart';
 import type { CheckoutFormData } from '@/types/checkout';
+import type { PointsSummary } from '@/types/points';
 import type {
   ShippingMethod,
   ShippingMethodConfig,
 } from '@/types/shipping';
-import type { Order } from '@/types/order';
+import type { CashReceiptRequest, Order } from '@/types/order';
 import type { UserAddress } from '@/types/address';
 import { envPublic } from '@/lib/env-public';
 import { PostcodeButton } from '@/components/PostcodeButton';
 import { MobileStickyBar } from '@/components/MobileStickyBar';
 import { tossErrorCopy } from '@/lib/payment/error-copy';
+import {
+  clampRedeem,
+  computeCheckoutTotals,
+  computeSurchargeFee,
+} from './checkout-totals';
+import { validateCheckoutSubmit } from './submit-validation';
+
+/**
+ * 서버(page.tsx)가 feature-probe 로 판정한 기능 가용성 (FS-EC-01).
+ * false = 해당 마이그레이션 미적용 → 섹션 자체를 렌더하지 않는다(graceful).
+ */
+export type CheckoutFeatures = {
+  /** 적립금 (migration 031). */
+  points: boolean;
+  /** 현금영수증 (migration 039). */
+  receipt: boolean;
+  /** 제주/도서산간 추가 배송비 (migration 030). */
+  surcharge: boolean;
+};
+
+/** createOrder 응답의 알려진 실패 코드 → 한국어 안내 (FS-EC-01 추가분). */
+const CREATE_ORDER_ERROR_COPY: Record<string, string> = {
+  POINTS_INSUFFICIENT:
+    '적립금 잔액이 부족합니다. 사용 금액을 확인해 주세요.',
+  POINTS_UNAVAILABLE:
+    '지금은 적립금을 사용할 수 없습니다. 적립금 없이 다시 시도해 주세요.',
+  RECEIPT_UNAVAILABLE:
+    '지금은 현금영수증 신청을 처리할 수 없습니다. 신청을 해제하고 다시 시도해 주세요.',
+  SHIPPING_FEE_MISMATCH:
+    '배송비 정보가 변경되었습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.',
+};
 
 type Props = {
   shippingMethods: ShippingMethodConfig[];
+  features: CheckoutFeatures;
 };
 
-export function CheckoutClient({ shippingMethods }: Props) {
+export function CheckoutClient({ shippingMethods, features }: Props) {
   const router = useRouter();
   const t = useTranslations('checkout');
   const [items, setItems] = useState<CartItem[]>([]);
@@ -67,6 +101,12 @@ export function CheckoutClient({ shippingMethods }: Props) {
       memo: '',
     },
     shippingMethod: (shippingMethods[0]?.code ?? 'STANDARD') as ShippingMethod,
+    // FS-EC-01 — 옵셔널 확장 필드의 controlled-input 초깃값.
+    redeemPoints: 0,
+    receiptRequested: false,
+    receiptInfo: '',
+    agreePrivacy: false,
+    agreePurchase: false,
   }));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +142,37 @@ export function CheckoutClient({ shippingMethods }: Props) {
       cancelled = true;
     };
   }, []);
+
+  // 적립금 요약 (FS-EC-01). 주소록과 같은 graceful 패턴: 게스트(401)/미적용
+  // (available:false)/네트워크 오류 → available:false 유지 → 섹션 비노출.
+  const [points, setPoints] = useState<PointsSummary>({
+    balance: 0,
+    available: false,
+  });
+
+  useEffect(() => {
+    if (!features.points) return;
+    let cancelled = false;
+    void fetch('/api/account/points', { credentials: 'same-origin' })
+      .then(async (res) => {
+        if (!res.ok) return null; // 401 (guest) / 500 → 섹션 비노출
+        return (await res.json()) as {
+          ok: boolean;
+          available?: boolean;
+          balance?: number;
+        };
+      })
+      .then((body) => {
+        if (cancelled || !body?.ok || body.available !== true) return;
+        setPoints({ balance: body.balance ?? 0, available: true });
+      })
+      .catch(() => {
+        /* network error → 적립금 없이 진행 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [features.points]);
 
   /** Fill the shipping form from a chosen saved address. Clears
    *  "주문인과 동일" since picking an address overrides the recipient. */
@@ -151,7 +222,22 @@ export function CheckoutClient({ shippingMethods }: Props) {
       return 0;
     }
   }, [form.shippingMethod, summary.subtotal, shippingMethods]);
-  const total = summary.subtotal + shippingFee;
+  // FS-EC-01: 제주/도서산간 추가배송비 — 서버 재계산과 같은 순수 함수 사용.
+  // 030 미적용이면 설정 필드가 0 폴백이라 자동으로 0(양쪽 일치).
+  const surchargeFee = useMemo(
+    () => computeSurchargeFee(form.shipping.zip, activeMethod),
+    [form.shipping.zip, activeMethod],
+  );
+  // 합계(FS-EC-01 §6): 상품합계 + 배송비 + 추가배송비 − 적립금 = 최종 결제액.
+  // redeem 은 파생 계산에서 재-clamp — payable 이 줄어도 effect 불필요.
+  const { payable, redeemApplied, total } = computeCheckoutTotals({
+    subtotal: summary.subtotal,
+    shippingFee,
+    surchargeFee,
+    desiredRedeem: form.redeemPoints ?? 0,
+    points,
+  });
+  const maxRedeem = clampRedeem(points.balance, points.balance, payable);
 
   function setOrderer<K extends keyof CheckoutFormData['orderer']>(k: K, v: CheckoutFormData['orderer'][K]) {
     setForm((f) => {
@@ -200,7 +286,8 @@ export function CheckoutClient({ shippingMethods }: Props) {
   }
 
   async function submit() {
-    const validation = validateCheckoutForm(form);
+    // FROZEN 계약: checkoutFormSchema + checkoutAgreementsSchema 둘 다 통과.
+    const validation = validateCheckoutSubmit(form);
     if (!validation.ok) {
       setErrors(validation.errors);
       setSubmitError('입력 내용을 다시 확인해 주세요.');
@@ -212,6 +299,11 @@ export function CheckoutClient({ shippingMethods }: Props) {
     setSubmitError(null);
     setSubmitting(true);
     try {
+      // FS-EC-01: 신청 시에만 receipt 페이로드 포함(미신청 = 필드 자체 생략).
+      const receipt: CashReceiptRequest | undefined =
+        features.receipt && form.receiptRequested === true && form.receiptType
+          ? { type: form.receiptType, info: form.receiptInfo ?? '' }
+          : undefined;
       const res = await fetch('/api/orders', {
         method: 'POST',
         credentials: 'same-origin',
@@ -228,13 +320,25 @@ export function CheckoutClient({ shippingMethods }: Props) {
             memo: form.shipping.memo,
           },
           shippingMethod: form.shippingMethod,
-          clientShippingFee: shippingFee,
+          // 추가배송비 포함 총 배송비 — 서버가 같은 순수 함수로 재계산·검증.
+          clientShippingFee: shippingFee + surchargeFee,
           sessionId: getGuestSessionId(),
+          // >0 일 때만 포함 — 서버가 잔액/상한을 권위 있게 재검증(031).
+          redeemPoints: redeemApplied > 0 ? redeemApplied : undefined,
+          receipt,
         }),
       });
-      const body = (await res.json()) as { ok: boolean; order?: Order; message?: string };
+      const body = (await res.json()) as {
+        ok: boolean;
+        order?: Order;
+        code?: string;
+        message?: string;
+      };
       if (!body.ok || !body.order) {
-        setSubmitError('주문 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+        setSubmitError(
+          (body.code !== undefined && CREATE_ORDER_ERROR_COPY[body.code]) ||
+            '주문 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+        );
         return;
       }
       // Persist order id for the success page lookup and clear cart.
@@ -453,6 +557,11 @@ export function CheckoutClient({ shippingMethods }: Props) {
               error={errors['shipping.memo']}
               maxLength={200}
             />
+            {features.surcharge && form.shippingMethod === 'STANDARD' ? (
+              <p className="text-xs text-muted-fg">
+                제주/도서산간 지역은 추가 배송비가 부과될 수 있습니다.
+              </p>
+            ) : null}
           </div>
         </Card>
       ) : (
@@ -463,6 +572,126 @@ export function CheckoutClient({ shippingMethods }: Props) {
           </p>
         </Card>
       )}
+
+      {/* FS-EC-01: 적립금 사용 — 031 적용 + 로그인 + 잔액 보유 시에만 노출 */}
+      {features.points && points.available && points.balance > 0 ? (
+        <Card padding="md" data-testid="points-section">
+          <h2 className="font-semibold mb-3">적립금</h2>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-muted-fg">
+              보유 적립금{' '}
+              <span className="text-ink font-medium tabular-nums">
+                {points.balance.toLocaleString('ko-KR')}P
+              </span>
+            </p>
+            <div className="flex gap-2 items-end">
+              <Input
+                label="사용할 적립금"
+                inputMode="numeric"
+                value={String(redeemApplied)}
+                onChange={(e) => {
+                  const n = Number(e.target.value.replace(/\D/g, '') || '0');
+                  setForm((f) => ({
+                    ...f,
+                    redeemPoints: clampRedeem(n, points.balance, payable),
+                  }));
+                }}
+                data-testid="redeem-input"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  setForm((f) => ({ ...f, redeemPoints: maxRedeem }))
+                }
+                disabled={maxRedeem === 0}
+                className="shrink-0 mb-0.5"
+              >
+                전액 사용
+              </Button>
+            </div>
+            <p className="text-xs text-muted-fg">
+              이 주문에 최대 {maxRedeem.toLocaleString('ko-KR')}P 사용 가능
+              (최소 결제 금액 100원)
+            </p>
+          </div>
+        </Card>
+      ) : null}
+
+      {/* FS-EC-01: 현금영수증 신청 — 039 적용 시에만 노출 */}
+      {features.receipt ? (
+        <Card padding="md" data-testid="receipt-section">
+          <h2 className="font-semibold mb-3">현금영수증</h2>
+          <div className="flex flex-col gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.receiptRequested ?? false}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setForm((f) => ({ ...f, receiptRequested: checked }));
+                  if (!checked) {
+                    setErrors((prev) => {
+                      const next = { ...prev };
+                      delete next['receiptType'];
+                      delete next['receiptInfo'];
+                      return next;
+                    });
+                  }
+                }}
+                data-testid="receipt-toggle"
+              />
+              현금영수증 신청
+            </label>
+            {form.receiptRequested ? (
+              <>
+                <Select
+                  label="발급 유형"
+                  placeholder="유형을 선택해주세요"
+                  value={form.receiptType ?? ''}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      receiptType:
+                        e.target.value === 'income' || e.target.value === 'proof'
+                          ? e.target.value
+                          : undefined,
+                    }))
+                  }
+                  options={[
+                    { value: 'income', label: '소득공제용 (개인)' },
+                    { value: 'proof', label: '지출증빙용 (사업자)' },
+                  ]}
+                  error={errors['receiptType']}
+                />
+                <Input
+                  label="식별번호"
+                  inputMode="numeric"
+                  placeholder={
+                    form.receiptType === 'proof'
+                      ? '사업자등록번호 (예: 123-45-67890)'
+                      : '휴대폰번호 (예: 010-1234-5678)'
+                  }
+                  value={form.receiptInfo ?? ''}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      // 숫자·하이픈만 (checkoutFormSchema 규칙과 동일)
+                      receiptInfo: e.target.value
+                        .replace(/[^0-9-]/g, '')
+                        .slice(0, 20),
+                    }))
+                  }
+                  error={errors['receiptInfo']}
+                />
+              </>
+            ) : null}
+            <p className="text-xs text-muted-fg">
+              현금성 결제(계좌이체 등) 시에만 발급됩니다.
+            </p>
+          </div>
+        </Card>
+      ) : null}
 
       </div>{/* 좌측 컬럼 끝 */}
 
@@ -509,11 +738,101 @@ export function CheckoutClient({ shippingMethods }: Props) {
             {shippingFee === 0 ? '0원' : `${shippingFee.toLocaleString('ko-KR')}원`}
           </span>
         </div>
+        {surchargeFee > 0 ? (
+          <div
+            className="flex justify-between text-sm"
+            data-testid="surcharge-row"
+          >
+            <span>제주/도서산간 추가 배송비</span>
+            <span className="tabular-nums">
+              +{surchargeFee.toLocaleString('ko-KR')}원
+            </span>
+          </div>
+        ) : null}
+        {redeemApplied > 0 ? (
+          <div
+            className="flex justify-between text-sm"
+            data-testid="redeem-row"
+          >
+            <span>적립금 사용</span>
+            <span className="tabular-nums text-sale">
+              -{redeemApplied.toLocaleString('ko-KR')}원
+            </span>
+          </div>
+        ) : null}
         <hr className="my-2 border-border" />
         <div className="flex items-center justify-between">
           <span className="font-semibold">{t('totalAmount')}</span>
           <PriceTag amount={total} variant="large" />
         </div>
+      </Card>
+
+      {/* FS-EC-01: 필수 동의 — 미체크 시 submit 검증이 인라인 에러로 차단 */}
+      <Card padding="md" className="flex flex-col gap-2">
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={form.agreePrivacy ?? false}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setForm((f) => ({ ...f, agreePrivacy: checked }));
+              if (checked) {
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next['agreePrivacy'];
+                  return next;
+                });
+              }
+            }}
+            data-testid="agree-privacy"
+          />
+          <span className="flex-1">
+            [필수] 개인정보 수집·이용 동의{' '}
+            <Link
+              href="/privacy"
+              target="_blank"
+              className="underline text-muted-fg hover:text-ink"
+            >
+              보기
+            </Link>
+          </span>
+        </label>
+        {errors['agreePrivacy'] ? (
+          <p className="text-xs text-danger">{errors['agreePrivacy']}</p>
+        ) : null}
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={form.agreePurchase ?? false}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setForm((f) => ({ ...f, agreePurchase: checked }));
+              if (checked) {
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next['agreePurchase'];
+                  return next;
+                });
+              }
+            }}
+            data-testid="agree-purchase"
+          />
+          <span className="flex-1">
+            [필수] 구매조건 확인 및 결제진행 동의{' '}
+            <Link
+              href="/terms"
+              target="_blank"
+              className="underline text-muted-fg hover:text-ink"
+            >
+              보기
+            </Link>
+          </span>
+        </label>
+        {errors['agreePurchase'] ? (
+          <p className="text-xs text-danger">{errors['agreePurchase']}</p>
+        ) : null}
       </Card>
 
       {submitError ? (

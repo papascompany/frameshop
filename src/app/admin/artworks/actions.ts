@@ -78,7 +78,9 @@ export async function upsertArtworkAction(
     const contentType =
       detectedFormat === 'png'  ? 'image/png'  :
       detectedFormat === 'webp' ? 'image/webp' : 'image/jpeg';
-    const path = `artworks/${crypto.randomUUID()}.${ext}`;
+    // Original and thumbnail share one asset id so storage stays traceable.
+    const assetId = crypto.randomUUID();
+    const path = `artworks/${assetId}.${ext}`;
 
     const { error: uploadErr } = await supabase.storage
       .from('marketing')
@@ -92,7 +94,45 @@ export async function upsertArtworkAction(
       .from('marketing')
       .getPublicUrl(path);
     imageUrl = urlData.publicUrl;
-    thumbUrl = urlData.publicUrl; // TODO: generate a resized thumbnail (Phase 2)
+    // Thumbnail generation is best-effort: the original upload above already
+    // succeeded, so any failure here falls back to the full-size URL (the
+    // pre-existing behavior) instead of failing the whole action.
+    thumbUrl = urlData.publicUrl;
+    try {
+      const thumbBuf = await sharp(buf)
+        .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      const thumbPath = `artworks/thumbs/${assetId}.jpg`;
+      const { error: thumbErr } = await supabase.storage
+        .from('marketing')
+        .upload(thumbPath, thumbBuf, {
+          contentType: 'image/jpeg',
+          upsert: false,
+        });
+      if (thumbErr) {
+        console.warn(
+          JSON.stringify({
+            event: 'artwork_thumb_upload_failed',
+            message: thumbErr.message,
+          }),
+        );
+      } else {
+        thumbUrl = supabase.storage
+          .from('marketing')
+          .getPublicUrl(thumbPath).data.publicUrl;
+      }
+    } catch (thumbGenErr) {
+      console.warn(
+        JSON.stringify({
+          event: 'artwork_thumb_generate_failed',
+          message:
+            thumbGenErr instanceof Error
+              ? thumbGenErr.message
+              : String(thumbGenErr),
+        }),
+      );
+    }
     widthPx  = detectedWidth  ?? 1200;
     heightPx = detectedHeight ?? 900;
   }

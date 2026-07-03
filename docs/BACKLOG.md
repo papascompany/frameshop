@@ -1,7 +1,7 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-06-22.
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-07-03 (EC 웨이브 반영).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
@@ -19,14 +19,17 @@
 | `029_orders_order_memo` | 관리자 주문 메모 (Phase A) | 라이브, 컬럼 대기 | `ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_memo text;` |
 | `032_user_addresses` | 주소록 (Phase B-1) | 라이브, 테이블 대기 | 파일 참조 |
 | `033_orders_confirmed_at` | 구매확정 (Phase B-1) | 라이브, 컬럼 대기 | `ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;` |
-| `031_user_points` | 적립금 (B-2에서 wiring) | 미연결 | 파일 참조 |
-| `030_orders_shipping_surcharge` | 제주/도서산간 추가배송비 | 미연결 | 파일 참조 |
+| `031_user_points` | 적립금 earn/redeem + `/account/points` (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
+| `030_orders_shipping_surcharge` | 제주/도서산간 추가배송비 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
 | `034_products_product_type` | 확장형 기반: product_type + cart_projects | 라이브(graceful, 무변화) | 파일 참조 |
 | `035_cart_items_project_link` | 확장형 기반: cart/order 프로젝트 링크 | 라이브(graceful, 무변화) | 파일 참조 |
+| `038_orders_refunded_amount` | 부분환불 누적액 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
+| `039_orders_cash_receipt` | 현금영수증 신청·Toss 발급 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
 
 → **적용 가이드(순서·검증쿼리·롤백)**: `docs/MIGRATIONS-APPLY.md` (CTO 전달용 단일 문서).
-→ **권장**: 029/032/033 먼저 적용(라이브 기능 즉시 활성화). 034/035 는 P1 직전 적용(지금 적용해도 앱 무변화 — ADR-023 graceful).
-→ 적용 후 메모·주소록·구매확정이 런타임에서 동작하는지 검증.
+→ **권장**: 029~033 + 038/039 적용(라이브/EC 기능 활성화). 034/035 는 P1 직전 적용(지금 적용해도 앱 무변화 — ADR-023 graceful).
+→ **029~039 전부 미적용 상태에서도 앱 정상**(graceful probe/conditional-spread, ADR-024) — 적용 시 코드 배포 없이 자동 활성화(probe TTL 60초).
+→ 적용 후 메모·주소록·구매확정·적립금·추가배송비·부분환불·현금영수증이 런타임에서 동작하는지 검증.
 
 ---
 
@@ -75,31 +78,23 @@
 
 ### 기타(저위험)
 - 리뷰 작성 자격이 `DELIVERED`만 확인 → `confirmed_at`(구매확정) 미연동. 설계 선택(현재는 의도).
-- `src/app/admin/artworks/actions.ts` 썸네일 생성 TODO (Phase 2 보류).
+- ✅ `src/app/admin/artworks/actions.ts` 썸네일 생성 TODO — EC 웨이브(FS-EC-06)에서 해소(sharp 썸네일).
 
 ---
 
-## §3. P1 — Phase B-2 (결제·세무 민감, 신규 마이그레이션 필요)
+## §3. ✅ P1 — Phase B-2 완료 (EC 웨이브 2026-07-03, ADR-024)
 
-> B-1(취소·주소록·구매확정)은 완료·라이브. B-2는 결제/세무 민감도가 높아 별도 웨이브로 분리됨.
-> 각 항목 골든/검증 후 단계 배포 권장.
+> B-2 3건 전부 EC 웨이브(브랜치 `feat/ecommerce-basics-photowall`, FS-EC-00~03)에서 구현 완료.
+> 마이그레이션 031/038/039 미적용 상태에서도 앱 정상 — 적용 시 feature-probe 로 자동 활성화(§1).
 
-### B-2-1. 적립금 연결 ⛏️(031)
-- **earn**: 구매확정(`confirmPurchase`) 시 결제액의 X% 적립 (기본 1% 상수, 후속에 admin 설정화).
-- **redeem**: 체크아웃에서 보유 적립금 차감 — `031`의 `apply_points_transaction` RPC(원자/이중지불 차단) 사용.
-- **마이페이지**: 적립금 잔액 + 내역(`/account/points`).
-- **주의**: 적립/차감을 주문 합계·결제 검증과 정합. 적립은 구매확정 게이트(`confirmed_at`)와 연동.
-
-### B-2-2. 부분환불 ⛏️(신규 컬럼)
-- 신규 마이그레이션: `orders.refunded_amount numeric NOT NULL DEFAULT 0`.
-- admin `refundOrderAction`에 금액 파라미터 + `tossClient.cancel({ paymentKey, cancelAmount })`.
-- 누적 환불액 추적 + 전액환불 시 REFUNDED 전이. admin 상세 UI에 부분환불 입력.
-
-### B-2-3. 현금영수증 ⛏️(신규 컬럼 + Toss API)
-- 신규 마이그레이션: `orders.receipt_type text`(소득공제/지출증빙/미발급), `orders.receipt_info text`(식별번호).
-- 체크아웃에서 발급 요청 캡처 → 주문 저장 → admin 가시성.
-- Toss `cash-receipts` API 발급(결제수단이 현금성일 때만 유효; 카드는 N/A) — 발급 훅 + 실패 graceful.
-- **세무/사업자 설정 의존** → 자동발급 범위는 CTO 확인 후 결정.
+- ✅ **B-2-1 적립금(031)**: earn = 구매확정(`confirmPurchase`) 시 1% 멱등(`POINTS_EARN_RATE_BPS=100`),
+  redeem = 체크아웃 차감(fail-closed + 보상 트랜잭션, redeem 후 최소 결제 100원), `/account/points` +
+  `/api/account/points`. **적립 회수 = 전액 환불·취소 시 자동**(`reversePointsForOrder`, 멱등 —
+  ADR-024 Postscript). 부분환불(누적<전액)은 무조정(§5 잔여).
+- ✅ **B-2-2 부분환불(038)**: Toss `cancelAmount` + `refunded_amount` 누적 + 낙관 잠금. 누적==total 시
+  REFUNDED 전이(IN_PRODUCTION/SHIPPED 등 전이 불가 상태면 상태 유지 + 경고 로그).
+- ✅ **B-2-3 현금영수증(039)**: 체크아웃 신청 캡처(income=소득공제/proof=지출증빙) → 주문 스냅샷 →
+  Toss 발급 훅(**현금성 결제만**, 카드 N/A).
 
 ---
 
@@ -115,13 +110,26 @@
 
 ## §5. P2 — Phase C (성장·부가, 주문관리 갭분석)
 
-- 매출·주문 **통계 대시보드** (admin)
-- **쿠폰/할인** (coupons 테이블 + 체크아웃 적용)
-- **1:1 문의 / 주문 Q&A** (inquiries 테이블 + admin 답변)
-- **위시리스트** (찜)
+완료(EC 웨이브 2026-07-03):
+- ✅ 매출·주문 **통계 대시보드** (admin) — FS-EC-06: 매출 요약·상태별·인기 상품·최근 주문(+artworks 썸네일 sharp)
+- ✅ **제주·도서산간 추가배송비** (030 wiring) — FS-EC-01/02: 체크아웃 표시 + `createOrder` 서버 재계산
+- ✅ **적립 회수 자동화(전액 경로)** — 리뷰 후속 격상(ADR-024 Postscript): 전액 환불·취소 시
+  `reversePointsForOrder` 자동 회수(사용분 복원 ADJUSTMENT+ / 적립분 회수 REFUND−, `(order_id,type)` 멱등,
+  fire-and-forget, 031 미적용 skip)
+
+남은 항목:
+- **쿠폰/할인** (coupons 테이블 + 체크아웃 적용) — CTO 결정으로 다음 세션
+- **1:1 문의 / 주문 Q&A** (inquiries 테이블 + admin 답변) — CTO 결정으로 다음 세션
+- **위시리스트** (찜) — CTO 결정으로 다음 세션
+- **SMS/카카오 알림톡** (현재 알림은 이메일 only)
 - **회원정보 관리** (수정/비밀번호 변경/회원탈퇴) — 고객 멤버십 성숙
-- **제주·도서산간 추가배송비** ⛏️(030 wiring)
-- **정산** 요약, **SMS/카카오 알림톡** (현재 알림은 이메일 only)
+- **배송 추적 API** 연동 (현재 운송장 번호 기록만)
+- **부분환불 적립 비례 조정** — 부분환불(누적<전액)은 현재 적립 무조정(문서화된 한계, ADR-024
+  Postscript). 비례 조정 정책 미정 — CTO 결정 필요
+- **REDEMPTION 원장 order_id 사후 링크**
+- **통계 규칙 보완** — 전액환불(REFUNDED 전이)은 `refunded_amount` 에 기록되지 않음 → 매출 통계에서
+  부분환불/전액환불 집계 규칙 정리 필요
+- **정산** 요약
 
 ---
 
@@ -146,9 +154,20 @@
 
 ---
 
-## §7. 완료(참고) — 이번 세션 성과
+## §7. 완료(참고)
 
-가로/세로 방향 선택(#47), 인쇄 파이프라인 photo-only 재작성(#48), 보안 감사 Phase 0(#49)·
+**EC 웨이브 (2026-07-03, 브랜치 `feat/ecommerce-basics-photowall`, ADR-024):** FS-EC-00~06 7단위 —
+기반(038/039 마이그+타입 계약+feature-probe+surcharge 순수모듈), 체크아웃(필수 동의 2종·적립금 사용·
+현금영수증 신청·추가배송비 표시·`/account/points`), 주문 서버 코어(redeem fail-closed·surcharge 서버
+재계산·receipt 저장·1% earn 멱등), 관리자 주문/결제(부분환불·현금영수증 Toss 발급 훅·주문 ZIP),
+**포토월 `/wall`**(mm 실측 Konva 벽 시뮬레이터 + 스튜디오 딥링크 프리셀렉트 + localStorage v1),
+법적고지(`/terms` `/privacy` + `company.ts` SSOT + 404 + JSON-LD 테스트), admin 통계 대시보드 +
+artworks 썸네일. 적대 리뷰(Security+Final)가 P0 1건(/api/orders 브리지 공백) 적발 → 수정 랜딩 +
+적립 회수 자동화 격상(ADR-024 Postscript). 최종 검증: tsc 0 · eslint 0 · vitest 451 passed | 14 todo · build OK.
+포토월은 CTO 결정대로 자체 주문 플로우 없이 스튜디오 딥링크로 연결 — 확장형 P1 편집기(§1A)와
+독립이며 그 선행 조건이 아니다(P1 편집기는 §1A 트랙으로 별도 진행).
+
+**이전 세션:** 가로/세로 방향 선택(#47), 인쇄 파이프라인 photo-only 재작성(#48), 보안 감사 Phase 0(#49)·
 분산 레이트리밋 Phase 1 코드(#50), 리전 동일화(#51), 주문관리 **Phase A**(검색·엑셀·메모·운송장일괄·
-알림, #52), **Phase B-1**(고객취소·주소록·구매확정, #53), 전수감사 보완 3건(#56). 전부 라이브.
-타입·린트·빌드·219 테스트 GREEN.
+알림, #52), **Phase B-1**(고객취소·주소록·구매확정, #53), 전수감사 보완 3건(#56), 확장형 P0 기반(#58).
+전부 라이브.

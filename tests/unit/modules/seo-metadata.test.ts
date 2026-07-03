@@ -16,6 +16,7 @@ import {
   buildCatalogMeta,
   SITE_URL,
 } from '@/lib/seo/metadata';
+import { safeJsonLd } from '@/lib/seo/safe-json-ld';
 
 // ── 1. buildOrganizationJsonLd ───────────────────────────────────────────────
 
@@ -104,6 +105,50 @@ describe('buildProductJsonLd', () => {
   it('falls back to DEFAULT_OG_IMAGE when no imageUrl', () => {
     const result = buildProductJsonLd({ ...BASE, imageUrl: null });
     expect(result.image).toContain('opengraph-image');
+  });
+});
+
+// ── 3-b. JSON-LD serialization round-trip (FS-EC-05) ─────────────────────────
+//
+// The <script type="application/ld+json"> payload on /product/[id] is
+// `safeJsonLd(buildProductJsonLd(...))`. Verify the serialized output is
+// valid JSON and survives a parse round-trip, including XSS-escape cases.
+
+describe('safeJsonLd(buildProductJsonLd) — serialization round-trip', () => {
+  const BASE = {
+    id: 'prod-1',
+    name: '베이직 액자',
+    description: '인기 액자',
+    imageUrl: 'https://example.com/image.jpg',
+    lowPrice: 4800,
+    highPrice: 39000,
+  };
+
+  it('produces valid JSON that parses back to the builder output', () => {
+    const jsonLd = buildProductJsonLd(BASE);
+    const serialized = safeJsonLd(jsonLd);
+    const parsed: unknown = JSON.parse(serialized);
+    expect(parsed).toEqual(jsonLd);
+  });
+
+  it('parsed output keeps Product/Offer essentials (KRW, availability)', () => {
+    const parsed = JSON.parse(safeJsonLd(buildProductJsonLd(BASE))) as ReturnType<
+      typeof buildProductJsonLd
+    >;
+    expect(parsed['@type']).toBe('Product');
+    expect(parsed.offers.priceCurrency).toBe('KRW');
+    expect(parsed.offers.lowPrice).toBe('4800');
+    expect(parsed.offers.availability).toBe('https://schema.org/InStock');
+  });
+
+  it('escapes </script> sequences yet round-trips the original text', () => {
+    const malicious = { ...BASE, description: '</script><script>alert(1)' };
+    const serialized = safeJsonLd(buildProductJsonLd(malicious));
+    // No raw angle brackets may survive — they would break out of the tag.
+    expect(serialized).not.toContain('<');
+    expect(serialized).not.toContain('>');
+    const parsed = JSON.parse(serialized) as { description: string };
+    expect(parsed.description).toBe('</script><script>alert(1)');
   });
 });
 

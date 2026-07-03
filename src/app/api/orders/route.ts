@@ -95,6 +95,12 @@ export async function POST(request: Request): Promise<Response> {
     // P0-03: Forward sessionId for anonymous photo-ownership verification.
     // Prefer the HttpOnly cookie value (tamper-proof) over the body value.
     sessionId,
+    // FS-EC P0-001: forward the reward-points redeem and cash-receipt request.
+    // Dropping these here made the server charge the FULL amount while the
+    // checkout UI displayed the redeemed total (표시≠청구) and silently ignored
+    // receipt requests. createOrder re-validates both server-side.
+    redeemPoints: parsed.data.redeemPoints,
+    receipt: parsed.data.receipt ?? null,
   };
 
   try {
@@ -108,6 +114,11 @@ export async function POST(request: Request): Promise<Response> {
         : err.code === 'SHIPPING_FEE_MISMATCH' ? 422
         : err.code === 'PRICE_MISMATCH' ? 422
         : err.code === 'PHOTO_OWNERSHIP' ? 403
+        // FS-EC P2-003: user-correctable failures, not server errors — a 500
+        // here would pollute Sentry and hide the real cause from the client.
+        : err.code === 'POINTS_UNAVAILABLE' ? 422
+        : err.code === 'POINTS_INSUFFICIENT' ? 422
+        : err.code === 'RECEIPT_UNAVAILABLE' ? 422
         : 500;
       return NextResponse.json(
         { ok: false, code: err.code, message: err.message },

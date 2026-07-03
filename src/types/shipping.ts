@@ -29,6 +29,13 @@ export type ShippingMethodConfig = {
   note: string | null;
   isActive: boolean;
   sortOrder: number;
+  /**
+   * 제주 추가 배송비(KRW, migration 030). STANDARD 에만 의미 있고 PICKUP/QUICK 은 0.
+   * FS-EC-00 옵셔널 추가(FROZEN 무파손) — mapShippingMethod 가 030 미적용 시 0 폴백.
+   */
+  surchargeFeeJeju?: number;
+  /** 도서산간 추가 배송비(KRW, migration 030). STANDARD 전용. → 0 폴백. */
+  surchargeFeeRemote?: number;
   createdAt: IsoTimestamp;
   updatedAt: IsoTimestamp;
 };
@@ -83,12 +90,24 @@ export const shippingMethodInputSchema = z
     note: z.string().max(500).nullable(),
     isActive: z.boolean(),
     sortOrder: z.number().int().nonnegative(),
+    /** FS-EC-00 옵셔널 추가(030). 미지정 = 0 유지(기존 폼 무파손). */
+    surchargeFeeJeju: z.number().int().nonnegative().optional(),
+    surchargeFeeRemote: z.number().int().nonnegative().optional(),
   })
   .refine(
     (val) => val.code === 'STANDARD' || val.freeThreshold === null,
     {
       message: 'freeThreshold is only valid on STANDARD',
       path: ['freeThreshold'],
+    },
+  )
+  .refine(
+    (val) =>
+      val.code === 'STANDARD' ||
+      ((val.surchargeFeeJeju ?? 0) === 0 && (val.surchargeFeeRemote ?? 0) === 0),
+    {
+      message: 'surcharge fees are only valid on STANDARD',
+      path: ['surchargeFeeJeju'],
     },
   );
 
