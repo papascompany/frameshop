@@ -4,6 +4,7 @@ import { getProductDetail, getProductOptions } from '@/lib/db/product';
 import { getActiveStockPhotos } from '@/lib/db/stock-photos';
 import { getSetting } from '@/lib/db/settings';
 import { getServerSupabase } from '@/lib/supabase/server';
+import { parseStudioPreselect } from '@/lib/wall/deeplink';
 import { asBrand } from '@/types/common';
 import type { ProductId } from '@/types/common';
 import { StudioClient } from './StudioClient';
@@ -15,10 +16,18 @@ export default async function StudioPage({
   searchParams,
 }: {
   params: Promise<{ orderId: string }>;
-  searchParams: Promise<{ productId?: string }>;
+  searchParams: Promise<{
+    productId?: string;
+    size?: string;
+    color?: string;
+    orientation?: string;
+  }>;
 }) {
   const { orderId } = await params;
-  const { productId } = await searchParams;
+  const { productId, size, color, orientation } = await searchParams;
+  // FS-EC-04: optional deep-link preselect (포토월 → 스튜디오). null when the
+  // params are absent → StudioClient behaves exactly as before.
+  const preselect = parseStudioPreselect({ size, color, orientation });
 
   // Resolve the effective sessionId:
   //   - For authenticated users: use the Supabase user ID (set upstream).
@@ -74,6 +83,7 @@ export default async function StudioPage({
       options={options}
       artworks={artworks}
       googlePhotosEnabled={googlePhotosEnabled}
+      preselect={preselect}
     />
   );
 }

@@ -1,6 +1,16 @@
 import Link from 'next/link';
 import { cn } from '@/lib/cn';
 import { adminTileItems, type AdminNavKey } from '@/lib/admin/adminNav';
+import {
+  getAdminDashboardStats,
+  type PeriodStats,
+  type RecentOrderSummary,
+  type TopProduct,
+} from '@/lib/db/admin-stats';
+import { ORDER_STATUSES, type OrderStatus } from '@/types/order';
+
+// 매 요청 시점 집계 — 통계는 캐시하지 않는다(다른 admin 페이지와 동일 패턴).
+export const dynamic = 'force-dynamic';
 
 const IconBox = () => (
   <svg viewBox="0 0 20 20" fill="currentColor" width="24" height="24" aria-hidden>
@@ -65,7 +75,157 @@ function formatDate() {
   });
 }
 
-export default function AdminHomePage() {
+// ---------- 통계 표시 유틸 ----------
+
+// 대시보드 전용 표시 메타. AdminOrdersClient 의 배지 맵과 시각적으로 맞추되,
+// 'use client' 모듈에서 상수를 가져오면 서버 컴포넌트 경계가 깨지므로 재선언.
+const STATUS_META: Record<OrderStatus, { label: string; barClass: string; textClass: string }> = {
+  CREATED:       { label: '주문접수', barClass: 'bg-stone',    textClass: 'text-mute' },
+  PAID:          { label: '결제완료', barClass: 'bg-info',     textClass: 'text-info' },
+  IN_PRODUCTION: { label: '제작중',   barClass: 'bg-warning',  textClass: 'text-warning' },
+  SHIPPED:       { label: '배송중',   barClass: 'bg-charcoal', textClass: 'text-charcoal' },
+  DELIVERED:     { label: '배송완료', barClass: 'bg-success',  textClass: 'text-success' },
+  CANCELLED:     { label: '취소',     barClass: 'bg-sale',     textClass: 'text-sale' },
+  REFUNDED:      { label: '환불',     barClass: 'bg-sale',     textClass: 'text-sale' },
+};
+
+function formatKRW(amount: number): string {
+  return `${amount.toLocaleString('ko-KR')}원`;
+}
+
+function formatDateTimeKST(iso: string): string {
+  return new Date(iso).toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function SectionUnavailable() {
+  return (
+    <div className="border border-hairline bg-canvas p-4">
+      <p className="text-sm text-mute">집계 불가 — 잠시 후 새로고침해 주세요.</p>
+    </div>
+  );
+}
+
+function SalesCard({ title, stats }: { title: string; stats: PeriodStats }) {
+  return (
+    <div className="border border-hairline bg-canvas p-4 md:p-5">
+      <p className="text-xs font-semibold uppercase tracking-wider text-stone">{title}</p>
+      <p className="mt-2 text-xl md:text-2xl font-bold text-ink tabular-nums">
+        {formatKRW(stats.revenue)}
+      </p>
+      <p className="mt-0.5 text-xs text-mute tabular-nums">주문 {stats.orderCount}건</p>
+    </div>
+  );
+}
+
+function StatusCountBars({ counts }: { counts: Record<OrderStatus, number> }) {
+  const max = Math.max(1, ...ORDER_STATUSES.map((s) => counts[s]));
+  return (
+    <div className="border border-hairline bg-canvas p-4 md:p-5 space-y-2.5">
+      {ORDER_STATUSES.map((status) => {
+        const meta = STATUS_META[status];
+        const count = counts[status];
+        return (
+          <div key={status} className="flex items-center gap-3">
+            <span className="w-16 shrink-0 text-xs text-mute">{meta.label}</span>
+            <div className="flex-1 h-2 bg-soft-cloud">
+              <div
+                className={cn('h-full', meta.barClass)}
+                style={{ width: `${Math.round((count / max) * 100)}%` }}
+              />
+            </div>
+            <span className={cn('w-10 shrink-0 text-right text-xs font-medium tabular-nums', meta.textClass)}>
+              {count}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TopProductsList({ products }: { products: TopProduct[] }) {
+  if (products.length === 0) {
+    return (
+      <div className="border border-hairline bg-canvas p-4">
+        <p className="text-sm text-mute">최근 30일 판매 데이터가 없습니다.</p>
+      </div>
+    );
+  }
+  const max = Math.max(1, ...products.map((p) => p.quantity));
+  return (
+    <ol className="border border-hairline bg-canvas p-4 md:p-5 space-y-3">
+      {products.map((p, i) => (
+        <li key={p.productName} className="space-y-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-sm text-ink truncate">
+              <span className="font-semibold tabular-nums mr-1.5">{i + 1}.</span>
+              {p.productName}
+            </p>
+            <p className="shrink-0 text-xs text-mute tabular-nums">
+              {p.quantity}개 · {formatKRW(p.revenue)}
+            </p>
+          </div>
+          <div className="h-1.5 bg-soft-cloud">
+            <div
+              className="h-full bg-ink"
+              style={{ width: `${Math.round((p.quantity / max) * 100)}%` }}
+            />
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function RecentOrdersTable({ orders }: { orders: RecentOrderSummary[] }) {
+  if (orders.length === 0) {
+    return (
+      <div className="border border-hairline bg-canvas p-4">
+        <p className="text-sm text-mute">주문이 없습니다.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="border border-hairline bg-canvas divide-y divide-hairline-soft">
+      {orders.map((order) => {
+        const meta = STATUS_META[order.status];
+        return (
+          <Link
+            key={order.id}
+            href={`/admin/orders/${order.id}`}
+            className="flex items-center gap-3 px-4 py-2.5 hover:bg-soft-cloud transition-colors"
+          >
+            <span className="text-xs font-medium text-ink tabular-nums shrink-0">
+              {order.orderNo}
+            </span>
+            <span className="flex-1 truncate text-xs text-mute">
+              {order.ordererName}
+            </span>
+            <span className={cn('text-xs font-medium shrink-0', meta.textClass)}>
+              {meta.label}
+            </span>
+            <span className="text-xs text-ink tabular-nums shrink-0 w-20 text-right">
+              {formatKRW(order.totalPrice)}
+            </span>
+            <span className="hidden md:inline text-xs text-stone tabular-nums shrink-0">
+              {formatDateTimeKST(order.createdAt)}
+            </span>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export default async function AdminHomePage() {
+  const stats = await getAdminDashboardStats();
+
   return (
     <div className="space-y-6">
       {/* Greeting */}
@@ -74,6 +234,65 @@ export default function AdminHomePage() {
           안녕하세요, 관리자님
         </h2>
         <p className="text-sm text-mute">{formatDate()}</p>
+      </div>
+
+      {/* 매출 요약 — 유효 매출(PAID/제작/배송 계열), 부분환불 미반영(ADR-023) */}
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-stone mb-3">
+          매출 요약 <span className="normal-case font-normal">(KST 기준 · 취소/환불 제외)</span>
+        </h3>
+        {stats.sales ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <SalesCard title="오늘" stats={stats.sales.today} />
+            <SalesCard title="최근 7일" stats={stats.sales.last7Days} />
+            <SalesCard title="최근 30일" stats={stats.sales.last30Days} />
+          </div>
+        ) : (
+          <SectionUnavailable />
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* 상태별 주문 현황 (전체 기간) */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-stone mb-3">
+            상태별 주문 현황
+          </h3>
+          {stats.statusCounts ? (
+            <StatusCountBars counts={stats.statusCounts} />
+          ) : (
+            <SectionUnavailable />
+          )}
+        </div>
+
+        {/* 인기 상품 TOP 5 (최근 30일, 유효 주문 기준) */}
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-stone mb-3">
+            인기 상품 TOP 5 <span className="normal-case font-normal">(최근 30일)</span>
+          </h3>
+          {stats.topProducts ? (
+            <TopProductsList products={stats.topProducts} />
+          ) : (
+            <SectionUnavailable />
+          )}
+        </div>
+      </div>
+
+      {/* 최근 주문 10건 */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-stone">
+            최근 주문
+          </h3>
+          <Link href="/admin/orders" className="text-xs text-mute hover:text-ink transition-colors">
+            전체 보기
+          </Link>
+        </div>
+        {stats.recentOrders ? (
+          <RecentOrdersTable orders={stats.recentOrders} />
+        ) : (
+          <SectionUnavailable />
+        )}
       </div>
 
       {/* Quick Nav Grid */}

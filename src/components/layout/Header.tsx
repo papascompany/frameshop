@@ -53,6 +53,9 @@ export async function Header() {
           <Link href="/catalog/landscape" className="nav-link" prefetch={true}>
             {t('landscape')}
           </Link>
+          <Link href="/wall" className="nav-link" prefetch={true}>
+            {t('wall')}
+          </Link>
           <Link href="/#how-it-works" className="nav-link" prefetch={true}>
             {t('howItWorks')}
           </Link>

@@ -43,6 +43,22 @@ export type TossConfirmResponse = {
   };
 };
 
+/** Toss 현금영수증 발급 유형 (POST /v1/cash-receipts `type`). */
+export type TossCashReceiptType = '소득공제' | '지출증빙';
+
+export type TossCashReceiptResponse = {
+  receiptKey?: string;
+  orderId?: string;
+  orderName?: string;
+  type?: string;
+  issueStatus?: string;
+  receiptUrl?: string;
+  failure?: {
+    code: string;
+    message: string;
+  };
+};
+
 export class TossApiError extends Error {
   public readonly code: string;
   public readonly httpStatus: number;
@@ -116,11 +132,33 @@ export const tossClient = {
   async cancel(input: {
     paymentKey: PaymentKey;
     cancelReason: string;
+    /** 부분취소 금액(KRW). 생략 = 잔액 전액 취소 (Toss 스펙 — 기존 호출 불변). */
+    cancelAmount?: number;
   }): Promise<TossConfirmResponse> {
     return call<TossConfirmResponse>(
       `/payments/${encodeURIComponent(input.paymentKey)}/cancel`,
-      { cancelReason: input.cancelReason },
+      {
+        cancelReason: input.cancelReason,
+        // Conditional spread: 필드를 아예 생략해야 Toss 가 전액 취소로 해석한다.
+        ...(input.cancelAmount !== undefined
+          ? { cancelAmount: input.cancelAmount }
+          : {}),
+      },
     );
+  },
+
+  /**
+   * 현금영수증 발급 (POST /v1/cash-receipts). 현금성 결제(계좌이체/가상계좌)
+   * 전용 — 카드 결제는 매출전표가 증빙이므로 발급 대상이 아니다.
+   */
+  async issueCashReceipt(input: {
+    amount: number;
+    orderId: string;
+    orderName: string;
+    customerIdentityNumber: string;
+    type: TossCashReceiptType;
+  }): Promise<TossCashReceiptResponse> {
+    return call<TossCashReceiptResponse>('/cash-receipts', input);
   },
 
   /** GET wrapper. */

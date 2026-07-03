@@ -4,8 +4,20 @@
 
 **Project:** FrameShop
 **Started:** 2026-05-12
-**Current Phase:** Phase 5 완료 — PR #17 비회원 주문 + PR #18 i18n(ko/en) main 머지 (2026-05-14)
-**Worktree:** `.claude/worktrees/trusting-heisenberg-6e59ec` (branch: `claude/trusting-heisenberg-6e59ec`)
+**Current Phase:** 이커머스 기본 완성 웨이브(EC) — 구현 7단위 완료·검증 GREEN, Merge Gate/PR/배포 대기 (2026-07-03)
+**Branch:** `feat/ecommerce-basics-photowall` (base: main@e108550 — 확장형 P0 배포 완료)
+
+## EC 웨이브 (2026-07-03, 오케스트레이션 하네스 집행)
+- 정찰: 5차원 병렬(주문플로우/관리자/백로그/포토월/실판매) 갭 82건 + P0 적대검증 — Review Gate 승인(CTO): A+B+C+D 전부, 재고 차감 제외, 포토월=스튜디오 딥링크, 쿠폰/문의/위시리스트 다음 세션.
+- 컨텍스트 패키지: `shared/context/FS-EC-00~06.md`
+- [x] FS-EC-00 Foundation(architect): 038/039 마이그 + 타입 계약 + feature-probe + surcharge 순수모듈
+- [x] 배치 1 (병렬 3): FS-EC-01 체크아웃 FE(필수 동의 2종·적립금 사용·현금영수증 신청·추가배송비 표시·`/account/points`·`/api/account/points`) · FS-EC-02 주문 서버 코어(redeem fail-closed+보상 트랜잭션·surcharge 서버 재계산·receipt 저장·conditional-spread INSERT / confirmPurchase 1% earn 멱등) · FS-EC-03 관리자 주문/결제(부분환불 Toss cancelAmount+refunded_amount 누적+낙관 잠금·현금영수증 Toss 발급 훅(현금성 결제만)·주문 ZIP(jszip))
+- [x] 배치 2 (병렬 3): FS-EC-04 포토월 /wall(mm 실측 Konva 벽 시뮬레이터+스튜디오 딥링크 프리셀렉트+localStorage v1) · FS-EC-05 법적고지/SEO(/terms /privacy+company.ts SSOT+404+JSON-LD 테스트) · FS-EC-06 관리자 통계 대시보드+artworks 썸네일 sharp
+- [x] Verification Gate — **tsc 0 · eslint(src,tests,--max-warnings=0) 0 · vitest 413 passed(베이스라인 239, +174) · next build exit 0.** 로컬 QA: /terms /privacy 404 콘텐츠 서버 HTML 확증, /wall graceful 빈 상태(로컬 env 없음). 데이터 화면은 배포 후 프로덕션 스모크 예정.
+- [x] Security/Final 적대 리뷰(`shared/audit/FS-EC-security.md`·`FS-EC-final.md`) — **verdict NO-GO(P0 1건: /api/orders 가 redeemPoints/receipt 미전달 브리지 공백) → 수정 랜딩 완료**(필드 전달+422 매핑+seam 통합 테스트). 동반 수정: 적립 회수 자동화 격상(전액 환불·취소 시 reversePointsForOrder 멱등 자동 회수 — 부분환불은 무조정, ADR-024 Postscript)·딥링크 시 편집 드래프트 보존·receipt_info PII 마스킹·ZIP fetch origin 제한·식별번호 최소 8자리. **보정 후 최종: vitest 451 passed | 14 todo(직접 실행 확인 — 관리자취소 회수 +4 포함).**
+- [x] Docs — ADR-024(B-2 정책+graceful feature-probe 패턴)+Postscript(리뷰 P0·자동 회수 격상), `docs/MIGRATIONS-APPLY.md` 038/039 반영, `docs/BACKLOG.md` §3 B-2 완료·§5 정리, `shared/HANDOFF.md` EC 핸드오프
+- [ ] Merge Gate → PR/배포 → 프로덕션 스모크(데이터 화면)
+- 마이그레이션 참고: **029~039 전부 미적용 상태에서도 앱 정상**(graceful probe/conditional-spread) — 적용 시 자동 활성화. CTO 적용 가이드 = `docs/MIGRATIONS-APPLY.md`.
 
 ---
 
@@ -199,3 +211,6 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 - 2026-06-22: [x] 전체 코드베이스 전수감사(5차원 오케스트레이션+adversarial) → 진짜 결함 3건 수정(#56): 결제 폴백렌더·webhook 로그·체크아웃 중복제출 가드. 오탐 3건 기각. tsc/lint/build/219테스트 GREEN. 라이브.
 - 2026-06-22: [x] 배포 정상화 — git author를 PapasCompany로 설정해 Hobby 비공개레포 배포 차단(storigehub) 완화. #56이 머지만으로 자동 Ready 배포됨(`0c81c01`).
 - 2026-06-22: [📋] **남은/예정 작업은 `docs/BACKLOG.md`(SSOT)로 정리.** 미적용 마이그레이션 029/030/031/032/033 = `shared/BLOCKERS.md BL-010`. 다음: 재주문 수정 / Phase B-2(적립금·부분환불·현금영수증) / 보안 Phase 1-2 / Phase C.
+- 2026-07-03: [x] Backend: FS-EC-06 admin 대시보드 + 명화 썸네일 완료 — `src/lib/db/admin-stats.ts` 신규(server-only, 명시 컬럼, KST 자정 경계, 유효 매출=PAID/IN_PRODUCTION/SHIPPED/DELIVERED, refunded_amount 미SELECT=부분환불 미반영 ADR-023, 섹션별 graceful null), admin 홈에 매출 요약/상태별 CSS 바/인기 상품 TOP5(variant_snapshot 앱 집계)/최근 주문 10건 추가(빠른이동 타일 유지), artworks 썸네일 sharp 512px inside q80 → `artworks/thumbs/` 업로드(실패 시 원본 URL 폴백). tsc 0 / eslint 0 / vitest 365 passed(신규 9). 커밋 없음(핸드오프).
+- 2026-07-03: [x] **EC 웨이브 구현 7단위(FS-EC-00~06) 완료 + 문서 정합** — 검증: tsc 0 · eslint(src,tests,--max-warnings=0) 0 · vitest 413 passed(베이스라인 239, +174) · next build exit 0. 정책·패턴은 ADR-024(재고 차감 제외, 포토월=스튜디오 딥링크, 적립 1%+최소결제 100원, 적립 회수 수동 ADJUSTMENT, 부분환불 누적==total 시 REFUNDED 전이(전이 불가 상태는 유지+경고 로그), 현금영수증 income/proof·현금성 결제만, graceful feature-probe+conditional-spread). 문서: MIGRATIONS-APPLY(038/039)·BACKLOG(§1/§2/§3/§5/§7)·HANDOFF 갱신. 다음: Merge Gate → PR/배포 → 프로덕션 스모크 + CTO 마이그 적용.
+- 2026-07-03: [x] **EC 웨이브 적대 리뷰(Security+Final) → P0 수정 랜딩 + 문서 보정** — verdict NO-GO(P0 1건: /api/orders route가 redeemPoints/receipt를 createOrder로 미전달) → 수정 완료(필드 전달+POINTS_*/RECEIPT_* 422 매핑+라우트 seam 통합 테스트). 동반: 적립 회수 자동화 격상(전액 환불·취소 시 reversePointsForOrder — 사용분 ADJUSTMENT+/적립분 REFUND−, (order_id,type) 멱등, fire-and-forget, 031 미적용 skip; 부분환불 무조정=문서화된 한계), 딥링크 진입 시 편집 드래프트 보존(ADR-022 정합), receipt_info PII 서버측 마스킹, ZIP fetch Supabase origin 제한, 현금영수증 식별번호 최소 숫자 8자리. **최종 vitest 451 passed | 14 todo(직접 실행 확인 — 관리자취소 회수 +4 포함).** 문서 보정: ADR-024 Postscript·BACKLOG §3/§5/§7·HANDOFF EC 절.

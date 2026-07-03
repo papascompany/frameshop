@@ -1,9 +1,12 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Container } from './Container';
+import { COMPANY } from '@/lib/legal/company';
 
 /**
- * Site footer — (주)파파스컴퍼니 사업자 정보 + 카탈로그·주문 링크.
+ * Site footer — 사업자 정보 + 카탈로그·주문·법적 고지 링크.
+ *
+ * 사업자 실값은 src/lib/legal/company.ts(SSOT)만 참조한다 (FS-EC-05).
  */
 export function Footer() {
   return (
@@ -58,9 +61,14 @@ export function Footer() {
           <div className="flex flex-col gap-3">
             <p className="body-strong text-ink">고객센터</p>
             <ul className="flex flex-col gap-2 caption-md text-mute">
-              <li>대표전화: <a href="tel:0222735131" className="hover:text-ink transition-colors">02-2273-5131</a></li>
-              <li>평일 10:00 – 18:00</li>
-              <li>카카오 채널: @frameshop</li>
+              <li>
+                대표전화:{' '}
+                <a href={COMPANY.phoneHref} className="hover:text-ink transition-colors">
+                  {COMPANY.phone}
+                </a>
+              </li>
+              <li>{COMPANY.businessHours}</li>
+              <li>카카오 채널: {COMPANY.kakaoChannel}</li>
             </ul>
           </div>
         </div>
@@ -84,25 +92,25 @@ export function Footer() {
           {/* 텍스트 정보 */}
           <div className="utility-xs text-mute leading-relaxed space-y-1">
             <p>
-              (주)파파스컴퍼니&nbsp;&nbsp;|&nbsp;&nbsp;대표자: 조요한&nbsp;&nbsp;|&nbsp;&nbsp;사업자등록번호: 276-88-00212&nbsp;&nbsp;|&nbsp;&nbsp;대표전화: 02-2273-5131
+              {COMPANY.name}&nbsp;&nbsp;|&nbsp;&nbsp;대표자: {COMPANY.ceo}&nbsp;&nbsp;|&nbsp;&nbsp;사업자등록번호: {COMPANY.businessRegistrationNo}&nbsp;&nbsp;|&nbsp;&nbsp;대표전화: {COMPANY.phone}
             </p>
             <p>
-              제작본부: 경기도 고양시 덕양구 통일로 140 삼송테크노밸리 B동 4층 422호
+              제작본부: {COMPANY.addressFactory}
             </p>
             <p>
-              본사: 서울시 종로구 지봉로4길 19 시즌빌딩 1층 i-15호
+              본사: {COMPANY.addressHq}
             </p>
             <p>
-              개인정보보호 책임자: 조요한&nbsp;&nbsp;|&nbsp;&nbsp;호스팅: AWS
+              개인정보보호 책임자: {COMPANY.privacyOfficer}&nbsp;&nbsp;|&nbsp;&nbsp;호스팅: {COMPANY.hosting}
             </p>
             <p>
-              통신판매업신고: 2016-서울강남-00140
+              통신판매업신고: {COMPANY.mailOrderSalesNo}
             </p>
             <p>
-              프로그램등록번호: C-2016-017298(Printable), C-2016-017299(Pages Converter)
+              프로그램등록번호: {COMPANY.programRegistrations.join(', ')}
             </p>
             <p>
-              특허등록번호: 제 10-2711423 호(콘티제네레이터)
+              특허등록번호: {COMPANY.patentNo}
             </p>
           </div>
         </div>
@@ -113,9 +121,13 @@ export function Footer() {
         <div className="flex flex-col md:flex-row gap-2 md:justify-between utility-xs text-mute">
           <p>© 2026 PapasCompany Archive. All rights reserved.</p>
           <p>
-            <span className="cursor-default opacity-70" title="게시 예정">이용약관</span>
+            <Link href="/terms" className="hover:text-ink transition-colors underline underline-offset-2">
+              이용약관
+            </Link>
             <span className="mx-2">·</span>
-            <span className="cursor-default opacity-70" title="게시 예정">개인정보처리방침</span>
+            <Link href="/privacy" className="hover:text-ink transition-colors underline underline-offset-2">
+              개인정보처리방침
+            </Link>
           </p>
         </div>
 

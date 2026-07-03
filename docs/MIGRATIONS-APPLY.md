@@ -4,35 +4,45 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-06-24.
+> 최종 갱신: 2026-07-03 (EC 웨이브 — 038/039 추가, 030/031 코드 연결됨).
 
 ---
 
 ## 적용 순서 (번호 오름차순, 한 번에 또는 나눠서)
 
 각 SQL 본문은 `supabase/migrations/<파일>` 에 있다. SQL Editor 에 파일 내용을 그대로 붙여넣고 실행하면 된다.
-**029 → 035 오름차순**으로 적용한다(034/035 의 일부가 029~033 와 같은 테이블을 건드리므로 순서 권장).
+**029 → 039 오름차순**으로 적용한다(같은 테이블을 건드리는 마이그레이션이 있어 순서 권장).
+036/037 은 결번 — 확장형 P2(`set_templates`/`bundle_rules`)용 예약 번호로 파일이 아직 없다.
 
 | # | 파일 | 활성화되는 것 | 지금 적용? |
 |---|---|---|---|
 | 029 | `029_orders_order_memo.sql` | 관리자 주문 메모(Phase A) | ✅ 권장 — 라이브 기능 활성화 |
-| 030 | `030_orders_shipping_surcharge.sql` | 제주/도서산간 추가배송비 컬럼 | ⏸ 선택 — 비파괴·안전하나 미연결(Phase C) |
-| 031 | `031_user_points.sql` | 적립금 테이블/RPC | ⏸ 선택 — 비파괴·안전하나 미연결(B-2) |
+| 030 | `030_orders_shipping_surcharge.sql` | 제주/도서산간 추가배송비(EC 웨이브 연결됨) | ✅ 권장 — 적용 시 자동 활성화 |
+| 031 | `031_user_points.sql` | 적립금 earn/redeem + `/account/points`(EC 웨이브 연결됨) | ✅ 권장 — 적용 시 자동 활성화 |
 | 032 | `032_user_addresses.sql` | 회원 주소록(Phase B-1) | ✅ 권장 — 라이브 기능 활성화 |
-| 033 | `033_orders_confirmed_at.sql` | 구매확정(Phase B-1) | ✅ 권장 — 라이브 기능 활성화 |
+| 033 | `033_orders_confirmed_at.sql` | 구매확정(Phase B-1) + 적립 earn 게이트 | ✅ 권장 — 라이브 기능 활성화 |
 | 034 | `034_products_product_type.sql` | 확장형 기반: `products.product_type` + `cart_projects` | 🟦 선택 — 적용해도 앱 무변화(P1 대비) |
 | 035 | `035_cart_items_project_link.sql` | 확장형 기반: cart/order 프로젝트 링크 컬럼 | 🟦 선택 — 적용해도 앱 무변화(P1 대비) |
+| 038 | `038_orders_refunded_amount.sql` | 부분환불 누적액(EC 웨이브) | ✅ 권장 — 적용 시 자동 활성화 |
+| 039 | `039_orders_cash_receipt.sql` | 현금영수증 신청·Toss 발급(EC 웨이브) | ✅ 권장 — 적용 시 자동 활성화 |
 
 - **✅ 029/032/033**: 코드는 이미 라이브이고 DB 컬럼/테이블만 없어서 해당 기능이 비활성 상태다. 적용하면 곧바로
-  동작한다. **이번에 먼저 적용 권장.**
-- **⏸ 030/031**: 비파괴라 적용해도 무해하지만, 이를 쓰는 코드(Phase B-2 적립금·Phase C 추가배송비)가 아직
-  없어 적용해도 사용자 변화는 없다. 해당 Phase 착수 때 적용해도 된다.
+  동작한다.
+- **✅ 030/031/038/039 (EC 웨이브, 2026-07-03)**: 이를 쓰는 코드가 이 웨이브에서 연결됐다.
+  **적용해도/안 해도 앱 무변화(무해)** — 미적용이면 feature-probe 가 해당 기능(추가배송비/적립금/부분환불/
+  현금영수증)을 UI·로직에서 숨기고, 적용하면 **코드 배포 없이 자동 활성화**(probe 캐시 TTL 60초 내).
+  orders INSERT 는 conditional-spread 라 미적용 DB 에서도 에러(42703)가 없다. ADR-024 참조.
+  - **031 적용 시**: 적립금이 자동 활성화 — 체크아웃 적립금 사용(redeem), 구매확정 시 1% 적립(earn),
+    마이페이지 `/account/points` 잔액·내역. earn 은 구매확정(033 `confirmed_at`) 게이트와 연동되므로
+    031 과 033 을 함께 적용하는 것을 권장.
+  - **038 적용 시**: 관리자 부분환불(Toss cancelAmount + 누적 추적) 자동 활성화.
+  - **039 적용 시**: 체크아웃 현금영수증 신청 캡처 + Toss 발급 훅(현금성 결제만) 자동 활성화.
 - **🟦 034/035**: 확장형 상품 P0 기반. **앱은 적용 여부와 무관하게 현행 단품 경로 100% 유지**되도록
   격리/폴백 설계됨(ADR-023). 즉 지금 적용해도 화면 변화는 없고, **P1 확장형 편집기 착수 전까지 적용하면
   된다**. 미리 적용해두면 P1 배포가 매끄럽다.
 
-> 권장 묶음: **이번 세션엔 029/032/033 만 적용**(라이브 기능 즉시 활성화). 034/035 는 P1 직전에 적용.
-> 단, 한 번에 029~035 를 다 적용해도 전부 안전하다(앱 무변화 보장).
+> 권장 묶음: **029~033 + 038/039 적용**(라이브/EC 기능 전부 활성화). 034/035 는 P1 직전에 적용해도 된다.
+> 단, 한 번에 029~039 를 다 적용해도 전부 안전하다(앱 무변화 보장).
 
 ---
 
@@ -44,6 +54,27 @@ SELECT column_name FROM information_schema.columns
  WHERE table_name='orders' AND column_name='order_memo';   -- 1행이면 OK
 ```
 앱 검증: 관리자 주문 상세에서 메모 저장 → 새로고침 후 유지되는지.
+
+### 030 — 제주/도서산간 추가배송비
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_name='orders' AND column_name='surcharge_fee';                                -- 1행
+SELECT column_name FROM information_schema.columns
+ WHERE table_name='shipping_methods'
+   AND column_name IN ('surcharge_fee_jeju','surcharge_fee_remote');                       -- 2행
+```
+앱 검증(probe TTL 60초 후): 체크아웃에서 제주(63xxx)/도서산간 우편번호 입력 시 추가배송비 표시.
+
+### 031 — 적립금
+```sql
+SELECT to_regclass('public.user_profiles');                 -- user_profiles 면 OK
+SELECT to_regclass('public.user_points_ledger');            -- user_points_ledger 면 OK
+SELECT column_name FROM information_schema.columns
+ WHERE table_name='orders' AND column_name IN ('points_redeemed','points_accrued');       -- 2행
+SELECT proname FROM pg_proc WHERE proname='apply_points_transaction';                     -- 1행
+```
+앱 검증(probe TTL 60초 후): 로그인 → `/account/points` 잔액/내역 표시, 체크아웃에서 적립금 사용,
+구매확정 시 1% 적립(033 `confirmed_at` 함께 적용 권장).
 
 ### 032 — 주소록
 ```sql
@@ -76,6 +107,23 @@ SELECT column_name FROM information_schema.columns
 ```
 앱 검증 불필요(현행 무변화).
 
+### 038 — 부분환불 누적액
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_name='orders' AND column_name='refunded_amount';   -- 1행이면 OK
+```
+앱 검증(probe TTL 60초 후): 관리자 주문 상세에 부분환불 입력 노출 → 금액 환불 시 누적액 반영.
+미적용이어도 앱 무변화(feature-probe 가 기능을 숨김) — 적용 시 자동 활성화.
+
+### 039 — 현금영수증
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_name='orders'
+   AND column_name IN ('receipt_type','receipt_info','receipt_url','receipt_issued_at');  -- 4행
+```
+앱 검증(probe TTL 60초 후): 체크아웃에 현금영수증 신청(소득공제/지출증빙) 노출 → 주문에 스냅샷 저장.
+Toss 발급은 **현금성 결제만** 훅 동작(카드는 N/A). 미적용이어도 앱 무변화 — 적용 시 자동 활성화.
+
 ---
 
 ## 롤백 메모
@@ -87,5 +135,11 @@ ALTER TABLE order_items DROP COLUMN IF EXISTS project_group_id, DROP COLUMN IF E
 ALTER TABLE cart_items  DROP COLUMN IF EXISTS project_id, DROP COLUMN IF EXISTS project_seq, DROP COLUMN IF EXISTS orientation;
 DROP TABLE IF EXISTS cart_projects;
 ALTER TABLE products DROP COLUMN IF EXISTS product_type;
+
+-- 예: 038/039 되돌리기 (필요 시에만 — DROP 후에도 feature-probe 가 기능을 다시 숨겨 앱은 정상)
+ALTER TABLE orders DROP COLUMN IF EXISTS refunded_amount;
+ALTER TABLE orders DROP COLUMN IF EXISTS receipt_type, DROP COLUMN IF EXISTS receipt_info,
+  DROP COLUMN IF EXISTS receipt_url, DROP COLUMN IF EXISTS receipt_issued_at;
 ```
-029/032/033 은 이미 라이브 기능이 의존하므로 적용 후 롤백 비권장.
+029/032/033 은 이미 라이브 기능이 의존하므로 적용 후 롤백 비권장. 030/031/038/039 도 적용 후
+데이터(환불 누적액·적립 원장·영수증 스냅샷)가 쌓이기 시작하면 롤백 비권장.

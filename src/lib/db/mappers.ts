@@ -157,6 +157,18 @@ type OrderRow = {
   order_memo?: string | null;
   /** migration 033 — may be absent on rows from before it was applied. */
   confirmed_at?: string | null;
+  /** migration 030 — may be absent until applied. */
+  surcharge_fee?: number | null;
+  /** migration 031 — may be absent until applied. */
+  points_redeemed?: number | null;
+  points_accrued?: number | null;
+  /** migration 038 — may be absent until applied. */
+  refunded_amount?: number | null;
+  /** migration 039 — may be absent until applied. NULL = 미신청. */
+  receipt_type?: string | null;
+  receipt_info?: string | null;
+  receipt_url?: string | null;
+  receipt_issued_at?: string | null;
   created_at: string;
   paid_at: string | null;
   shipped_at: string | null;
@@ -182,6 +194,9 @@ type ShippingMethodRow = {
   note: string | null;
   is_active: boolean;
   sort_order: number;
+  /** migration 030 — may be absent until applied. */
+  surcharge_fee_jeju?: number | null;
+  surcharge_fee_remote?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -327,6 +342,19 @@ export const mapOrder = (row: OrderRow): Order => ({
   orderMemo: row.order_memo ?? null,
   // undefined-safe: column may not exist yet (migration 033 unapplied).
   confirmedAt: row.confirmed_at ?? null,
+  // FS-EC-00 — undefined-safe: 각 마이그레이션(030/031/038/039) 미적용 시 폴백.
+  surchargeFee: row.surcharge_fee ?? 0,
+  pointsRedeemed: row.points_redeemed ?? 0,
+  pointsAccrued: row.points_accrued ?? 0,
+  refundedAmount: row.refunded_amount ?? 0,
+  // 예상 외 값은 null(미신청)로 — 039 CHECK 가 income/proof 만 허용하지만 방어적.
+  receiptType:
+    row.receipt_type === 'income' || row.receipt_type === 'proof'
+      ? row.receipt_type
+      : null,
+  receiptInfo: row.receipt_info ?? null,
+  receiptUrl: row.receipt_url ?? null,
+  receiptIssuedAt: row.receipt_issued_at ?? null,
   createdAt: row.created_at,
   paidAt: row.paid_at,
   shippedAt: row.shipped_at,
@@ -352,6 +380,9 @@ export const mapShippingMethod = (row: ShippingMethodRow): ShippingMethodConfig 
   note: row.note,
   isActive: row.is_active,
   sortOrder: row.sort_order,
+  // FS-EC-00 — undefined-safe: migration 030 미적용 시 0(추가비 없음) 폴백.
+  surchargeFeeJeju: row.surcharge_fee_jeju ?? 0,
+  surchargeFeeRemote: row.surcharge_fee_remote ?? 0,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });

@@ -469,4 +469,70 @@ yohan73 계정에서 CTO 가 수동 적용해야 하고(BL-010 제약) 적용 �
 
 ---
 
+## ADR-024: 이커머스 기본 완성 웨이브 — B-2 정책 + graceful feature-probe 패턴
+
+**Date:** 2026-07-03
+**Status:** Accepted (구현 완료, 검증 GREEN — Merge Gate/배포 대기)
+
+**Context:**
+EC 웨이브(브랜치 `feat/ecommerce-basics-photowall`, FS-EC-00~06, 컨텍스트 `shared/context/FS-EC-00~06.md`)가
+B-2(적립금·부분환불·현금영수증) + 030 추가배송비 + 실판매 요건(법적고지 /terms /privacy·404·JSON-LD) +
+관리자 통계 대시보드 + 포토월 시뮬레이터를 한 번에 구현한다. 마이그레이션은 CTO 수동 적용(BL-010)이라
+적용 시점이 불확실하고(029~039 전부 미적용 상태 전제), B-2 는 금전 경로라 정책(적립률·환불 전이·
+영수증 발급 조건)을 구현 전에 동결해야 했다.
+
+**Decision (CTO 승인):**
+
+*B-2/웨이브 정책:*
+1. **재고 차감 제외.** 주문제작 상품이므로 재고 개념을 도입하지 않는다.
+2. **포토월 = 스튜디오 딥링크.** `/wall` 은 mm 실측 Konva 벽 시뮬레이터로 배치만 담당하고, 주문은
+   스튜디오 딥링크 프리셀렉트로 연결(자체 주문 플로우 미구축). 배치 상태는 localStorage v1.
+3. **쿠폰·1:1문의·위시리스트는 다음 세션.**
+4. **적립 1%** — `POINTS_EARN_RATE_BPS = 100`. earn 은 구매확정(`confirmPurchase`) 시 결제액 1%, 멱등.
+   redeem 후 최소 결제 100원(`POINTS_MIN_PAYABLE = 100`). redeem 은 **fail-closed + 보상 트랜잭션**
+   (`createOrder` 실패 시 차감분 복원).
+5. **취소/환불 시 적립 회수는 관리자 수동 ADJUSTMENT.** 자동화는 후속 과제(BACKLOG §5).
+6. **부분환불** — Toss `cancelAmount` + `orders.refunded_amount` 누적 + 낙관 잠금. 누적 == total 이면
+   REFUNDED 전이. 단, 상태기계상 전이 불가 상태(IN_PRODUCTION/SHIPPED)면 상태 유지 + 경고 로그.
+7. **현금영수증** — `income`=소득공제(개인) / `proof`=지출증빙(사업자). Toss 발급 훅은 **현금성 결제만**
+   (카드 결제는 발급 대상 아님).
+
+*graceful feature-probe 패턴(명문화 — ADR-020/023 graceful 원칙의 일반화):*
+- **feature-probe**: `src/lib/db/feature-probe.ts`(server-only) — `select <column> limit 0` 으로 컬럼/테이블
+  존재를 감지(42703/42P01 → false), 캐시 TTL 60초. 마이그레이션 미적용이면 해당 기능을 UI/로직에서
+  숨기고, CTO 가 적용하면 **코드 배포 없이 자동 활성화**(probe 캐시 TTL 60초 내).
+- **conditional-spread INSERT**: 신규 컬럼은 기능 가용 시에만 INSERT payload 에 spread — 미적용 DB 에서
+  42703 을 원천 차단.
+- **매퍼 폴백**: `mapOrder` 등이 신규 컬럼 부재를 0/null 로 undefined-safe 매핑.
+- **서버 권위 재계산**: surcharge(추가배송비)는 `createOrder` 가 서버에서 재계산(클라 값 불신뢰),
+  현금영수증 신청은 주문 저장 시 스냅샷.
+
+**Consequences:**
+- (+) 029~039 전부 미적용 상태에서도 앱 정상(현행 경로 회귀 0) — 적용 즉시 자동 활성화. 배포와
+  마이그레이션 적용 시점이 완전히 분리됨(BL-010 제약 무력화).
+- (+) 금전 경로 안전: redeem fail-closed+보상 트랜잭션, 부분환불 낙관 잠금, earn 멱등, surcharge 서버 재계산.
+- (-) probe 캐시 TTL 60초 동안 활성화 지연(운영상 무시 가능 수준).
+- (-) 적립 회수가 수동 ADJUSTMENT — 운영 부담. 자동화는 후속 과제.
+- (-) IN_PRODUCTION/SHIPPED 에서 누적 환불액이 total 에 도달해도 REFUNDED 로 전이하지 못함(상태 유지
+  + 경고 로그로 추적) — 통계 규칙 후속 정리 필요(BACKLOG §5).
+- 검증: `tsc` 0 · `eslint src tests --max-warnings=0` 0 · `next build` exit 0 · `vitest` 413 passed
+  (베이스라인 239, +174).
+
+**Alternatives Considered:**
+- **재고 차감 구현** — 기각. 주문제작(made-to-order) 상품이라 재고 개념 자체가 없음.
+- **서버 드래프트** — 미채택. ADR-022 에서 P2+ 로 분리한 결정 유지.
+- **settings 토글 방식(probe 대신 app_settings 플래그)** — 기각. 마이그레이션 적용 후 CTO 가 토글을
+  따로 켜야 하는 수동 운영 부담. probe 는 스키마 존재 자체가 활성 신호라 운영 개입 0.
+
+**Postscript (2026-07-03):** 적대 리뷰(Security+Final, `shared/audit/FS-EC-security.md`·`FS-EC-final.md`)가
+**P0 1건**을 적발했고 수정이 랜딩됐다: `/api/orders` route 가 `redeemPoints`/`receipt` 를 `createOrder` 로
+전달하지 않던 **브리지 공백** → 필드 전달 + `POINTS_*`/`RECEIPT_*` 에러 422 매핑 + 라우트 seam 통합
+테스트 신설. 아울러 Decision 5(적립 회수 = 관리자 수동 ADJUSTMENT)가 **자동 회수로 격상**됐다:
+전액 환불·취소(고객취소/관리자 전액환불/부분환불 누적==전액 REFUNDED 전이/관리자 취소) 시
+`reversePointsForOrder` 가 사용분 복원(ADJUSTMENT+)·적립분 회수(REFUND−)를 수행 — `(order_id, type)`
+멱등, fire-and-forget, 031 미적용 시 skip. **부분환불(누적<전액)은 무조정**(문서화된 한계 — 비례 조정
+정책 미정, BACKLOG §5). 보정 후 최종 검증: `vitest` 451 passed | 14 todo (2026-07-03 직접 실행 확인 — 관리자취소 회수 테스트 +4 포함).
+
+---
+
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_
