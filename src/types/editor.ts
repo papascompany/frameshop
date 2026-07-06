@@ -7,6 +7,8 @@
  * imported on both server and client.
  *
  * FROZEN: 2026-05-12 by Architect.
+ * ADR-025 (2026-07-06): 옵셔널 확장만 — `EditorPhotoEntry.selectedOptions?/orientation?`
+ * + `EditorKind` 추가(확장형 P1 라인 단위 옵션 계약). 기존 필드 무변경.
  */
 
 import { z } from 'zod';
@@ -62,7 +64,32 @@ export type EditorPhotoEntry = {
   sourcePhotoUrl?: string;
   /** 베이크에 사용된 실제 크롭 변형(identity가 아님). 재편집·재주문 복원용. */
   cropTransform?: CropTransform;
+  /**
+   * ADR-025 (확장형 P1) — 라인 단위 옵션 스냅샷. extended 라인은 항상 채워지고,
+   * basic 라인은 undefined → 전역 selectedOptions 사용(현행 동작 문자 그대로).
+   * variantId 는 **저장하지 않는다**: `variantsByKey[variantKey(selectedOptions)]`
+   * 로 파생한다(options 와의 이중 진실 방지 — ADR-025).
+   */
+  selectedOptions?: SelectedOptions;
+  /**
+   * ADR-025 — 라인 방향(혼합 방향 지원). basic 라인은 undefined → 전역 방향 사용.
+   * 값 어휘는 project.ts `Orientation`·store/editor.ts `FrameOrientation` 과
+   * 동일하나, project.ts 가 이미 이 파일의 `CropTransform` 을 type-import 하므로
+   * 역방향 참조는 순환이 된다 — 여기서는 리터럴 유니온으로 둔다(구조적 호환).
+   */
+  orientation?: 'portrait' | 'landscape';
 };
+
+// ---------- Editor kind (ADR-025, 확장형 P1) ----------
+
+/**
+ * 편집 세션 모드. `basic` = 현행 단품 편집기(회귀 0 — setSize/setOrientation 의
+ * entries 초기화 등 현행 동작 문자 그대로), `extended` = 멀티포토 사진풀 +
+ * 라인별 독립 사이즈/방향/수량. 스토어 `init` 이 URL `mode` 파라미터로 결정하며
+ * 기본값은 `'basic'`.
+ */
+export const EDITOR_KINDS = ['basic', 'extended'] as const;
+export type EditorKind = (typeof EDITOR_KINDS)[number];
 
 // ---------- Editor state (Zustand store) ----------
 
@@ -110,6 +137,8 @@ export const DEFAULT_INNER_RECT_FALLBACK = {
 } as const;
 
 // ---------- Zod schemas ----------
+
+export const editorKindSchema = z.enum(EDITOR_KINDS);
 
 export const cropTransformSchema = z.object({
   x: z.number().finite(),

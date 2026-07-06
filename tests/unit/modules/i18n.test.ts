@@ -148,4 +148,38 @@ describe('message completeness', () => {
       expect(enKeys.has(`order.status.${status}`), `en: order.status.${status}`).toBe(true);
     }
   });
+
+  it('both locales have the extended editor keys (studio.multi* / product.multiCta — FS-P1-03)', () => {
+    const required = [
+      'product.multiCta',
+      'studio.multiUpload',
+      'studio.multiUploading',
+      'studio.multiPool',
+      'studio.multiPoolEmpty',
+      'studio.multiPoolSelectHint',
+      'studio.multiPoolRemove',
+      'studio.multiPoolRemoveNote',
+      'studio.multiLines',
+      'studio.multiApplyAll',
+      'studio.multiDuplicate',
+      'studio.multiDelete',
+      'studio.multiSize',
+      'studio.multiOrientation',
+      'studio.multiPortrait',
+      'studio.multiLandscape',
+      'studio.multiQtyDecrease',
+      'studio.multiQtyIncrease',
+      'studio.multiUnavailable',
+      'studio.multiRecropBadge',
+      'studio.multiRecrop',
+      'studio.multiCheckout',
+      'studio.multiOptionsHint',
+      'studio.multiTotalQuantity',
+      'studio.multiUnitPrice',
+    ];
+    for (const key of required) {
+      expect(koKeys.has(key), `ko: ${key}`).toBe(true);
+      expect(enKeys.has(key), `en: ${key}`).toBe(true);
+    }
+  });
 });

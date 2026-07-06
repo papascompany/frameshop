@@ -1,7 +1,7 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-07-03 (EC 웨이브 반영).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-07-06 (확장형 P1 편집기 웨이브 반영).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
@@ -21,19 +21,20 @@
 | `033_orders_confirmed_at` | 구매확정 (Phase B-1) | 라이브, 컬럼 대기 | `ALTER TABLE orders ADD COLUMN IF NOT EXISTS confirmed_at timestamptz;` |
 | `031_user_points` | 적립금 earn/redeem + `/account/points` (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
 | `030_orders_shipping_surcharge` | 제주/도서산간 추가배송비 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
-| `034_products_product_type` | 확장형 기반: product_type + cart_projects | 라이브(graceful, 무변화) | 파일 참조 |
-| `035_cart_items_project_link` | 확장형 기반: cart/order 프로젝트 링크 | 라이브(graceful, 무변화) | 파일 참조 |
+| `034_products_product_type` | 확장형 기반: product_type + cart_projects | **P1 라이브** — 적용 시 로그인 묶음 카트 동기화 자동 활성화(probe) | 파일 참조 |
+| `035_cart_items_project_link` | 확장형 기반: cart/order 프로젝트 링크 | **P1 라이브** — 적용 시 로그인 묶음 카트 동기화 자동 활성화(probe) | 파일 참조 |
 | `038_orders_refunded_amount` | 부분환불 누적액 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
 | `039_orders_cash_receipt` | 현금영수증 신청·Toss 발급 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
 
 → **적용 가이드(순서·검증쿼리·롤백)**: `docs/MIGRATIONS-APPLY.md` (CTO 전달용 단일 문서).
-→ **권장**: 029~033 + 038/039 적용(라이브/EC 기능 활성화). 034/035 는 P1 직전 적용(지금 적용해도 앱 무변화 — ADR-023 graceful).
+→ **권장**: 029~039 전부 적용. **P1 편집기 라이브로 034/035 도 권장 격상** — 미적용 시 로그인 묶음 카트
+  동기화만 평면 저장 폴백(묶음 정보는 주문 스냅샷 jsonb 에 보존), 적용 시 자동 활성화(probe).
 → **029~039 전부 미적용 상태에서도 앱 정상**(graceful probe/conditional-spread, ADR-024) — 적용 시 코드 배포 없이 자동 활성화(probe TTL 60초).
 → 적용 후 메모·주소록·구매확정·적립금·추가배송비·부분환불·현금영수증이 런타임에서 동작하는지 검증.
 
 ---
 
-## §1A. ★ 확장형 상품 (베이직/확장형 분리) — 신규 이니셔티브 (설계 제안 완료, 검토 대기)
+## §1A. ★ 확장형 상품 (베이직/확장형 분리) — P0·P1 완료, 다음 = P2/P3
 
 > **요청(2026-06-23)**: 사진1장→사이즈1개 단품을 **베이직**으로 분리하고, 멀티포토·혼합 사이즈/방향·
 > 세트(갤러리월)를 한 흐름에서 주문하는 **확장형 상품** 도입. 장바구니~주문 화면도 구성 시각화.
@@ -51,7 +52,7 @@
      부분선택=세트 불가(같이 담긴 단품은 선택 가능). 구현은 P2/P3.
   3. ✅ **편집 세션 무결성 — 완료(ADR-022).** localStorage 드래프트(키=`(sessionId,productId)`, sessionId 안정 →
      소유권 무결성 유지), 버전키+안전파싱+7일 TTL, 마운트 복원 배너·결제 시 정리. 서버 드래프트(교차기기·공유)는 P2+로 분리.
-- **롤아웃**: P0 기반(비파괴, 034/035 + 스냅샷 v2 ADR) → P1 편집기 MVP(케이스1~4 그리드) →
+- **롤아웃**: P0 기반(비파괴, 034/035 + 스냅샷 v2 ADR) ✅ → P1 편집기 MVP(케이스1~4 그리드) ✅ →
   P2 세트·어드민 워크스페이스(036/037) → P3 주문 6화면 시각화.
 - **✅ P0 기반 — 완료(ADR-023, 배포 대기 커밋).** 034/035 SQL 작성(`supabase/migrations/`, CTO 적용 가이드
   `docs/MIGRATIONS-APPLY.md`) · `src/types/project.ts` 신설(확장형 도메인 SSOT) · `product_type` plumbing
@@ -60,9 +61,21 @@
   build·239 tests). **034/035 는 적용해도/안 해도 앱 무변화** — 035 의 진짜 게이트는 P1(라인 저장 시점).
 - **신규 마이그레이션** ⛏️: `034_products_product_type`(+cart_projects) ✅작성, `035_cart_items_project_link`
   (+order_items 컬럼) ✅작성, `036_set_templates`, `037_bundle_rules` (전부 비파괴 NULL/신규, 029~033 다음 번호).
-- **다음(P1)**: 확장형 편집기 MVP — 옵션 라인 단위화, `PhotoPoolPanel`/`LineList`, +추가/교체·일괄적용·복제,
-  묶음 담기 변환점. **착수 시 035 적용 전제**로 카트 DB SELECT/UPSERT 에 project 컬럼 추가(P0 에선 미변경).
-  베이직(single) 경로 회귀 0 유지.
+- **✅ P1 확장형 편집기 MVP — 완료(2026-07-06, ADR-025, 브랜치 `feat/extended-p1-editor`).** 4유닛:
+  ① FS-P1-00 기반 — ADR-025(FROZEN 옵셔널 계약)·`EditorPhotoEntry` 옵셔널(`selectedOptions?`/`orientation?`)·
+  드래프트 v2 무손실 승격·`OrderItemSnapshot` orientation/projectSeq/groupLabel·`isProjectCartAvailable` probe.
+  ② FS-P1-01 스토어 — `kind:'basic'|'extended'` 분기(basic=현행 문자 그대로)·`photoPool`·라인 액션 5종·
+  라인별 totals `sum(price_i×qty_i)`·`suggestOrientation`. ③ FS-P1-02 서버 — createOrder 그룹 동결
+  (스냅샷 jsonb + 035 probe conditional-spread)·cart_projects 헤더 upsert(dedup+race)·sync probe 폴백.
+  ④ FS-P1-03 UI — `mode=multi`(PhotoPoolPanel/LineList/MultiCheckoutControls)·묶음 담기·드래프트 v2 연동·
+  상품상세 "여러 장 만들기" CTA·모바일·i18n 24키. **CTO 케이스 1~4 전부 커버**, 베이직 회귀 고정 테스트 다수.
+  graceful: 익명은 034/035 무관 완전 동작, 로그인 카트 동기화만 probe 폴백(미적용 시 평면 저장, 묶음 정보는
+  주문 스냅샷 jsonb 보존) — **034/035 적용 시 로그인 묶음 동기화 자동 활성화**. 검증: tsc 0 · eslint 0 ·
+  build 0 · vitest 510 passed | 14 todo(베이스라인 451 → +59).
+- **다음**: **P2 세트·어드민 워크스페이스**(036/037 — set_templates 슬롯 빌더·bundle_rules 폼·
+  `/admin/products/[id]` 워크스페이스) → **P3 주문 6화면 묶음 시각화**(그룹핑 뷰모델·카드 UI).
+- **잔여(P2 후보)**: 재크롭 배지 베이스라인 드래프트 영속화 · extended 에서 명화/Google Photos 소스 ·
+  StudioClient 본문 i18n · 갤러리월(036/037) · 카트/주문 6화면 묶음 시각화(P3) · 서버 드래프트(교차기기).
 - **CTO 결정 필요**: 세트 부분선택/취소 단위/할인 분배/프리셋 우선순위/마이그레이션 적용 시점/카탈로그 분리(스펙 §12).
 
 ---

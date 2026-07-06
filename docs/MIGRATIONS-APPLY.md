@@ -4,7 +4,7 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-07-03 (EC 웨이브 — 038/039 추가, 030/031 코드 연결됨).
+> 최종 갱신: 2026-07-06 (확장형 P1 — 034/035 를 쓰는 코드 라이브, "선택"에서 **적용 권장**으로 격상).
 
 ---
 
@@ -21,8 +21,8 @@
 | 031 | `031_user_points.sql` | 적립금 earn/redeem + `/account/points`(EC 웨이브 연결됨) | ✅ 권장 — 적용 시 자동 활성화 |
 | 032 | `032_user_addresses.sql` | 회원 주소록(Phase B-1) | ✅ 권장 — 라이브 기능 활성화 |
 | 033 | `033_orders_confirmed_at.sql` | 구매확정(Phase B-1) + 적립 earn 게이트 | ✅ 권장 — 라이브 기능 활성화 |
-| 034 | `034_products_product_type.sql` | 확장형 기반: `products.product_type` + `cart_projects` | 🟦 선택 — 적용해도 앱 무변화(P1 대비) |
-| 035 | `035_cart_items_project_link.sql` | 확장형 기반: cart/order 프로젝트 링크 컬럼 | 🟦 선택 — 적용해도 앱 무변화(P1 대비) |
+| 034 | `034_products_product_type.sql` | 확장형 기반: `products.product_type` + `cart_projects` | ✅ 권장 — **P1 라이브**, 적용 시 로그인 묶음 카트 동기화 자동 활성화(probe) |
+| 035 | `035_cart_items_project_link.sql` | 확장형 기반: cart/order 프로젝트 링크 컬럼 | ✅ 권장 — **P1 라이브**, 적용 시 로그인 묶음 카트 동기화 자동 활성화(probe) |
 | 038 | `038_orders_refunded_amount.sql` | 부분환불 누적액(EC 웨이브) | ✅ 권장 — 적용 시 자동 활성화 |
 | 039 | `039_orders_cash_receipt.sql` | 현금영수증 신청·Toss 발급(EC 웨이브) | ✅ 권장 — 적용 시 자동 활성화 |
 
@@ -37,12 +37,14 @@
     031 과 033 을 함께 적용하는 것을 권장.
   - **038 적용 시**: 관리자 부분환불(Toss cancelAmount + 누적 추적) 자동 활성화.
   - **039 적용 시**: 체크아웃 현금영수증 신청 캡처 + Toss 발급 훅(현금성 결제만) 자동 활성화.
-- **🟦 034/035**: 확장형 상품 P0 기반. **앱은 적용 여부와 무관하게 현행 단품 경로 100% 유지**되도록
-  격리/폴백 설계됨(ADR-023). 즉 지금 적용해도 화면 변화는 없고, **P1 확장형 편집기 착수 전까지 적용하면
-  된다**. 미리 적용해두면 P1 배포가 매끄럽다.
+- **✅ 034/035 (확장형 P1 라이브, 2026-07-06)**: 확장형 편집기 P1 이 라이브되어 이를 쓰는 코드가
+  연결됐다(ADR-025). **미적용이어도 앱 정상** — 익명 확장형 플로우는 034/035 무관 완전 동작(localStorage),
+  로그인 카트 동기화만 probe 폴백(평면 저장, 묶음 정보는 주문 스냅샷 jsonb 에 보존). **적용 시 로그인
+  묶음 카트 동기화(cart_projects 헤더 + cart_items project 컬럼)가 코드 배포 없이 자동 활성화**
+  (probe TTL 60초). 현행 단품(베이직) 경로는 적용 여부와 무관하게 100% 유지(ADR-023).
 
-> 권장 묶음: **029~033 + 038/039 적용**(라이브/EC 기능 전부 활성화). 034/035 는 P1 직전에 적용해도 된다.
-> 단, 한 번에 029~039 를 다 적용해도 전부 안전하다(앱 무변화 보장).
+> 권장 묶음: **029~039 전부 적용**(라이브/EC/확장형 P1 기능 전부 활성화). P1 라이브로 034/035 도
+> 권장으로 격상됐다. 한 번에 다 적용해도 전부 안전하다(비파괴·멱등, 미적용 상태에서도 앱 정상).
 
 ---
 
@@ -96,7 +98,8 @@ SELECT column_name FROM information_schema.columns
 SELECT to_regclass('public.cart_projects');                          -- cart_projects
 SELECT count(*) FROM products WHERE product_type='single';           -- 기존 상품 전부 single 백필
 ```
-앱 검증 불필요(현행 무변화). 적용 후에도 카탈로그/주문/인쇄가 동일해야 정상.
+앱 검증(probe TTL 60초 후): 로그인 상태에서 확장형(`mode=multi`) 묶음 담기 → 새로고침 후 카트 유지
+(cart_projects 헤더 동기화). 베이직 경로(카탈로그/주문/인쇄)는 적용 전후 동일해야 정상.
 
 ### 035 — 확장형 기반 (2)
 ```sql
@@ -105,7 +108,8 @@ SELECT column_name FROM information_schema.columns
 SELECT column_name FROM information_schema.columns
  WHERE table_name='order_items' AND column_name IN ('project_group_id','project_seq','orientation'); -- 3행
 ```
-앱 검증 불필요(현행 무변화).
+앱 검증(probe TTL 60초 후): 로그인 묶음 담기 시 cart_items 에 project_id/project_seq/orientation 저장,
+주문 생성 시 order_items 컬럼에도 그룹 동결(미적용에서는 주문 스냅샷 jsonb 에만 보존 — 손실 없음).
 
 ### 038 — 부분환불 누적액
 ```sql

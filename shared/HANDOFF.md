@@ -150,3 +150,52 @@ REDEMPTION 원장 order_id 사후 링크, 전액환불 통계 규칙 보완, SMS
 **주의사항:** 마이그레이션 미적용 상태에서 orders INSERT 에 신규 컬럼을 무조건 넣으면 42703 —
 반드시 feature-probe + conditional-spread 패턴 유지(ADR-024). FROZEN 타입은 옵셔널 추가만.
 카트/상품 SELECT 명시 컬럼 목록에 미적용 컬럼 추가 금지(ADR-023).
+
+---
+
+### [2026-07-06] 확장형 P1 편집기 웨이브(orchestrator) → 다음 세션 — P1 핸드오프
+
+**브랜치:** `feat/extended-p1-editor` (base: main@2e9a738). 이 요약만 읽고 이어받을 수 있게 작성.
+
+**컨텍스트(완료 — 구현 4유닛, FS-P1-00~03):**
+1. **FS-P1-00 기반(architect)** — ADR-025(FROZEN 옵셔널 계약 게이트) · `EditorPhotoEntry` 옵셔널
+   (`selectedOptions?`/`orientation?`) · 드래프트 v2 무손실 승격(v1 자동 승격, 손실 0) ·
+   `OrderItemSnapshot` orientation/projectSeq/groupLabel · `isProjectCartAvailable` probe.
+2. **FS-P1-01 스토어** — `kind:'basic'|'extended'` 분기(basic=현행 코드 문자 그대로, entries 초기화 유지) ·
+   `photoPool` · 라인 액션 5종 · 라인별 totals `sum(price_i×qty_i)` · `suggestOrientation`(best-fit).
+3. **FS-P1-02 서버** — `createOrder` 그룹 동결(variant_snapshot jsonb — 035 미적용에서도 보존 +
+   035 적용 시 probe conditional-spread 로 컬럼 동결) · `cart_projects` 헤더 upsert(dedup+race) ·
+   로그인 카트 sync probe 폴백.
+4. **FS-P1-03 UI** — `mode=multi`(PhotoPoolPanel/LineList/MultiCheckoutControls) · 묶음 담기 ·
+   드래프트 v2 연동 · 상품상세 "여러 장 만들기" CTA · 모바일 · i18n 24키.
+
+**커버리지:** CTO 케이스 1~4 전부(같은 사진 다른 사이즈 / 사진별 상이 사이즈·방향 / 같은 사이즈 N장 /
+혼합 방향). **베이직(단품) 경로 회귀 0** — 베이직 회귀 고정 테스트 다수.
+
+**graceful(ADR-023/024 패턴 계승):** 익명은 034/035 무관 완전 동작(localStorage). 로그인 카트 동기화만
+probe 폴백 — 미적용 시 평면 저장(묶음 정보는 주문 스냅샷 jsonb 에 보존). **034/035 적용 시 로그인 묶음
+동기화가 코드 배포 없이 자동 활성화**(probe TTL 60초).
+
+**검증:** tsc 0 · eslint 0 · next build exit 0 · **vitest 510 passed | 14 todo**(베이스라인 451 → +59).
+
+**다음 액션(CTO):**
+1. **마이그레이션 034/035 적용 — 권장으로 격상**(기존 "선택/P1 직전" → P1 라이브로 적용 권장).
+   적용 시 로그인 묶음 카트 동기화 자동 활성화. 가이드 = `docs/MIGRATIONS-APPLY.md`(앱 검증 절 포함).
+   미적용분 029~033 + 038/039 도 함께 적용 권장.
+2. Merge Gate → PR/배포 → 프로덕션 스모크(`mode=multi` 편집기 · 묶음 담기 → 주문 스냅샷 확인).
+3. (지속) Toss 실키 설정 — 결제 완주 불가(BACKLOG §6, 런칭 전 과제).
+
+**다음 액션(개발, 후보):**
+- **P2 세트·어드민 워크스페이스**(036/037 — set_templates 슬롯 빌더 · bundle_rules 폼 ·
+  `/admin/products/[id]` 워크스페이스) → **P3 주문 6화면 묶음 시각화**(그룹핑 뷰모델·카드 UI).
+- 잔여 P2 후보: 재크롭 배지 베이스라인 드래프트 영속화 · extended 에서 명화/Google Photos 소스 ·
+  StudioClient 본문 i18n · 갤러리월(036/037) · 카트/주문 6화면 묶음 시각화(P3) · 서버 드래프트(교차기기).
+
+**참고 파일:** `shared/context/FS-P1-wave.md`(컨텍스트 패키지) · `shared/DECISIONS.md` ADR-025 ·
+`docs/specs/extended-product.md` §8(롤아웃) · `docs/MIGRATIONS-APPLY.md` · `docs/BACKLOG.md` §1A ·
+`shared/STATUS.md`(P1 웨이브 섹션).
+
+**주의사항:** FROZEN 타입은 옵셔널 추가만(ADR-025 게이트). 카트/상품 SELECT 명시 컬럼에 미적용 컬럼
+추가 금지 — project 컬럼은 probe true 일 때만 conditional-spread(ADR-023/024). `kind:'basic'` 의
+`setSize`/`setOrientation` entries 초기화는 의도된 현행 동작 — 제거 금지(베이직 회귀 테스트가 고정).
+variantId 는 저장하지 않고 `variantsByKey[variantKey(selectedOptions)]` 로 파생(이중 진실 방지).

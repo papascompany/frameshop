@@ -30,7 +30,8 @@ function makeItem(overrides: Partial<CartItem> = {}): CartItem {
   return {
     localId: asBrand<LocalId>('a1b2c3d4-5e6f-4a89-9bca-1234567890ab'),
     userId: null,
-    productId: asBrand<ProductId>('p-1'),
+    // RFC 4122 v4 — cartItemSchema 의 productId uuid 강화(P1-001)를 통과해야 한다.
+    productId: asBrand<ProductId>('22222222-2222-4222-8222-222222222222'),
     variantId: asBrand<ProductVariantId>('v-1'),
     photoId: asBrand<PhotoId>('ph-1'),
     options: {
@@ -93,7 +94,8 @@ describe('cart storage v1 → v2 migration', () => {
 
   it('round-trips v2 items carrying the new 묶음 fields', () => {
     const projectItem = makeItem({
-      projectId: asBrand<CartProjectId>('proj-1'),
+      // RFC 4122 v4 — projectId uuid 강화(P1-001) 이후에도 v2 왕복 무손실.
+      projectId: asBrand<CartProjectId>('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
       projectSeq: 2,
       orientation: 'landscape',
     });

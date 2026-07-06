@@ -25,10 +25,10 @@ import type { CartItem } from '@/types/cart';
 function makeItem(overrides: Partial<CartItem> = {}): CartItem {
   return {
     id: asBrand<CartItemId>('ci-' + Math.random().toString(36).slice(2)),
-    // RFC 4122 v4 UUID for Zod's strict checker.
+    // RFC 4122 v4 UUIDs for Zod's strict checker (productId hardened — P1-001).
     localId: asBrand<LocalId>('a1b2c3d4-5e6f-4a89-9bca-1234567890ab'),
     userId: asBrand<UserId>('u-1'),
-    productId: asBrand<ProductId>('p-1'),
+    productId: asBrand<ProductId>('22222222-2222-4222-8222-222222222222'),
     variantId: asBrand<ProductVariantId>('v-1'),
     photoId: asBrand<PhotoId>('ph-1'),
     options: {

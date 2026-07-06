@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { getProductDetail, getProductOptions } from '@/lib/db/product';
 import { asBrand } from '@/types/common';
 import type { ProductId } from '@/types/common';
-import { StartEditorButton } from './StartEditorButton';
+import { StartEditorButton, StartMultiEditorButton } from './StartEditorButton';
 import Image from 'next/image';
 import {
   buildProductMeta,
@@ -195,7 +195,11 @@ export default async function ProductPage({
             </p>
 
             {detail.defaultVariantId ? (
-              <StartEditorButton productId={detail.product.id} />
+              <div className="flex flex-col gap-2">
+                <StartEditorButton productId={detail.product.id} />
+                {/* FS-P1-03: 확장형(멀티포토) 편집기 보조 CTA */}
+                <StartMultiEditorButton productId={detail.product.id} />
+              </div>
             ) : (
               <Button variant="primary" size="lg" fullWidth disabled>
                 {t('optionPrepairing')}

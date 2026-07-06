@@ -92,7 +92,10 @@ export const cartItemSchema = z.object({
   id: z.string().min(1).optional(),
   localId: z.string().uuid(),
   userId: z.string().min(1).nullable(),
-  productId: z.string().min(1),
+  // uuid 강화(FS-P1 security P1-001): probe true 시 cart_projects.product_id
+  // (uuid FK) 에 그대로 닿는다 — 느슨한 문자열은 Postgres 22P02/23503 의 입구.
+  // 실값은 항상 products PK(gen_random_uuid) 라 정상 클라이언트 무파손.
+  productId: z.string().uuid(),
   variantId: z.string().min(1),
   photoId: z.string().min(1),
   options: selectedOptionsSchema,
@@ -105,8 +108,11 @@ export const cartItemSchema = z.object({
   quantity: z.number().int().min(CART_QUANTITY_MIN).max(CART_QUANTITY_MAX),
   createdAt: z.string(),
   // 확장형 묶음 링크(ADR-023). 옵셔널·nullable — v1 카트 항목은 이 필드들이 없어도 통과.
-  projectId: z.string().min(1).nullable().optional(),
-  projectSeq: z.number().int().nonnegative().nullable().optional(),
+  // uuid/.max(9999) 강화(FS-P1 security P1-001): probe true 시 projectId 는
+  // cart_projects.project_local_id(uuid), projectSeq 는 cart_items.project_seq
+  // (int4) 에 닿는다 — DB 타입보다 느슨한 스키마는 22P02/22003 무처리 500 의 입구.
+  projectId: z.string().uuid().nullable().optional(),
+  projectSeq: z.number().int().nonnegative().max(9999).nullable().optional(),
   orientation: orientationSchema.nullable().optional(),
 });
 

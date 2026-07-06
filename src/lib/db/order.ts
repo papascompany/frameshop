@@ -24,7 +24,7 @@ import { mapOrder, mapOrderItem } from './mappers';
 import { canTransition, formatOrderNo } from '../order/state';
 import { calculateShippingFee } from '../shipping/calc';
 import { calcSurcharge, classifyZip } from '../shipping/surcharge';
-import { isReceiptAvailable } from './feature-probe';
+import { isProjectCartAvailable, isReceiptAvailable } from './feature-probe';
 import {
   accruePointsForOrder,
   getPointsSummary,
@@ -346,6 +346,27 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     frameByKey.set(`${f.product_id}|${f.color_code}`, f.id);
   }
 
+  // ADR-025 (확장형 P1): mint ONE server-side group id per client project key.
+  // `item.projectId` is the client's LOCAL grouping key (projectLocalId) — it
+  // is never trusted as an id, only used to partition the cart. groupLabel is
+  // a display snapshot ('묶음 1', '묶음 2', …) numbered by first appearance.
+  const projectGroups = new Map<string, { groupId: string; label: string }>();
+  for (const item of input.cartItems) {
+    const key = item.projectId != null ? (item.projectId as string) : null;
+    if (key !== null && !projectGroups.has(key)) {
+      projectGroups.set(key, {
+        groupId: crypto.randomUUID(),
+        label: `묶음 ${projectGroups.size + 1}`,
+      });
+    }
+  }
+  // Migration 035 gate — probed ONLY when grouped lines exist, so pure single
+  // orders never call the probe and keep the exact legacy INSERT column set.
+  // PostgREST bulk insert needs a uniform key set across rows, so when the
+  // probe passes the three columns are spread onto EVERY row (singles → NULL).
+  const includeProjectColumns =
+    projectGroups.size > 0 && (await isProjectCartAvailable());
+
   // order_items snapshot insert. All authoritative fields come from DB so
   // the snapshot survives later price/label edits in admin.
   const itemRows = input.cartItems.map((item) => {
@@ -375,6 +396,18 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       // baked crop for print; this is provenance only, unused by the render path.
       sourcePhotoId: item.photoId,
     };
+    const group =
+      item.projectId != null
+        ? projectGroups.get(item.projectId as string)
+        : undefined;
+    if (group) {
+      // ADR-025: freeze the grouping into the jsonb snapshot so it survives
+      // even on a DB where migration 035 is unapplied (columns absent there —
+      // the snapshot is the durable copy). Singles never get these fields.
+      snapshot.groupLabel = group.label;
+      if (item.orientation != null) snapshot.orientation = item.orientation;
+      if (item.projectSeq != null) snapshot.projectSeq = item.projectSeq;
+    }
     const frameAssetId = frameByKey.get(`${v.product_id}|${v.color_code}`) ?? null;
     return {
       order_id: order.id as string,
@@ -390,6 +423,16 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       stage_size: null,
       quantity: item.quantity,
       price: v.price,
+      // Conditional-spread (ADR-025, EC 웨이브 points/receipt 패턴): the 035
+      // columns are written only when the DB has them AND the order carries
+      // grouped lines. Uniform across all rows of the bulk insert.
+      ...(includeProjectColumns
+        ? {
+            project_group_id: group?.groupId ?? null,
+            project_seq: group ? (item.projectSeq ?? null) : null,
+            orientation: group ? (item.orientation ?? null) : null,
+          }
+        : {}),
     };
   });
 

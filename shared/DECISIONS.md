@@ -535,4 +535,99 @@ B-2(적립금·부분환불·현금영수증) + 030 추가배송비 + 실판매 
 
 ---
 
+## ADR-025: 확장형 P1 편집기 — 라인 단위 옵션 계약(FROZEN 옵셔널 확장) + 모드 분기 + 드래프트 v2
+
+**Date:** 2026-07-06
+**Status:** Accepted (FS-P1-00 계약 동결 — 구현은 FS-P1-01~03)
+
+**Context:**
+확장형 P1 편집기(웨이브 `shared/context/FS-P1-wave.md`)는 한 편집 세션에서 멀티포토 업로드(사진풀) →
+라인별 독립 사이즈/방향/수량(혼합) → 묶음 담기를 지원해야 한다(CTO 케이스 1~4). 이를 위해 FROZEN
+계약(`EditorPhotoEntry`/`OrderItemSnapshot`/드래프트)에 확장이 필요하고, 마이그레이션 034/035 는
+미적용 가능(BL-010)이라 graceful 폴백(ADR-023/024 패턴)이 전제다. **베이직(단품) 경로 회귀 0** 이
+웨이브 불변식이다. ADR-022 의 드래프트 키에는 `v1` 이 문자열로 박혀 있어(`frameshop.editor.draft.v1`)
+스키마 진화 방법을 정해야 했다.
+
+**Decision:**
+1. **모드 분기 — 스토어 `kind: 'basic' | 'extended'`** (`EditorKind`, src/types/editor.ts). 스튜디오
+   진입 URL `mode=multi` 로 init 시 결정, 기본 `'basic'`. `basic` 은 현행 코드 문자 그대로
+   (setSize/setOrientation 의 `entries:[]` 초기화 유지, 사진풀/라인 UI 미렌더). `extended` 만
+   entries 초기화를 건너뛰고(라인별 독립) 전역 옵션 변경은 "새 라인 기본값" 컨텍스트만 바꾼다.
+2. **라인 단위 옵션 = `EditorPhotoEntry` 옵셔널 확장(FROZEN 무파손).** `selectedOptions?:
+   SelectedOptions` + `orientation?: 'portrait'|'landscape'`. basic 라인은 undefined → 전역 옵션
+   사용(현행), extended 라인은 항상 채움. 가격은 `sum(price_i × qty_i)` — entry 에 옵션이 있으면
+   라인별 가격, 없으면 전역 가격. orientation 은 project.ts `Orientation` 과 의미 동일하지만
+   project.ts 가 editor.ts 의 `CropTransform` 을 이미 type-import 하므로(역참조 = 순환) editor.ts
+   에는 리터럴 유니온으로 둔다.
+3. **variantId 는 파생값 — 저장하지 않는다.** 라인의 variant 는
+   `variantsByKey[variantKey(selectedOptions)]` 로 항상 파생한다. entry 에 variantId 를 함께
+   저장하면 options 와 이중 진실이 되어 옵션 변경 시 불일치 버그의 온상이 된다.
+4. **드래프트 v2 — 키 유지 + payload `version` 필드 판별(무손실 자동 승격).** 키
+   `frameshop.editor.draft.v1` 의 `v1` 은 **의도적으로 유지**한다: 키를 바꾸면 기존 사용자의
+   드래프트가 전부 고아가 되어 소실된다. 대신 payload 의 `version` 으로 v1|v2 를 판별하고, v1 은
+   로드 시 `migrateEditorDraftV1` 로 v2 승격(kind:'basic', photoPool 없음 — 손실 0, 저장소 재기록은
+   다음 save). v2 = `{kind, photoPool?, entries(라인 옵션 포함), ...v1 필드}`. save 는 항상 v2 로
+   기록하며 `kind` 미지정 시 'basic'(기존 호출부 시그니처 무파손). 빈 세션 판정은 "entries **와**
+   photoPool 모두 빈 경우"로 확장(확장형은 라인 확정 전 사진풀만 채운 상태도 복원 가치). TTL 7일·
+   안전파싱·(sessionId, productId) 키 등 ADR-022 골격은 그대로.
+5. **묶음 담기 — 클라 `projectLocalId` → 서버 `project_group_id`.** extended 담기 시 세션당 1회
+   `projectLocalId = crypto.randomUUID()` 로 라인 N개를 `addToCart({projectId: projectLocalId,
+   projectSeq: i, orientation})`(CartItem 옵셔널 필드, P0). `createOrder` 는 cartItems 를 projectId
+   로 그룹핑해 그룹당 서버 `project_group_id = randomUUID()` 를 새로 부여한다(카트는 휘발, 주문은
+   영구 — 클라 id 를 신뢰하지 않음). 세트 할인 없음(P1, ADR-021) → 라인별 개별 CartItem 이라 기존
+   서버 가격 재검증(PRICE_MISMATCH)이 라인별로 그대로 동작(신규 가격 경로 0).
+6. **주문 스냅샷 jsonb 동결 — 035 미적용에서도 묶음 보존.** `OrderItemSnapshot` 옵셔널 확장:
+   `orientation?`/`projectSeq?`/`groupLabel?`(+ zod 동기화, 기존 bleedMm/sourcePhotoId 패턴).
+   createOrder 가 variant_snapshot(jsonb)에 동결하므로 **마이그레이션 불필요**하게 묶음 정보가
+   주문에 영구 보존되고, 035 적용 시(probe) 전용 컬럼(project_group_id/project_seq/orientation)에도
+   conditional-spread 로 기록한다.
+7. **로그인 카트 동기화 = probe 폴백(CTO 확정).** `isProjectCartAvailable()`(feature-probe,
+   cart_items.project_id — 035 는 034 의 cart_projects FK 를 참조하므로 단일 probe 로 034+035 판별)
+   가 true 면 cart_projects 헤더 upsert 후 cart_items 에 project 컬럼 포함 upsert(FK 순서: 헤더
+   먼저), false 면 project 필드 생략(평면 저장 — 묶음 정보는 6의 주문 스냅샷에 보존되므로 유실
+   아님). 익명 카트는 localStorage v2 로 034/035 무관 완전 동작.
+
+**Consequences:**
+- (+) FROZEN 계약 전부 옵셔널 확장 — 기존 리터럴/픽스처/호출부 무파손, 베이직 경로 회귀 표면 0.
+- (+) 드래프트/카트/주문 모두 마이그레이션 적용 여부와 분리(graceful) — 배포 자유, CTO 적용 즉시
+  probe 로 자동 활성화. 기존 v1 드래프트 손실 0.
+- (+) variantId 파생 원칙으로 라인 옵션의 단일 진실 확보(이중 진실 버그 예방).
+- (-) 035 미적용 동안 로그인 카트의 묶음 구조가 DB 에 평면 저장된다(교차기기에서 묶음 시각화 불가 —
+  주문 시점 스냅샷으로는 보존). 문서화된 한계.
+- (-) groupLabel 등 스냅샷 필드의 생성 규칙은 backend(FS-P1-02) 구현 재량(계약은 옵셔널 string).
+- 검증(FS-P1-00 범위): `tsc` 0 · `eslint`(수정 파일) 0 · `vitest` 466 passed | 14 todo
+  (베이스라인 451 무파손, 신규 15: 드래프트 v1→v2 승격/라운드트립/손상폐기 9 + 스냅샷 스키마 6).
+
+**Alternatives Considered:**
+- **별도 extended 스토어(useExtendedEditorStore):** 기각 — 업로드/크롭/드래프트/프리셀렉트 로직
+  중복 + ADR-022 드래프트·딥링크 프리셀렉트를 재구현해야 함. 단일 스토어 + kind 분기가 회귀 표면이
+  더 작다.
+- **entry 에 variantId 저장:** 기각 — selectedOptions 와 이중 진실. 옵션 수정 시 두 값의 동기화
+  버그 위험. 파생(variantsByKey)으로 충분.
+- **서버 드래프트:** 기각 — ADR-022 에서 P2+ 로 분리한 결정 유지(마이그레이션·anon 소유권·cleanup
+  비용, 무결성엔 불필요).
+- **드래프트 키를 v2 로 bump:** 기각 — 키에 v1 이 박혀 있어 키 변경 시 기존 드래프트 전부 소실.
+  payload version 필드 판별 + 로드 시 자동 승격(손실 0)을 채택.
+
+**Postscript (2026-07-06):** Final 감사 P0-001 이 Decision 7 의 폴백 계약 불성립을 적발했다 —
+로그인 + probe false(034/035 미적용 = 현 프로덕션)에서 `getCart` 가 DB 의 평면 items 만 반환해
+체크아웃 페이로드에 projectId 가 실리지 않았고, Decision 6 의 "주문 스냅샷 동결로 보존" 주장이
+구현과 모순이었다(묶음 메타 영구 소실). 수정: `getCart` 로그인 경로가 DB items 를 localStorage
+미러와 **localId 로 병합**한다(`mergeProjectFieldsFromMirror`, src/lib/cart/client.ts) — DB 항목이
+평면이고 미러의 동일 localId 항목에 projectId 가 있으면 projectId/projectSeq/orientation 만 주입
+(가격/수량 등 서버 값 우선), DB 가 projectId(서버 헤더 PK)를 반환하면(probe true) DB 가 SSOT 라
+병합하지 않는다. **잔여 한계(문서화):** 담은 기기와 다른 기기(교차 기기)에는 미러가 없어 병합
+불가 — 그 주문은 묶음 메타 없이 평면 생성된다. 034/035 적용 시 자연 해소되므로 CTO 적용이 근본
+해법이다. 함께 반영(Security 감사): ① P1-001 — `cartItemSchema` 를 DB 타입에 정합하게 강화
+(`projectId`/`productId` = `z.string().uuid()`, `projectSeq` = `.max(9999)`; 실값이 전부
+uuid(gen_random_uuid/crypto.randomUUID)라 정상 클라이언트 무파손) + `/api/cart` POST 에
+try/catch·에러 정제 매핑(22P02/22003/23503 류 → 400 INVALID_REFERENCE, 그 외 → 500
+CART_WRITE_FAILED, raw 메시지는 서버 로그 전용). ② P2-002 — `upsertCartProject` 에 PK 에코 가드
+(projectLocalId 가 기존 헤더 PK 와 일치하면 재사용, 중복 헤더 봉인). ③ P2-005 정책 명시 —
+**멀티 CTA("여러 장 만들기")는 `product_type` 게이트 없이 모든 단품에 개방한다.** 이는 스펙
+§3(docs/specs/extended-product.md)의 "일반 다조합은 일반 상품에서 CTA 로 진입" 의도 그대로이며
+드리프트가 아니다(가격은 라인별 variant 서버 재검증으로 보호 — 금전 경로 무관).
+
+---
+
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_
