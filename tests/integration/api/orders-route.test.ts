@@ -62,7 +62,8 @@ function makeBody(overrides: Record<string, unknown> = {}): Record<string, unkno
       {
         localId: '44444444-4444-4444-8444-444444444444',
         userId: null,
-        productId: '22222222-2222-2222-2222-222222222222',
+        // RFC 4122 v4 — cartItemSchema 의 productId uuid 강화(P1-001) 통과값.
+        productId: '22222222-2222-4222-8222-222222222222',
         variantId: '11111111-1111-1111-1111-111111111111',
         photoId: '33333333-3333-3333-3333-333333333333',
         options: {

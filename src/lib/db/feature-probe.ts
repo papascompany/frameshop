@@ -86,3 +86,15 @@ export function isPartialRefundAvailable(): Promise<boolean> {
 export function isConfirmAvailable(): Promise<boolean> {
   return probeFeature('confirm', 'orders', 'confirmed_at');
 }
+
+/**
+ * 확장형 묶음 카트 DB 동기화(ADR-025): cart_items.project_id (migration 035).
+ * 035 는 cart_projects(034) FK 를 참조하므로 이 컬럼 존재 = 034·035 모두 적용됨
+ * (단일 probe 로 충분). false → 로그인 카트 동기화가 project 필드(project_id/
+ * project_seq/orientation)를 생략하고 평면 저장한다 — 묶음 정보는 주문 생성 시
+ * variant_snapshot(jsonb)에 동결돼 보존되므로 유실이 아니다(ADR-025 폴백 계약).
+ * 익명 카트(localStorage v2)는 이 probe 와 무관하게 완전 동작한다.
+ */
+export function isProjectCartAvailable(): Promise<boolean> {
+  return probeFeature('projectCart', 'cart_items', 'project_id');
+}

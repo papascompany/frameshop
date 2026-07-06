@@ -27,7 +27,8 @@ import type { AddToCartInput } from '@/types/cart';
 function makeAddInput(): AddToCartInput {
   return {
     userId: null,
-    productId: asBrand<ProductId>('p1'),
+    // RFC 4122 v4 — readLocalCart 의 productId uuid 강화(P1-001) 파싱 통과용.
+    productId: asBrand<ProductId>('22222222-2222-4222-8222-222222222222'),
     variantId: asBrand<ProductVariantId>('v1'),
     photoId: asBrand<PhotoId>('ph1'),
     options: {

@@ -72,6 +72,27 @@ export async function POST(request: Request): Promise<Response> {
   }
   // Owner override is forced server-side: ignore client's userId.
   const item = { ...parsed.data, userId: userId } as CartItem;
-  await upsertCartItem(item);
+  try {
+    await upsertCartItem(item);
+  } catch (err) {
+    // FS-P1 security P1-001: DB 오류를 raw 그대로 클라이언트에 흘리지 않는다.
+    // zod 강화(uuid/.max)로 정상 클라이언트는 여기 닿지 않지만, 변조 입력의
+    // 형식·범위·FK 위반(22P02/22003/23503)은 400 으로 정제하고 그 외에는 상세를
+    // 서버 로그에만 남긴 채 일반화된 500 을 반환한다.
+    const detail = err instanceof Error ? err.message : String(err);
+    const badReference =
+      /22P02|22003|23503|invalid input syntax|out of range|foreign key/i.test(
+        detail,
+      );
+    console.error(
+      JSON.stringify({ event: 'cart_upsert_failed', userId, detail }),
+    );
+    return NextResponse.json(
+      badReference
+        ? { ok: false, code: 'INVALID_REFERENCE' }
+        : { ok: false, code: 'CART_WRITE_FAILED' },
+      { status: badReference ? 400 : 500 },
+    );
+  }
   return NextResponse.json({ ok: true });
 }

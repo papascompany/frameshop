@@ -7,6 +7,7 @@ import { getServerSupabase } from '@/lib/supabase/server';
 import { parseStudioPreselect } from '@/lib/wall/deeplink';
 import { asBrand } from '@/types/common';
 import type { ProductId } from '@/types/common';
+import type { EditorKind } from '@/types/editor';
 import { StudioClient } from './StudioClient';
 
 const GUEST_COOKIE_NAME = 'fs-guest-sid';
@@ -21,13 +22,17 @@ export default async function StudioPage({
     size?: string;
     color?: string;
     orientation?: string;
+    mode?: string;
   }>;
 }) {
   const { orderId } = await params;
-  const { productId, size, color, orientation } = await searchParams;
+  const { productId, size, color, orientation, mode } = await searchParams;
   // FS-EC-04: optional deep-link preselect (포토월 → 스튜디오). null when the
   // params are absent → StudioClient behaves exactly as before.
   const preselect = parseStudioPreselect({ size, color, orientation });
+  // FS-P1-03 (ADR-025): `?mode=multi` → 확장형(멀티포토) 편집 세션. 그 외 모든
+  // 값/부재는 'basic' — 현행 단품 편집기와 완전 동일.
+  const editorKind: EditorKind = mode === 'multi' ? 'extended' : 'basic';
 
   // Resolve the effective sessionId:
   //   - For authenticated users: use the Supabase user ID (set upstream).
@@ -84,6 +89,7 @@ export default async function StudioPage({
       artworks={artworks}
       googlePhotosEnabled={googlePhotosEnabled}
       preselect={preselect}
+      kind={editorKind}
     />
   );
 }

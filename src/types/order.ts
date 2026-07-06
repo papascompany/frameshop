@@ -14,6 +14,7 @@
 
 import { z } from 'zod';
 import { selectedOptionsSchema } from './product';
+import { orientationSchema } from './project';
 import {
   shippingMethodSchema,
   SHIPPING_METHODS,
@@ -31,6 +32,7 @@ import type {
 } from './common';
 import type { SelectedOptions } from './product';
 import type { CropTransform } from './editor';
+import type { Orientation } from './project';
 import type { ShippingMethod } from './shipping';
 
 // ---------- Status union & transitions ----------
@@ -166,6 +168,19 @@ export type OrderItemSnapshot = {
   sourcePhotoId?: PhotoId;
   /** 원본 사진 URL(있으면). 재편집 시 원본을 캔버스에 다시 올리기 위함. */
   sourcePhotoUrl?: string;
+  /**
+   * ADR-025 (확장형 P1) — 묶음 라인 스냅샷 동결. `createOrder` 가 cartItems 를
+   * projectId 로 그룹핑해 그룹당 서버 project_group_id 를 부여하고, 아래 필드들을
+   * variant_snapshot(jsonb)에 함께 동결한다 — **마이그레이션 035 미적용에서도
+   * 묶음 정보가 주문에 보존**된다(035 적용 시 전용 컬럼에도 conditional-spread).
+   * 전부 옵셔널 — 단품/레거시 주문 행에는 없다.
+   */
+  /** 라인 방향 스냅샷(혼합 방향). 값 어휘는 project.ts `Orientation` 과 동일. */
+  orientation?: Orientation;
+  /** 묶음 내 라인 표시 순번. 단품은 없음. */
+  projectSeq?: number;
+  /** 묶음 표시 라벨(주문내역/관리자 그룹 표기용, 서버 생성). 단품은 없음. */
+  groupLabel?: string;
 };
 
 export type OrderItem = {
@@ -359,6 +374,10 @@ export const orderItemSnapshotSchema = z.object({
   bleedMm: z.number().nonnegative().optional(),
   sourcePhotoId: z.string().min(1).optional(),
   sourcePhotoUrl: z.string().optional(),
+  // ADR-025 확장형 묶음 라인 스냅샷(옵셔널 — 단품/레거시 행엔 없음).
+  orientation: orientationSchema.optional(),
+  projectSeq: z.number().int().nonnegative().optional(),
+  groupLabel: z.string().min(1).optional(),
 });
 
 export const createOrderInputSchema = z.object({
