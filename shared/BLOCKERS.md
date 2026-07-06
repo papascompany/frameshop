@@ -18,20 +18,19 @@
 ## Active Blockers
 _(현재 막힌 이슈. 비어있어야 정상)_
 
-### BL-010: 미적용 마이그레이션 029/030/031/032/033 (CTO 수동 적용 필요)
-**Reported by:** orchestrator
-**Date:** 2026-06-22
-**Severity:** P1
-**Description:** 관리자 메모(029)·주소록(032)·구매확정(033)은 코드가 라이브이나 DB 컬럼/테이블
-미적용으로 해당 기능만 런타임 비활성. 적립금(031)·추가배송비(030)는 B-2/Phase C wiring 대기.
-코드는 격리 설계되어 미적용 중에도 나머지 앱은 정상.
-**Needs:** CTO가 Supabase SQL Editor(yohan73@gmail.com 계정)에서 직접 적용. Claude의 Supabase
-MCP는 papascompany 계정이라 해당 프로젝트 접근 불가.
-**Proposed Resolutions:** (1) `supabase/migrations/029,032,033` 먼저 적용 → A/B-1 완성,
-(2) B-2 착수 시 031 + 신규(refunded_amount, receipt_*) 적용. 상세 `docs/BACKLOG.md §1`.
+_(없음)_
 
 ## Resolved Blockers
 _(해결 완료. 학습용으로 보관)_
+
+### BL-010: 미적용 마이그레이션 029~039 — 해소됨 2026-07-06
+**Description:** 관리자 메모(029)·주소록(032)·구매확정(033) 등 코드는 라이브이나 DB 미적용으로
+런타임 비활성. Claude의 Supabase MCP/CLI가 papascompany 계정이라 직접 적용 불가였음.
+**Resolution:** CTO가 브라우저에서 yohan73@gmail.com 로그인 → Claude가 Supabase SQL Editor에서
+통합 SQL(029~035, 038/039 — 전부 비파괴·멱등)을 실행. 검증 쿼리 24행 전부 일치(orders 10컬럼·
+cart/order 프로젝트 링크 6컬럼·product_type·테이블 4종·RPC). 프로덕션 런타임 자동 활성화 확증
+(체크아웃 RSC `features:{points:true,receipt:true,surcharge:true}` — 재배포 없이 probe 활성화).
+036/037은 확장형 P2 예약 결번.
 
 ### BL-009: Vercel 자동배포 누락/Blocked (storigehub 작성 커밋) — 완화됨 2026-06-22
 **Description:** Hobby 비공개 레포에서 `storigehub` 작성 커밋의 배포가 Blocked → main 커밋이

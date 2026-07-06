@@ -5,6 +5,11 @@
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
 > 최종 갱신: 2026-07-06 (확장형 P1 — 034/035 를 쓰는 코드 라이브, "선택"에서 **적용 권장**으로 격상).
+>
+> **✅ 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
+> CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
+> (체크아웃 probe `points/receipt/surcharge` 전부 true). 이 문서는 이후 신규 마이그레이션(036/037 등)
+> 적용 시의 절차 참고용으로 유지한다. 상세: `shared/BLOCKERS.md` BL-010(Resolved).
 
 ---
 

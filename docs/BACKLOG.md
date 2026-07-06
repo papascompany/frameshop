@@ -8,11 +8,12 @@
 
 ---
 
-## §1. ⛏️ 미적용 마이그레이션 (CTO가 Supabase SQL Editor에서 실행해야 활성화)
+## §1. ✅ 마이그레이션 029~039 적용 완료 (2026-07-06)
 
-> **제약**: FrameShop DB는 `yohan73@gmail.com` 계정 소유. Claude의 Supabase MCP는
-> `papascompany` 계정에 연결돼 있어 **직접 적용 불가** → CTO가 SQL Editor에서 수동 실행해야 함.
-> 미적용 상태에서도 앱은 정상 동작하도록 컬럼/테이블 접근을 격리 설계함(해당 기능만 비활성).
+> **적용 완료**: CTO 브라우저 로그인(yohan73) 후 SQL Editor에서 통합 실행. 검증 쿼리 24행 일치,
+> 프로덕션 런타임 자동 활성화 확증(체크아웃 probe points/receipt/surcharge 전부 true).
+> BL-010 Resolved. 036/037은 확장형 P2 예약 결번 — P2 착수 시 작성·적용.
+> 아래 표는 이력 참고용으로 유지.
 
 | 마이그레이션 | 기능 | 코드 상태 | SQL |
 |---|---|---|---|
