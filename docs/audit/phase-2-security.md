@@ -407,7 +407,7 @@ The login form calls `supabase.auth.signInWithPassword` directly from the
 browser. Supabase has internal throttling but it's per IP, not per email â€”
 distributed credential stuffing against `yohan73@gmail.com` (publicly known
 admin from STATUS.md and seed script) is possible. Combined with seed script's
-hardcoded default `Yohan0817` (`scripts/seed-admin-user.sh:23`), this is a
+hardcoded default `\<REDACTED\ 2026\-07\-10\ \â\€\”\ \ê\³\µ\ê\°\œ\ë\…\¸\ì\¶\œ\ \ë\°\œ\ê\²\¬\,\ \í\š\Œ\ì\ \„\ \í\•\„\ì\ˆ\˜\(\ì\˜\¤\ë\„\ˆ\)\,\ \ì\‹\¤\ê\°\’\ \ê\¸\°\ë\¡\\ \ê\¸\ˆ\ì\§\€\>` (`scripts/seed-admin-user.sh:23`), this is a
 concrete risk if the seed script ran in production without override.
 
 **Recommend:**
@@ -467,7 +467,7 @@ URLs, drop `images.unsplash.com` from `remotePatterns`.
 
 | ID | File | Issue |
 |---|---|---|
-| P2-01 | `scripts/seed-admin-user.sh:23-24` | Default password `Yohan0817` and email hardcoded in committed script. Tracked in git history forever. Move to env-only, no default. |
+| P2-01 | `scripts/seed-admin-user.sh:23-24` | Default password `\<REDACTED\ 2026\-07\-10\ \â\€\”\ \ê\³\µ\ê\°\œ\ë\…\¸\ì\¶\œ\ \ë\°\œ\ê\²\¬\,\ \í\š\Œ\ì\ \„\ \í\•\„\ì\ˆ\˜\(\ì\˜\¤\ë\„\ˆ\)\,\ \ì\‹\¤\ê\°\’\ \ê\¸\°\ë\¡\\ \ê\¸\ˆ\ì\§\€\>` and email hardcoded in committed script. Tracked in git history forever. Move to env-only, no default. |
 | P2-02 | `src/lib/upload-ratelimit.ts:19` | `Map<string, Bucket>` grows unbounded â€” no TTL eviction. On a long-lived Node instance, attacker can fill memory by rotating `sessionId`s. Add periodic prune. |
 | P2-03 | `src/lib/security/same-origin.ts:64-67` | Non-production bypass `if (NODE_ENV !== 'production' && !secFetchSite) return true;` â€” preview deployments run with `NODE_ENV=production` by default on Vercel, so this is fine **only if** preview env confirms it. Worth a deployment-config check. |
 | P2-04 | `src/lib/render/print.ts:159-318` | Sharp pipeline allocates â‰¥4 large buffers (photoOut, clippedPhotoLayer, innerCanvas, innerComposite, withBleed). Memory peak for a 4000Ã—4000 photo on 11Ã—14 print â‰ˆ 200MB. Vercel Pro Node functions cap at 1GB; OK for now, but flag for load test. |
