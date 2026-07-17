@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { PriceTag } from './PriceTag';
 import type { ProductListItem } from '@/types';
 import { cn } from '@/lib/cn';
@@ -12,6 +13,13 @@ type Props = {
   lazyImage?: boolean;
   /** Optional eyebrow text shown above the name (e.g. category). */
   eyebrow?: string;
+  /**
+   * FS-X-06: 위시리스트 하트 오버레이 슬롯(클라 아일랜드, e.g. WishlistHeart).
+   * 카드가 단일 <Link> 라 내부에 버튼을 중첩할 수 없어(HTML 불허) relative
+   * 래퍼 + Link "형제" absolute 오버레이(top-right)로 렌더한다.
+   * 미지정이면 기존 렌더와 완전히 동일(래퍼 없음).
+   */
+  wishlistSlot?: ReactNode;
 };
 
 /**
@@ -37,8 +45,9 @@ export function ProductCard({
   badge,
   lazyImage = true,
   eyebrow,
+  wishlistSlot,
 }: Props) {
-  return (
+  const card = (
     <Link
       href={`/product/${product.id}`}
       className="group block rounded-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink focus-visible:outline-offset-4"
@@ -117,6 +126,16 @@ export function ProductCard({
         </div>
       </div>
     </Link>
+  );
+
+  if (!wishlistSlot) return card;
+
+  return (
+    <div className="relative">
+      {card}
+      {/* 하트 오버레이 — 이미지 영역 top-right(배지는 top-left라 충돌 없음). */}
+      <div className="absolute top-3 right-3 z-20">{wishlistSlot}</div>
+    </div>
   );
 }
 

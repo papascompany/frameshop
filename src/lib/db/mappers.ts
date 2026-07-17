@@ -164,6 +164,9 @@ type OrderRow = {
   points_accrued?: number | null;
   /** migration 038 — may be absent until applied. */
   refunded_amount?: number | null;
+  /** migration 042 (FS-X-04, ADR-026) — may be absent until applied. */
+  coupon_code?: string | null;
+  coupon_discount?: number | null;
   /** migration 039 — may be absent until applied. NULL = 미신청. */
   receipt_type?: string | null;
   receipt_info?: string | null;
@@ -347,6 +350,9 @@ export const mapOrder = (row: OrderRow): Order => ({
   pointsRedeemed: row.points_redeemed ?? 0,
   pointsAccrued: row.points_accrued ?? 0,
   refundedAmount: row.refunded_amount ?? 0,
+  // FS-X-04 — undefined-safe: migration 042 미적용/쿠폰 미사용 시 폴백.
+  couponCode: row.coupon_code ?? null,
+  couponDiscount: row.coupon_discount ?? 0,
   // 예상 외 값은 null(미신청)로 — 039 CHECK 가 income/proof 만 허용하지만 방어적.
   receiptType:
     row.receipt_type === 'income' || row.receipt_type === 'proof'

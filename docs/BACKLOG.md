@@ -1,19 +1,20 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-07-06 (확장형 P1 편집기 웨이브 반영).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-07-16 (FS-X 웨이브 — P2/P3·쿠폰·문의·위시 반영).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
 
 ---
 
-## §1. ✅ 마이그레이션 029~039 적용 완료 (2026-07-06)
+## §1. 마이그레이션 — 029~039 ✅ 적용 완료(2026-07-06) · 036/037/040~042 적용 대기(FS-X)
 
-> **적용 완료**: CTO 브라우저 로그인(yohan73) 후 SQL Editor에서 통합 실행. 검증 쿼리 24행 일치,
+> **029~039 적용 완료**: CTO 브라우저 로그인(yohan73) 후 SQL Editor에서 통합 실행. 검증 쿼리 24행 일치,
 > 프로덕션 런타임 자동 활성화 확증(체크아웃 probe points/receipt/surcharge 전부 true).
-> BL-010 Resolved. 036/037은 확장형 P2 예약 결번 — P2 착수 시 작성·적용.
-> 아래 표는 이력 참고용으로 유지.
+> BL-010 Resolved. **036/037/040/041/042 는 FS-X 웨이브(2026-07-16)에서 작성 완료 — 미적용(적용 대기)**:
+> 이 웨이브 머지·배포 후 브라우저 세션으로 적용 예정(CTO 승인済). probe 게이트로 적용 전 무해.
+> 아래 표는 이력 참고 + 적용 대기 추적용으로 유지.
 
 | 마이그레이션 | 기능 | 코드 상태 | SQL |
 |---|---|---|---|
@@ -26,8 +27,16 @@
 | `035_cart_items_project_link` | 확장형 기반: cart/order 프로젝트 링크 | **P1 라이브** — 적용 시 로그인 묶음 카트 동기화 자동 활성화(probe) | 파일 참조 |
 | `038_orders_refunded_amount` | 부분환불 누적액 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
 | `039_orders_cash_receipt` | 현금영수증 신청·Toss 발급 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
+| `036_set_templates` | 확장형 P2: 세트 프리셋 + cart_projects FK 이행 (FS-X) | **작성 완료·적용 대기** — probe `isSetTemplatesAvailable`, 적용 시 자동 활성화 | 파일 참조 |
+| `037_bundle_rules` | 확장형 P2: 구성 검증/가격 규칙 (FS-X — 세트할인 적용은 ADR-026 보류) | **작성 완료·적용 대기** — probe `isBundleRulesAvailable` | 파일 참조 |
+| `040_inquiries` | 1:1 문의(비밀글 고정) + admin 답변 (FS-X) | **작성 완료·적용 대기** — probe `isInquiriesAvailable` | 파일 참조 |
+| `041_wishlists` | 위시리스트(로그인 전용) (FS-X) | **작성 완료·적용 대기** — probe `isWishlistAvailable` | 파일 참조 |
+| `042_coupons` | 쿠폰 + 사용 원장 + orders 쿠폰 스냅샷 (FS-X) | **작성 완료·적용 대기** — probe `isCouponsAvailable` | 파일 참조 |
 
 → **적용 가이드(순서·검증쿼리·롤백)**: `docs/MIGRATIONS-APPLY.md` (CTO 전달용 단일 문서).
+→ **2차 적용 대기(FS-X, 2026-07-16 작성)**: 036/037/040/041/042 — 전부 비파괴·멱등, 미적용 상태에서도
+  probe 게이트로 앱 정상(해당 UI 비노출). 적용 시 코드 배포 없이 자동 활성화(probe TTL 60초).
+  절차·검증쿼리·롤백 = `docs/MIGRATIONS-APPLY.md` "2차 적용 대기" 절.
 → **권장**: 029~039 전부 적용. **P1 편집기 라이브로 034/035 도 권장 격상** — 미적용 시 로그인 묶음 카트
   동기화만 평면 저장 폴백(묶음 정보는 주문 스냅샷 jsonb 에 보존), 적용 시 자동 활성화(probe).
 → **029~039 전부 미적용 상태에서도 앱 정상**(graceful probe/conditional-spread, ADR-024) — 적용 시 코드 배포 없이 자동 활성화(probe TTL 60초).
@@ -35,7 +44,7 @@
 
 ---
 
-## §1A. ★ 확장형 상품 (베이직/확장형 분리) — P0·P1 완료, 다음 = P2/P3
+## §1A. ★ 확장형 상품 (베이직/확장형 분리) — P0·P1·P2·P3 완료 (갤러리월 에디터는 후속)
 
 > **요청(2026-06-23)**: 사진1장→사이즈1개 단품을 **베이직**으로 분리하고, 멀티포토·혼합 사이즈/방향·
 > 세트(갤러리월)를 한 흐름에서 주문하는 **확장형 상품** 도입. 장바구니~주문 화면도 구성 시각화.
@@ -54,14 +63,16 @@
   3. ✅ **편집 세션 무결성 — 완료(ADR-022).** localStorage 드래프트(키=`(sessionId,productId)`, sessionId 안정 →
      소유권 무결성 유지), 버전키+안전파싱+7일 TTL, 마운트 복원 배너·결제 시 정리. 서버 드래프트(교차기기·공유)는 P2+로 분리.
 - **롤아웃**: P0 기반(비파괴, 034/035 + 스냅샷 v2 ADR) ✅ → P1 편집기 MVP(케이스1~4 그리드) ✅ →
-  P2 세트·어드민 워크스페이스(036/037) → P3 주문 6화면 시각화.
+  P2 세트·어드민 워크스페이스(036/037) ✅ → P3 주문 6화면 시각화 ✅ (FS-X 웨이브 2026-07-16 —
+  갤러리월 드래그 에디터·세트 SKU 주문 플로우·세트할인 적용은 후속).
 - **✅ P0 기반 — 완료(ADR-023, 배포 대기 커밋).** 034/035 SQL 작성(`supabase/migrations/`, CTO 적용 가이드
   `docs/MIGRATIONS-APPLY.md`) · `src/types/project.ts` 신설(확장형 도메인 SSOT) · `product_type` plumbing
   graceful 폴백(`mapProduct` 부재/NULL→'single', 034 비게이트) · CartItem 옵셔널 묶음필드 + localStorage
   v1→v2 무손실 마이그레이터 · `adminNav.ts` SSOT(사이드바/하단바/타일 3중복 통합). 검증 GREEN(tsc·eslint·
   build·239 tests). **034/035 는 적용해도/안 해도 앱 무변화** — 035 의 진짜 게이트는 P1(라인 저장 시점).
-- **신규 마이그레이션** ⛏️: `034_products_product_type`(+cart_projects) ✅작성, `035_cart_items_project_link`
-  (+order_items 컬럼) ✅작성, `036_set_templates`, `037_bundle_rules` (전부 비파괴 NULL/신규, 029~033 다음 번호).
+- **신규 마이그레이션** ⛏️: `034_products_product_type`(+cart_projects) ✅적용, `035_cart_items_project_link`
+  (+order_items 컬럼) ✅적용, `036_set_templates` ✅작성(적용 대기), `037_bundle_rules` ✅작성(적용 대기)
+  (전부 비파괴 NULL/신규 — §1 표·`docs/MIGRATIONS-APPLY.md` "2차 적용 대기" 절 참조).
 - **✅ P1 확장형 편집기 MVP — 완료(2026-07-06, ADR-025, 브랜치 `feat/extended-p1-editor`).** 4유닛:
   ① FS-P1-00 기반 — ADR-025(FROZEN 옵셔널 계약)·`EditorPhotoEntry` 옵셔널(`selectedOptions?`/`orientation?`)·
   드래프트 v2 무손실 승격·`OrderItemSnapshot` orientation/projectSeq/groupLabel·`isProjectCartAvailable` probe.
@@ -73,11 +84,21 @@
   graceful: 익명은 034/035 무관 완전 동작, 로그인 카트 동기화만 probe 폴백(미적용 시 평면 저장, 묶음 정보는
   주문 스냅샷 jsonb 보존) — **034/035 적용 시 로그인 묶음 동기화 자동 활성화**. 검증: tsc 0 · eslint 0 ·
   build 0 · vitest 510 passed | 14 todo(베이스라인 451 → +59).
-- **다음**: **P2 세트·어드민 워크스페이스**(036/037 — set_templates 슬롯 빌더·bundle_rules 폼·
-  `/admin/products/[id]` 워크스페이스) → **P3 주문 6화면 묶음 시각화**(그룹핑 뷰모델·카드 UI).
-- **잔여(P2 후보)**: 재크롭 배지 베이스라인 드래프트 영속화 · extended 에서 명화/Google Photos 소스 ·
-  StudioClient 본문 i18n · 갤러리월(036/037) · 카트/주문 6화면 묶음 시각화(P3) · 서버 드래프트(교차기기).
-- **CTO 결정 필요**: 세트 부분선택/취소 단위/할인 분배/프리셋 우선순위/마이그레이션 적용 시점/카탈로그 분리(스펙 §12).
+- **✅ P2 세트·어드민 워크스페이스 — 완료(2026-07-16, FS-X 웨이브 X-03, ADR-026, 브랜치 `feat/p2-p3-commerce`).**
+  마이그 036/037 작성(적용 대기) · `/admin/products/[id]` 워크스페이스 6탭(유형 게이트 — single→extended
+  승격 포함) · set_templates 슬롯 빌더(mm 4필드 폼 + WallCanvas 읽기전용 미니맵 프리뷰) · bundle_rules 폼
+  (폼·저장·타입까지 — **세트할인 createOrder 적용은 ADR-026 보류**, 세트 SKU 출시 시 활성화).
+  갤러리월(벽 슬롯 에디터 드래그·세트 SKU 주문 플로우)은 후속(P2 후기).
+- **✅ P3 주문 6화면 묶음 시각화 — 완료(2026-07-16, FS-X 웨이브 X-04/X-05).** 그룹핑 뷰모델
+  (`groupCartByProject`/`groupOrderByGroupId` — 그룹 키 = 카트 projectId / 주문 snapshot.groupLabel,
+  깨진 키 단품 폴백) · cart 묶음 카드 + 세트 원자 선택(ADR-021 — 그룹 헤더 일괄 토글, 부분선택 불가) ·
+  checkout 그룹 요약 · success 그룹 요약 · lookup projection+그룹 · MyOrders 그룹 · admin 주문상세
+  그룹 트리+할인 분해 · **reorder 세트 복원 버그 수정**(project 필드 드롭 → groupLabel 기준 복원).
+- **잔여(후속 후보)**: 갤러리월 드래그 에디터·세트 SKU 주문 플로우(P2 후기) · 세트할인 createOrder 적용
+  (ADR-026 보류 해제 시) · 재크롭 배지 베이스라인 드래프트 영속화 · extended 에서 명화/Google Photos 소스 ·
+  StudioClient 본문 i18n · 서버 드래프트(교차기기).
+- **CTO 결정 잔여**: 갤러리월 카탈로그 노출 방식(스펙 §12-6) — 나머지는 ADR-021/026 으로 확정
+  (부분선택·취소 단위·할인 분배·마이그 적용 시점=머지·배포 후 브라우저 세션).
 
 ---
 
@@ -131,13 +152,23 @@
   `reversePointsForOrder` 자동 회수(사용분 복원 ADJUSTMENT+ / 적립분 회수 REFUND−, `(order_id,type)` 멱등,
   fire-and-forget, 031 미적용 skip)
 
+완료(FS-X 웨이브 2026-07-16, 브랜치 `feat/p2-p3-commerce`, ADR-026 — 마이그 042/040/041 적용 대기):
+- ✅ **쿠폰/할인** — X-01/X-04/X-05: 정액(원)/정률(bps, subtotal 기준·상한 payable)·최소금액·만료·
+  전체한도(조건부 UPDATE 원자 소비 + 실패 보상)·회원 1인1회(coupon_redemptions UNIQUE)·비회원 허용.
+  할인 순서 = 쿠폰→적립금(net totalPrice, 031 계약 유지). 체크아웃 쿠폰 카드 + `/api/coupons/validate` +
+  createOrder 통합 + admin 쿠폰 CRUD. (042 적용 대기 — probe 게이트)
+- ✅ **1:1 문의** — X-02/X-05/X-06: 4레이어(db/api/account/admin) + 답변 이메일(notifyInquiryReplied) +
+  admin 답변 UI + account 문의 목록/작성폼. 비밀글 고정(전부 비공개). (040 적용 대기)
+- ✅ **위시리스트** — X-02/X-06: 로그인 전용(CTO 확정). 하트 아일랜드 + 배치 하이드레이션 + 카탈로그/상세
+  와이어링 + account 위시. (041 적용 대기)
+
 남은 항목:
-- **쿠폰/할인** (coupons 테이블 + 체크아웃 적용) — CTO 결정으로 다음 세션
-- **1:1 문의 / 주문 Q&A** (inquiries 테이블 + admin 답변) — CTO 결정으로 다음 세션
-- **위시리스트** (찜) — CTO 결정으로 다음 세션
 - **SMS/카카오 알림톡** (현재 알림은 이메일 only)
 - **회원정보 관리** (수정/비밀번호 변경/회원탈퇴) — 고객 멤버십 성숙
 - **배송 추적 API** 연동 (현재 운송장 번호 기록만)
+- **세트할인 createOrder 적용** — ADR-026 보류(세트 SKU/갤러리월 출시 시). bundle_rules 폼·저장·타입까지는
+  구현 완료 — 현행 라인별 가격 검증 유지
+- **갤러리월 드래그 에디터·세트 SKU 주문 플로우** — P2 후기(슬롯 빌더는 mm 폼+미니맵 프리뷰까지 완료, §1A)
 - **부분환불 적립 비례 조정** — 부분환불(누적<전액)은 현재 적립 무조정(문서화된 한계, ADR-024
   Postscript). 비례 조정 정책 미정 — CTO 결정 필요
 - **REDEMPTION 원장 order_id 사후 링크**

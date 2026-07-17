@@ -18,6 +18,9 @@ export default async function AccountLayout({ children }: { children: ReactNode 
     // 한국어 고정 — 통합 단계에서 account.points 키로 승격.
     { href: '/account/points', label: '적립금' },
     { href: '/account/addresses', label: t('addresses') },
+    // FS-X-06: 위시리스트 · 1:1 문의 (ADR-026)
+    { href: '/account/wishlist', label: t('wishlist.navLabel') },
+    { href: '/account/inquiries', label: t('inquiries.navLabel') },
   ];
 
   return (

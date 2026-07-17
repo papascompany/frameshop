@@ -630,4 +630,139 @@ CART_WRITE_FAILED, raw 메시지는 서버 로그 전용). ② P2-002 — `upser
 
 ---
 
+## ADR-026: FS-X 통합 웨이브 — 쿠폰 정책 전문 + 세트할인 보류 + 문의·위시 정책 + probe 유지
+
+**Date:** 2026-07-17
+**Status:** Accepted (FS-X-00 계약 동결 — 구현은 FS-X-01~06)
+
+**Context:**
+FS-X 통합 웨이브(`shared/context/FS-X-wave.md`, 브랜치 `feat/p2-p3-commerce`)가 P2(세트 프리셋·
+어드민 워크스페이스) + P3(묶음 시각화) + 쿠폰·1:1문의·위시리스트를 한 번에 구현한다. 쿠폰은 금전
+경로라 정책(할인 종류·순서·한도·보상)을 구현 전에 동결해야 하고, 신규 마이그레이션
+036/037/040/041/042 는 머지·배포 후 적용이라 **배포~적용 사이 창**의 graceful 동작이 전제다.
+CTO Review Gate 통과: ①계획 승인(세트할인 createOrder 적용만 보류) ②쿠폰 추천안 확정 ③마이그
+5본 적용 진행 ④위시 로그인 전용.
+
+**Decision (CTO 확정):**
+
+*쿠폰 정책 전문(042 + src/types/coupon.ts + src/lib/coupon/calc.ts):*
+1. **2종** — `fixed`(value = KRW 정액) / `percent`(value = bps, **subtotal 기준** 계산, 상한
+   payable). 할인 계산은 순수 함수 `calcCouponDiscount` 단일 SSOT: fixed = min(value, payable),
+   percent = min(floor(subtotal × value / 10000), payable), 음수/비유한/비정상 입력은 0.
+2. **적용 조건** — `min_subtotal`(최소 상품합계) · `expires_at`(만료) · `is_active`. 코드는
+   `normalizeCouponCode`(trim + 대문자)로 정규화해 저장/조회(DB CHECK `code = upper(btrim(code))`
+   와 동일 계약). 비회원도 코드 입력 가능.
+3. **할인 순서** — `subtotal + shipping + surcharge − 쿠폰할인 − 적립금 = totalPrice`
+   (**net 저장**, 031 계약 유지 — confirm.ts 의 `totalPrice === amount` 검증 무변경). 쿠폰할인은
+   subtotal 기준으로 계산하되 상한 = payable(음수 방지). 적립금 상한(maxRedeemable)은 **쿠폰
+   적용 후 payable 기준으로 재계산**한다.
+4. **전체 한도** — `usage_limit` 은 조건부 UPDATE 원자 차감:
+   `SET used_count = used_count + 1 WHERE id = ? AND is_active AND (usage_limit IS NULL OR
+   used_count < usage_limit)` → 0행이면 소진 거부(`COUPON_EXHAUSTED`).
+5. **회원 1인 1회** — `coupon_redemptions UNIQUE(coupon_id, user_id)`(충돌 =
+   `COUPON_ALREADY_USED`). 비회원은 미기록(식별 불가 — 전체 한도만 적용).
+6. **createOrder 체인 위치** — variant 검증 → subtotal → surcharge → fee-mismatch →
+   **쿠폰 검증·원자 사용·할인 확정** → redeem 검증(쿠폰 반영 payable 기준) → redeem RPC →
+   receipt → INSERT(`coupon_code`/`coupon_discount` conditional-spread). **실패 보상**: 주문
+   INSERT 실패 시 used_count 원복(−1) + redemptions 행 삭제 + redeem 환급(기존) — redeem 보상
+   패턴 미러.
+7. **에러코드** — `COUPON_INVALID`(부재/비활성/만료/최소금액 미달) · `COUPON_EXHAUSTED`(한도
+   소진) · `COUPON_ALREADY_USED`(회원 재사용). API 는 422 매핑.
+8. **coupons RLS = 정책 없음(service-role 전용)** — 코드 열거 방지. 검증은 서버
+   API(`/api/coupons/validate`) 경유. redemptions 는 owner-select 만.
+
+*세트할인 보류:*
+9. bundle_rules 는 **폼·저장·타입까지만** 이번 웨이브에서 구현한다. createOrder 의 세트가
+   재계산·할인 적용(`sum_with_discount`/`flat` 전략의 금전 경로)은 세트 SKU/갤러리월 출시 시
+   후속 — ADR-021 정합 경로(행별 비례배분, 행 가격 합 = 세트가)는 그때 활성화한다. 현행 라인별
+   가격 검증(PRICE_MISMATCH)이 계속 유효하므로 이번 웨이브에 신규 가격 경로는 0 이다.
+
+*문의·위시 정책:*
+10. **위시리스트 로그인 전용** — `wishlists.user_id NOT NULL`, 익명 localStorage 위시 없음.
+    RLS 는 032 스타일 owner FOR ALL. (user_id, product_id) UNIQUE 로 토글 멱등.
+11. **문의 비공개(비밀글 고정)** — 공개 SELECT 정책 없음. 작성자 본인(owner-select) +
+    관리자(service-role)만 읽는다. 비회원 문의는 user_id NULL 로 서버 라우트(service-role +
+    코드 레벨 스코핑)를 통해서만 생성/조회. 답변 알림은 `contact_email` 수신(회원/비회원 공통
+    필수, notifyInquiryReplied fire-and-forget).
+
+*probe 게이트 유지:*
+12. 마이그 029~039 는 프로덕션 적용 완료지만, 신규 036/037/040/041/042 는 머지·배포 후
+    적용이므로 **배포~적용 사이 창**을 위해 신규 기능도 feature-probe 게이트(ADR-024 패턴)를
+    유지한다: `isSetTemplatesAvailable`/`isBundleRulesAvailable`/`isInquiriesAvailable`/
+    `isWishlistAvailable`/`isCouponsAvailable`(042 는 한 파일이 coupons·redemptions·orders
+    2컬럼을 함께 만들므로 `coupons.code` 단일 probe 로 충분). false → UI 비노출/명시 에러
+    (42703/42P01 노출 금지), 적용 시 TTL 60초 내 자동 활성화.
+
+*P3 그룹핑 계약(뷰모델 순수 함수):*
+13. 그룹 키 SSOT — 카트 = `CartItem.projectId`(null = 단품), 주문 = `snapshot.groupLabel`
+    (035 무관 durable — mapOrderItem 이 전용 컬럼을 노출하지 않으므로 유일 키).
+    `groupCartByProject`/`groupOrderByGroupId`(src/lib/{cart,order}/grouping.ts)는 동형 계약:
+    groups 첫 등장 순서 + lines/singles 입력 순서 보존, 깨진 키(빈 문자열·공백)는 단품 폴백,
+    subtotal = sum(price × quantity). 클라/서버 공용(server-only 금지).
+
+**Consequences:**
+- (+) 할인 계산이 순수 함수 단일 SSOT 라 체크아웃 표시와 createOrder 청구가 구조적으로 일치.
+- (+) 원자 차감 + UNIQUE + 보상 트랜잭션으로 금전 경로의 초과 사용/이중 사용/유령 차감 봉쇄.
+- (+) 5본 전부 비파괴·멱등·graceful — 배포와 마이그레이션 적용 시점 완전 분리(ADR-024 연장).
+- (-) 비회원은 1인 1회 강제 불가(전체 한도만) — 문서화된 한계.
+- (-) used_count 보상(−1)은 원자 차감의 역연산이라 경합 시 이론상 순간 과소집계 가능(한도
+  검증은 차감 시점에만 일어나므로 안전 방향 오차).
+- (-) 세트할인 미적용 동안 set_price/set_discount_bps/pricing_strategy 는 저장만 되고 주문
+  금액에 반영되지 않음 — 어드민 UI 에 보류 안내 필요(X-03).
+
+**Alternatives Considered:**
+- **쿠폰 RPC 원자화(사용+기록+주문을 단일 RPC)** — 기각. 조건부 UPDATE(0행 = 거부)만으로
+  한도 원자성이 충족되고, 주문 INSERT 실패 보상은 기존 redeem 보상 패턴을 미러하면 된다.
+  RPC 는 마이그레이션 표면과 리뷰 비용만 늘린다(014 order_no RPC 와 달리 다중 테이블 왕복이
+  본질적으로 필요하지 않음).
+- **비회원 1인 1회(이메일/전화 기준)** — 기각. 신뢰 가능한 식별자가 없어(입력값 변조 자유)
+  강제 불가. 전체 usage_limit 로 노출을 통제한다.
+- **세트할인 즉시 적용(createOrder 세트가 재계산)** — 기각. 세트 SKU/갤러리월 적용 플로우가
+  아직 없어(카탈로그 노출·세트 담기 UI 부재) 검증 불가능한 죽은 금전 경로가 된다. ADR-021
+  비례배분 계약은 유지하고 활성화만 후속으로 미룬다.
+
+**Postscript (2026-07-17, FS-X-FIX-A — 적대 리뷰 Security+Final 후속):**
+
+적대 리뷰가 쿠폰 라이프사이클/금전 경로에서 4건을 적발해 아래처럼 수정했다(최소 diff, 계약
+동결 유지). 결제 표시/청구 일치와 원자성 원칙은 그대로다.
+
+1. **쿠폰 소비 시점 이동(P1-2, 핵심).** consumeCoupon 을 createOrder(주문 INSERT 직전)에서
+   **결제 확정(confirmPayment, PAID 전이 성공 직후)** 로 옮겼다. 기존 구조는 결제 실패·재시도
+   때마다 회원의 1인 1회 쿠폰이 영구 소실됐다(주문은 CREATED 로 남는데 쿠폰만 소진). 이제
+   createOrder 는 **검증 + 할인 확정 + orders.coupon_code/coupon_discount 스냅샷(예약)** 까지만
+   하고, 실제 원자 소비(used_count CAS + 회원 redemptions INSERT)는 `consumeCouponByCode`
+   (스냅샷 code → id 재조회)가 confirm 에서 수행한다. **멱등 근거**: confirm 은 payment_events
+   UNIQUE 락을 획득한 브랜치에서만 소비하므로 confirm 재호출은 dedup 단락되어 재소비 없음(회원은
+   redemptions UNIQUE 가, 비회원은 "락 소유자만 소비" 가정이 이중 증가를 막는다 — 코드 주석+
+   payment-confirm.test 로 고정). **fail-open**: 예약~confirm 사이 소진(EXHAUSTED) 등 소비 실패는
+   결제가 이미 성사됐으므로 주문을 PAID 로 유지 + 구조화 로그(`coupon_consume_after_paid_failed`);
+   used_count 과소집계는 ADR-026 Consequences 의 안전 방향이다. redeem(적립금)은 기존 동작
+   유지(createOrder 소비 + 취소 시 reverse) — 이번 스코프는 **쿠폰만** 이동.
+
+2. **취소/환불 쿠폰 복원(P1-1).** `releaseCouponByOrder`(스냅샷 code → release) 를 추가하고
+   customerCancelOrder + 관리자 fullRefund/cancelOrderAction 의 **CANCELLED/REFUNDED 전이 성공
+   후** 호출한다(reversePointsForOrder 미러, fire-and-forget, never throws). 소비를 confirm 으로
+   옮겼으므로 **PAID 이후에서 취소/환불한 경우에만** 복원한다 — CREATED(미결제) 취소는 애초에
+   소비 안 됐으니 스냅샷만 남기고 무동작.
+
+3. **쿠폰 할인 최소결제금액(P1-3).** calcCouponDiscount 상한을 payable 전액이 아니라
+   **max(0, payable − POINTS_MIN_PAYABLE(100))** 로 바꿔 쿠폰만으로 0원 결제가 되는 것을
+   막았다(적립금 maxRedeemable 과 동일 정책). 공용 순수 함수라 checkout-totals/CheckoutClient
+   표시도 자동 정합(재검증 완료).
+
+4. **주문 생성 레이트리밋 키(Sec-2).** `order_create` 레이트리밋 키에서 **body sessionId 폴백을
+   제거**(쿠키 sessionId ?? IP 만) — 공격자가 매 요청 body sessionId 를 회전시켜 스로틀을 우회할
+   수 있었다. body sessionId 는 photo-ownership 검증용으로 createOrder 에는 그대로 전달한다.
+
+**검증 한계:** Toss 키가 placeholder 라 실 confirm 은 미검증 — 위 소비 경로는 로직/테스트로만
+확인했다. **런칭 전 실결제 스모크 테스트 필수**.
+
+**이번 미구현(보류 문서화):**
+- **P2-006(세트 원자성 서버 강제)** — 세트 라인의 원자적 담기/가격 합 = 세트가 서버 강제는
+  세트할인 활성화 시(위 세트할인 보류 §9 해제 시점)의 **P0 선결과제**. 이번 웨이브 미구현.
+- **P2-005(비회원 1:1 문의)** — 비회원 문의 생성/조회(user_id NULL + 서버 라우트 스코핑)는
+  후속 범위. 이번 웨이브 미구현.
+
+---
+
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_

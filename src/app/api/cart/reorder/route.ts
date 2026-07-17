@@ -12,7 +12,7 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { asBrand } from '@/types/common';
-import type { PhotoId, UserId } from '@/types/common';
+import type { CartProjectId, PhotoId, UserId } from '@/types/common';
 import type { AddToCartInput } from '@/types/cart';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getOrder } from '@/lib/db/order';
@@ -88,6 +88,16 @@ export async function POST(request: Request): Promise<Response> {
     .map((it) => it.photoUrl);
   const idByUrl = await getPhotoIdsByOriginalUrl(legacyUrls);
 
+  // FS-X-05 (ADR-025 §P3): 세트(묶음) 복원. 그룹 키는 snapshot.groupLabel —
+  // 주문 스냅샷에 동결된 유일한 durable 그룹 키(035 무관)다. CartItem zod 는
+  // projectId 에 uuid 를 요구하므로 표시 라벨('묶음 1')을 키로 실을 수 없다 —
+  // 그룹당 새 projectLocalId(uuid)를 발급해 라인들이 다시 한 묶음으로 담긴다.
+  // 새 uuid 는 클라이언트 로컬 그룹 키일 뿐이며(createOrder 가 서버 group id 를
+  // 다시 발급), 주문마다 새로 발급되므로 재주문 간 충돌이 없다.
+  const projectIdByLabel = new Map<string, CartProjectId>();
+  // 스냅샷에 projectSeq 가 없는 레거시 묶음 라인의 폴백 순번(그룹 내 0-based).
+  const nextSeqByLabel = new Map<string, number>();
+
   const reorderItems: AddToCartInput[] = [];
   let skipped = 0;
   for (const item of order.items) {
@@ -97,7 +107,7 @@ export async function POST(request: Request): Promise<Response> {
       skipped += 1;
       continue;
     }
-    reorderItems.push({
+    const base: AddToCartInput = {
       userId: null,
       productId: item.snapshot.productId,
       variantId: item.snapshot.variantId,
@@ -108,6 +118,33 @@ export async function POST(request: Request): Promise<Response> {
       previewUrl: item.photoUrl,
       price: item.snapshot.unitPrice,
       quantity: item.quantity,
+    };
+
+    const rawLabel = item.snapshot.groupLabel;
+    const label = typeof rawLabel === 'string' ? rawLabel.trim() : '';
+    if (label === '') {
+      // 단품/레거시(groupLabel 없음) — 현행 평면 복원 그대로(회귀 없음).
+      reorderItems.push(base);
+      continue;
+    }
+
+    let projectId = projectIdByLabel.get(label);
+    if (!projectId) {
+      projectId = asBrand<CartProjectId>(crypto.randomUUID());
+      projectIdByLabel.set(label, projectId);
+    }
+    const fallbackSeq = nextSeqByLabel.get(label) ?? 0;
+    nextSeqByLabel.set(label, fallbackSeq + 1);
+
+    reorderItems.push({
+      ...base,
+      projectId,
+      // 스냅샷 projectSeq 우선(라인 표시 순서 보존), 없으면 그룹 내 등장 순번.
+      projectSeq: item.snapshot.projectSeq ?? fallbackSeq,
+      // 방향은 스냅샷에 있을 때만 전달(단품과 동일하게 키 자체를 생략).
+      ...(item.snapshot.orientation != null
+        ? { orientation: item.snapshot.orientation }
+        : {}),
     });
   }
 

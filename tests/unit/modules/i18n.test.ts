@@ -182,4 +182,39 @@ describe('message completeness', () => {
       expect(enKeys.has(key), `en: ${key}`).toBe(true);
     }
   });
+
+  it('both locales have the wishlist/inquiry keys (FS-X-06)', () => {
+    const required = [
+      'product.wishlistAdd',
+      'product.wishlistRemove',
+      'product.inquiryCta',
+      'account.wishlist.navLabel',
+      'account.wishlist.title',
+      'account.wishlist.unavailable',
+      'account.wishlist.empty',
+      'account.wishlist.viewProduct',
+      'account.wishlist.remove',
+      'account.wishlist.soldOut',
+      'account.wishlist.removeFailed',
+      'account.inquiries.navLabel',
+      'account.inquiries.title',
+      'account.inquiries.unavailable',
+      'account.inquiries.empty',
+      'account.inquiries.new',
+      'account.inquiries.reply',
+      'account.inquiries.status.OPEN',
+      'account.inquiries.status.ANSWERED',
+      'account.inquiries.status.CLOSED',
+      'account.inquiries.form.subject',
+      'account.inquiries.form.body',
+      'account.inquiries.form.contactEmail',
+      'account.inquiries.form.category',
+      'account.inquiries.form.rateLimited',
+      'account.inquiries.form.submit',
+    ];
+    for (const key of required) {
+      expect(koKeys.has(key), `ko: ${key}`).toBe(true);
+      expect(enKeys.has(key), `en: ${key}`).toBe(true);
+    }
+  });
 });

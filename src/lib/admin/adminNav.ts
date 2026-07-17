@@ -19,6 +19,8 @@ export type AdminNavKey =
   | 'options'
   | 'orders'
   | 'reviews'
+  | 'inquiries'
+  | 'coupons'
   | 'curation'
   | 'artworks'
   | 'landing'
@@ -64,6 +66,9 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
 
   { key: 'orders', href: '/admin/orders', label: '주문', section: 'ops', tileDescription: '주문 조회 및 상태 전이', inBottomNav: true },
   { key: 'reviews', href: '/admin/reviews', label: '리뷰', section: 'ops' },
+  // FS-X-05: 문의/쿠폰 — 하단바 미포함(5개 만석), 타일 미노출(아이콘 맵은 표면별 로컬).
+  { key: 'inquiries', href: '/admin/inquiries', label: '문의', section: 'ops' },
+  { key: 'coupons', href: '/admin/coupons', label: '쿠폰', section: 'ops' },
   { key: 'curation', href: '/admin/curation', label: '큐레이션', section: 'ops', tileDescription: '랜딩 배너/컬렉션/feature', inBottomNav: true },
   { key: 'artworks', href: '/admin/artworks', label: '명화', section: 'ops' },
   { key: 'landing', href: '/admin/landing', label: '랜딩 관리', section: 'ops' },

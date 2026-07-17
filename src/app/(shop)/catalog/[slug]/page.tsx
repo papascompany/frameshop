@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { Container } from '@/components/layout/Container';
 import { ProductCard } from '@/components/ProductCard';
+import { WishlistHeart } from '@/components/wishlist/WishlistHeart';
+import { WishlistHydrator } from '@/components/wishlist/WishlistHydrator';
 import { SectionHeader } from '@/components/marketing/SectionHeader';
 import { getProductsByCategory, getCategories } from '@/lib/db/catalog';
 import type { ProductListResult } from '@/types';
@@ -126,17 +128,28 @@ export default async function CatalogPage({
             </p>
           </div>
         ) : (
-          <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
-            {result.items.map((p, i) => (
-              <li key={p.id}>
-                <ProductCard
-                  product={p}
-                  lazyImage={i > 3}
-                  badge={i === 0 ? 'BEST' : undefined}
-                />
-              </li>
-            ))}
-          </ul>
+          /* FS-X-06: 하트 상태 배치 하이드레이션 — 그리드 전체 productIds 를
+             모아 GET ?productIds= 1회 조회 후 컨텍스트로 하트에 분배한다.
+             페이지는 ISR 이라 서버에서 위시 상태를 굽지 않는다(클라 전용). */
+          <WishlistHydrator productIds={result.items.map((p) => p.id as string)}>
+            <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
+              {result.items.map((p, i) => (
+                <li key={p.id}>
+                  <ProductCard
+                    product={p}
+                    lazyImage={i > 3}
+                    badge={i === 0 ? 'BEST' : undefined}
+                    wishlistSlot={
+                      <WishlistHeart
+                        productId={p.id as string}
+                        className="h-9 w-9"
+                      />
+                    }
+                  />
+                </li>
+              ))}
+            </ul>
+          </WishlistHydrator>
         )}
       </Container>
     </>

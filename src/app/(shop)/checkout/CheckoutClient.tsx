@@ -11,7 +11,13 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { PriceTag } from '@/components/PriceTag';
 import { getCart, clearCart, getCartSummary } from '@/lib/cart/client';
+import { groupCartByProject } from '@/lib/cart/grouping';
 import { takeCheckoutSelection } from '@/lib/cart/selection';
+import {
+  ORIENTATION_LABELS,
+  cartGroupTitle,
+  composeOrientationChips,
+} from '../cart/group-view';
 import { formatPhone } from '@/lib/checkout/validate';
 import { calculateShippingFee } from '@/lib/shipping/calc';
 import { requestPayment } from '@/lib/payment/client';
@@ -25,6 +31,7 @@ import type {
   ShippingMethodConfig,
 } from '@/types/shipping';
 import type { CashReceiptRequest, Order } from '@/types/order';
+import type { CouponErrorCode, CouponType } from '@/types/coupon';
 import type { UserAddress } from '@/types/address';
 import { envPublic } from '@/lib/env-public';
 import { PostcodeButton } from '@/components/PostcodeButton';
@@ -48,6 +55,8 @@ export type CheckoutFeatures = {
   receipt: boolean;
   /** 제주/도서산간 추가 배송비 (migration 030). */
   surcharge: boolean;
+  /** 쿠폰 (migration 042, FS-X-04). */
+  coupons: boolean;
 };
 
 /** createOrder 응답의 알려진 실패 코드 → 한국어 안내 (FS-EC-01 추가분). */
@@ -60,6 +69,28 @@ const CREATE_ORDER_ERROR_COPY: Record<string, string> = {
     '지금은 현금영수증 신청을 처리할 수 없습니다. 신청을 해제하고 다시 시도해 주세요.',
   SHIPPING_FEE_MISMATCH:
     '배송비 정보가 변경되었습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.',
+  // FS-X-04 (ADR-026): 결제 직전 서버 재검증(createOrder)이 쿠폰을 거부한 경우.
+  COUPON_INVALID:
+    '쿠폰을 더 이상 적용할 수 없습니다. 쿠폰을 해제한 뒤 다시 시도해 주세요.',
+  COUPON_EXHAUSTED:
+    '쿠폰 수량이 모두 소진되었습니다. 쿠폰을 해제한 뒤 다시 시도해 주세요.',
+  COUPON_ALREADY_USED:
+    '이미 사용한 쿠폰입니다. 쿠폰을 해제한 뒤 다시 시도해 주세요.',
+};
+
+/** /api/coupons/validate 의 errorCode → 한국어 안내 (FS-X-04, ADR-026 3종). */
+const COUPON_ERROR_COPY: Record<CouponErrorCode, string> = {
+  COUPON_INVALID: '사용할 수 없는 쿠폰입니다. 코드와 사용 조건을 확인해 주세요.',
+  COUPON_EXHAUSTED: '준비된 쿠폰이 모두 소진되었습니다.',
+  COUPON_ALREADY_USED: '이미 사용한 쿠폰입니다.',
+};
+
+/** 적용된 쿠폰 상태 — validate 응답 스냅샷(할인액은 totals 가 재계산). */
+type AppliedCoupon = {
+  /** 서버가 정규화한 코드(createOrder 페이로드에 그대로 전달). */
+  code: string;
+  type: CouponType;
+  value: number;
 };
 
 type Props = {
@@ -174,6 +205,18 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
     };
   }, [features.points]);
 
+  // 쿠폰 (FS-X-04, ADR-026). validate API 는 UX 프리뷰 — 청구는 createOrder 가
+  // 같은 순수 함수(calcCouponDiscount)로 재검증·확정한다.
+  const [coupon, setCoupon] = useState<AppliedCoupon | null>(null);
+  const [couponInput, setCouponInput] = useState('');
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponPending, setCouponPending] = useState(false);
+
+  function clearCoupon() {
+    setCoupon(null);
+    setCouponError(null);
+  }
+
   /** Fill the shipping form from a chosen saved address. Clears
    *  "주문인과 동일" since picking an address overrides the recipient. */
   function applySavedAddress(addressId: string) {
@@ -228,16 +271,79 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
     () => computeSurchargeFee(form.shipping.zip, activeMethod),
     [form.shipping.zip, activeMethod],
   );
-  // 합계(FS-EC-01 §6): 상품합계 + 배송비 + 추가배송비 − 적립금 = 최종 결제액.
-  // redeem 은 파생 계산에서 재-clamp — payable 이 줄어도 effect 불필요.
-  const { payable, redeemApplied, total } = computeCheckoutTotals({
-    subtotal: summary.subtotal,
-    shippingFee,
-    surchargeFee,
-    desiredRedeem: form.redeemPoints ?? 0,
-    points,
-  });
-  const maxRedeem = clampRedeem(points.balance, points.balance, payable);
+  // 합계(ADR-026 §3): 상품합계 + 배송비 + 추가배송비 − 쿠폰 − 적립금 = 최종액.
+  // redeem 은 파생 계산에서 재-clamp — payable/쿠폰이 변해도 effect 불필요.
+  const { payable, couponDiscount, payableAfterCoupon, redeemApplied, total } =
+    computeCheckoutTotals({
+      subtotal: summary.subtotal,
+      shippingFee,
+      surchargeFee,
+      desiredRedeem: form.redeemPoints ?? 0,
+      points,
+      coupon,
+    });
+  // FS-X-04: redeem 상한은 쿠폰 반영 후 payable 기준으로 재계산(ADR-026 §3).
+  const maxRedeem = clampRedeem(points.balance, points.balance, payableAfterCoupon);
+
+  // 주문 상품 요약의 묶음 그룹 뷰 (FS-X-04 — 읽기전용).
+  const groupedItems = useMemo(() => groupCartByProject(items), [items]);
+
+  async function applyCoupon() {
+    const code = couponInput.trim();
+    if (code.length < 2) {
+      setCouponError('쿠폰 코드를 입력해 주세요.');
+      return;
+    }
+    setCouponPending(true);
+    setCouponError(null);
+    try {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        // subtotal/payable 은 표시용 할인 계산 기준 — payable 은 쿠폰 차감 전
+        // 결제예정액(음수 방지 상한)을 보낸다.
+        body: JSON.stringify({ code, subtotal: summary.subtotal, payable }),
+      });
+      const body = (await res.json()) as {
+        ok: boolean;
+        valid?: boolean;
+        code?: string;
+        type?: CouponType;
+        value?: number;
+        discount?: number;
+        errorCode?: CouponErrorCode;
+      };
+      if (!body.ok) {
+        setCouponError(
+          res.status === 429
+            ? '쿠폰 확인 시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.'
+            : '쿠폰 확인에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+        );
+        return;
+      }
+      if (
+        body.valid !== true ||
+        typeof body.code !== 'string' ||
+        (body.type !== 'fixed' && body.type !== 'percent') ||
+        typeof body.value !== 'number'
+      ) {
+        setCouponError(
+          (body.errorCode && COUPON_ERROR_COPY[body.errorCode]) ??
+            COUPON_ERROR_COPY.COUPON_INVALID,
+        );
+        return;
+      }
+      // type/value 를 저장해 이후 금액 변동(배송방법 등) 시 totals 파생 계산이
+      // 공용 순수 함수로 할인액을 재계산한다(서버 discount 값 고정 아님).
+      setCoupon({ code: body.code, type: body.type, value: body.value });
+      setCouponInput('');
+    } catch {
+      setCouponError('네트워크 오류가 발생했습니다. 다시 시도해 주세요.');
+    } finally {
+      setCouponPending(false);
+    }
+  }
 
   function setOrderer<K extends keyof CheckoutFormData['orderer']>(k: K, v: CheckoutFormData['orderer'][K]) {
     setForm((f) => {
@@ -326,6 +432,9 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
           // >0 일 때만 포함 — 서버가 잔액/상한을 권위 있게 재검증(031).
           redeemPoints: redeemApplied > 0 ? redeemApplied : undefined,
           receipt,
+          // FS-X-04 (ADR-026): 적용 시에만 포함 — 서버가 재검증·원자 소비.
+          // 할인액은 보내지 않는다(클라이언트 금액은 결코 신뢰되지 않음).
+          couponCode: coupon ? coupon.code : undefined,
         }),
       });
       const body = (await res.json()) as {
@@ -593,7 +702,8 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
                   const n = Number(e.target.value.replace(/\D/g, '') || '0');
                   setForm((f) => ({
                     ...f,
-                    redeemPoints: clampRedeem(n, points.balance, payable),
+                    // 쿠폰 반영 payable 기준 상한(ADR-026 §3)
+                    redeemPoints: clampRedeem(n, points.balance, payableAfterCoupon),
                   }));
                 }}
                 data-testid="redeem-input"
@@ -614,6 +724,66 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
               이 주문에 최대 {maxRedeem.toLocaleString('ko-KR')}P 사용 가능
               (최소 결제 금액 100원)
             </p>
+          </div>
+        </Card>
+      ) : null}
+
+      {/* FS-X-04: 쿠폰 — 042 적용 시에만 노출(probe 게이트). 비회원도 입력 가능 */}
+      {features.coupons ? (
+        <Card padding="md" data-testid="coupon-section">
+          <h2 className="font-semibold mb-3">쿠폰</h2>
+          <div className="flex flex-col gap-2">
+            {coupon ? (
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{coupon.code}</p>
+                  <p className="text-xs text-muted-fg tabular-nums">
+                    {couponDiscount > 0
+                      ? `-${couponDiscount.toLocaleString('ko-KR')}원 할인 적용`
+                      : '이 주문에는 할인이 적용되지 않습니다'}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={clearCoupon}
+                  className="shrink-0"
+                  data-testid="coupon-clear"
+                >
+                  해제
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2 items-end">
+                <Input
+                  label="쿠폰 코드"
+                  value={couponInput}
+                  onChange={(e) => {
+                    setCouponInput(e.target.value.toUpperCase());
+                    setCouponError(null);
+                  }}
+                  placeholder="쿠폰 코드를 입력해 주세요"
+                  autoComplete="off"
+                  data-testid="coupon-input"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  loading={couponPending}
+                  disabled={couponPending || couponInput.trim().length < 2}
+                  onClick={() => void applyCoupon()}
+                  className="shrink-0 mb-0.5"
+                  data-testid="coupon-apply"
+                >
+                  적용
+                </Button>
+              </div>
+            )}
+            {couponError ? (
+              <p role="alert" className="text-xs text-danger" data-testid="coupon-error">
+                {couponError}
+              </p>
+            ) : null}
           </div>
         </Card>
       ) : null}
@@ -697,31 +867,81 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
 
       {/* 우측: 주문 상품 + 주문 요약 + 결제 버튼 */}
       <div className="flex flex-col gap-4 mt-4 md:mt-0">
-      {/* #7 주문 상품 요약 — 결제 직전 무엇을 사는지 확인 */}
+      {/* #7 주문 상품 요약 — 결제 직전 무엇을 사는지 확인.
+          FS-X-04: 묶음은 그룹 카드(헤더 + 라인 목록, 읽기전용)로 표시. */}
       <Card padding="md">
         <h2 className="font-semibold mb-3">주문 상품 ({items.length}건)</h2>
-        <ul className="flex flex-col gap-2">
-          {items.map((item) => (
-            <li key={item.localId} className="flex items-center gap-3">
-              <div
-                className="w-12 h-12 shrink-0 bg-surface-muted bg-cover bg-center rounded"
-                style={{ backgroundImage: `url(${item.previewUrl})` }}
-                aria-hidden
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs truncate">
-                  {item.options.sizeCode} / {item.options.colorCode}
+        <div className="flex flex-col gap-3">
+          {groupedItems.groups.map((group, gi) => (
+            <div
+              key={group.key}
+              className="border border-border p-2"
+              data-testid="checkout-group"
+            >
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-semibold">
+                  {cartGroupTitle(gi)}{' '}
+                  <span className="font-normal text-muted-fg">
+                    {composeOrientationChips(group.lines.map((l) => l.orientation))}
+                  </span>
                 </p>
-                <p className="text-xs text-muted-fg tabular-nums">
-                  {item.quantity}장 × {item.price.toLocaleString('ko-KR')}원
-                </p>
+                <span className="text-sm tabular-nums">
+                  {group.subtotal.toLocaleString('ko-KR')}원
+                </span>
               </div>
-              <span className="text-sm tabular-nums">
-                {(item.price * item.quantity).toLocaleString('ko-KR')}원
-              </span>
-            </li>
+              <ul className="flex flex-col gap-2">
+                {group.lines.map((item) => (
+                  <li key={item.localId} className="flex items-center gap-3">
+                    <div
+                      className="w-12 h-12 shrink-0 bg-surface-muted bg-cover bg-center rounded"
+                      style={{ backgroundImage: `url(${item.previewUrl})` }}
+                      aria-hidden
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs truncate">
+                        {item.options.sizeCode}
+                        {item.orientation
+                          ? ` / ${ORIENTATION_LABELS[item.orientation]}형`
+                          : ''}{' '}
+                        / {item.options.colorCode}
+                      </p>
+                      <p className="text-xs text-muted-fg tabular-nums">
+                        {item.quantity}장 × {item.price.toLocaleString('ko-KR')}원
+                      </p>
+                    </div>
+                    <span className="text-sm tabular-nums">
+                      {(item.price * item.quantity).toLocaleString('ko-KR')}원
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+          {groupedItems.singles.length > 0 ? (
+            <ul className="flex flex-col gap-2">
+              {groupedItems.singles.map((item) => (
+                <li key={item.localId} className="flex items-center gap-3">
+                  <div
+                    className="w-12 h-12 shrink-0 bg-surface-muted bg-cover bg-center rounded"
+                    style={{ backgroundImage: `url(${item.previewUrl})` }}
+                    aria-hidden
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs truncate">
+                      {item.options.sizeCode} / {item.options.colorCode}
+                    </p>
+                    <p className="text-xs text-muted-fg tabular-nums">
+                      {item.quantity}장 × {item.price.toLocaleString('ko-KR')}원
+                    </p>
+                  </div>
+                  <span className="text-sm tabular-nums">
+                    {(item.price * item.quantity).toLocaleString('ko-KR')}원
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </Card>
 
       {/* Total */}
@@ -746,6 +966,17 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
             <span>제주/도서산간 추가 배송비</span>
             <span className="tabular-nums">
               +{surchargeFee.toLocaleString('ko-KR')}원
+            </span>
+          </div>
+        ) : null}
+        {couponDiscount > 0 ? (
+          <div
+            className="flex justify-between text-sm"
+            data-testid="coupon-row"
+          >
+            <span>쿠폰 할인{coupon ? ` (${coupon.code})` : ''}</span>
+            <span className="tabular-nums text-sale">
+              -{couponDiscount.toLocaleString('ko-KR')}원
             </span>
           </div>
         ) : null}

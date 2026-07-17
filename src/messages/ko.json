@@ -100,7 +100,11 @@
     "productionGuide": "제작 가이드",
     "imagePrepairing": "이미지 준비 중",
     "optionPrepairing": "옵션 준비 중",
-    "multiCta": "여러 장 만들기"
+    "multiCta": "여러 장 만들기",
+    "wishlistAdd": "위시리스트에 추가",
+    "wishlistRemove": "위시리스트에서 제거",
+    "wishlistUnavailable": "위시리스트 준비 중입니다.",
+    "inquiryCta": "1:1 문의하기"
   },
   "cart": {
     "title": "장바구니",
@@ -195,7 +199,58 @@
     "reviewDone": "리뷰 완료",
     "printFile": "인쇄파일 보기",
     "login": "로그인",
-    "logout": "로그아웃"
+    "logout": "로그아웃",
+    "wishlist": {
+      "navLabel": "위시리스트",
+      "title": "위시리스트",
+      "unavailable": "위시리스트 기능이 아직 활성화되지 않았습니다. 잠시 후 다시 확인해 주세요.",
+      "empty": "위시리스트에 담긴 상품이 없습니다.",
+      "emptyHint": "마음에 드는 상품의 하트를 누르면 여기에 모아볼 수 있습니다.",
+      "browse": "상품 둘러보기",
+      "viewProduct": "상품 보기",
+      "remove": "제거",
+      "soldOut": "판매 종료",
+      "deletedProduct": "판매가 종료된 상품입니다",
+      "removeFailed": "제거하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    },
+    "inquiries": {
+      "navLabel": "1:1 문의",
+      "title": "1:1 문의",
+      "unavailable": "1:1 문의 기능이 아직 활성화되지 않았습니다. 잠시 후 다시 확인해 주세요.",
+      "empty": "등록된 문의가 없습니다.",
+      "emptyHint": "궁금한 점이 있으면 언제든 1:1 문의를 남겨 주세요.",
+      "new": "문의 작성",
+      "reply": "답변",
+      "status": {
+        "OPEN": "답변 대기",
+        "ANSWERED": "답변 완료",
+        "CLOSED": "종료"
+      },
+      "form": {
+        "title": "1:1 문의 작성",
+        "category": "문의 유형",
+        "categoryPlaceholder": "문의 유형 선택 (선택)",
+        "categoryProduct": "상품",
+        "categoryOrder": "주문/결제",
+        "categoryShipping": "배송",
+        "categoryEtc": "기타",
+        "subject": "제목",
+        "subjectRequired": "제목을 입력해 주세요.",
+        "subjectTooLong": "제목은 100자 이내로 입력해 주세요.",
+        "body": "문의 내용",
+        "bodyRequired": "문의 내용을 입력해 주세요.",
+        "bodyTooLong": "문의 내용은 2000자 이내로 입력해 주세요.",
+        "contactEmail": "답변 받을 이메일",
+        "emailInvalid": "올바른 이메일 주소를 입력해 주세요.",
+        "productRef": "관련 상품 정보가 문의에 함께 접수됩니다.",
+        "orderRef": "관련 주문 정보가 문의에 함께 접수됩니다.",
+        "submit": "문의 등록",
+        "cancel": "취소",
+        "rateLimited": "문의는 1시간에 5건까지 등록할 수 있습니다. 잠시 후 다시 시도해 주세요.",
+        "unavailable": "1:1 문의 기능이 아직 활성화되지 않았습니다. 잠시 후 다시 시도해 주세요.",
+        "submitFailed": "문의 등록에 실패했습니다. 입력 내용을 확인하고 다시 시도해 주세요."
+      }
+    }
   },
   "studio": {
     "loadingEditor": "편집기를 불러오는 중...",

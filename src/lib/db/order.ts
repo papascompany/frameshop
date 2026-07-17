@@ -20,11 +20,17 @@ import {
   type TransitionMeta,
 } from '@/types/order';
 import { maxRedeemable } from '@/types/points';
+import type { CouponValidationResult } from '@/types/coupon';
 import { mapOrder, mapOrderItem } from './mappers';
 import { canTransition, formatOrderNo } from '../order/state';
 import { calculateShippingFee } from '../shipping/calc';
 import { calcSurcharge, classifyZip } from '../shipping/surcharge';
-import { isProjectCartAvailable, isReceiptAvailable } from './feature-probe';
+import { releaseCouponByOrder, validateCoupon } from './coupons';
+import {
+  isCouponsAvailable,
+  isProjectCartAvailable,
+  isReceiptAvailable,
+} from './feature-probe';
 import {
   accruePointsForOrder,
   getPointsSummary,
@@ -153,8 +159,40 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     );
   }
 
-  // Payable BEFORE points — the redeem cap (maxRedeemable) is defined on it.
+  // Payable BEFORE coupon/points — the coupon discount cap is defined on it.
   const payable = subtotal + shippingFee + surchargeFee;
+
+  // Coupon (FS-X-01, ADR-026) — fail-closed. A coupon the server cannot honor
+  // must abort the order: silently charging the undiscounted amount would make
+  // the checkout display disagree with the charge (표시≠청구 금지).
+  // Validation here is READ-ONLY and only RESERVES the discount by freezing the
+  // coupon_code/coupon_discount snapshot below. The atomic consume (used_count
+  // CAS + member redemptions INSERT) is deferred to the PAID transition in
+  // confirmPayment (FS-X-FIX-A P1-2) — consuming at creation permanently burned a
+  // member's one-per-user coupon on every failed/retried payment.
+  const couponCodeInput = input.couponCode?.trim() ?? '';
+  let coupon: Extract<CouponValidationResult, { valid: true }> | null = null;
+  if (couponCodeInput.length > 0) {
+    if (!(await isCouponsAvailable())) {
+      // Migration 042 unapplied — probe gate (single COUPON_INVALID expression,
+      // never a raw 42703/42P01 leak).
+      throw new CreateOrderError('COUPON_INVALID', 'coupon feature unavailable');
+    }
+    const result = await validateCoupon(
+      couponCodeInput,
+      subtotal,
+      payable,
+      input.userId ?? null,
+    );
+    if (!result.valid) {
+      throw new CreateOrderError(result.errorCode, `coupon rejected: ${result.errorCode}`);
+    }
+    coupon = result;
+  }
+  const couponDiscount = coupon?.discount ?? 0;
+
+  // ADR-026 §3: the redeem cap is recomputed on the payable AFTER the coupon.
+  const payableAfterCoupon = payable - couponDiscount;
 
   // Reward points (FS-EC-02) — fail-closed. A redeem request the server cannot
   // honor must abort the order; silently charging the full amount is forbidden.
@@ -178,7 +216,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
         'points feature unavailable',
       );
     }
-    const cap = maxRedeemable(summary.balance, payable);
+    const cap = maxRedeemable(summary.balance, payableAfterCoupon);
     if (redeemRequested > cap) {
       throw new CreateOrderError(
         'POINTS_INSUFFICIENT',
@@ -187,9 +225,9 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     }
   }
 
-  // 031 contract: total_price is stored NET of redeemed points, so the
-  // confirm.ts `order.totalPrice === input.amount` check works unmodified.
-  const totalPrice = payable - redeemRequested;
+  // 031 contract: total_price is stored NET of coupon + redeemed points, so
+  // the confirm.ts `order.totalPrice === input.amount` check works unmodified.
+  const totalPrice = payableAfterCoupon - redeemRequested;
 
   // Cash receipt request (FS-EC-02) — re-validate + fail-closed BEFORE any
   // money moves, so a rejected receipt never strands a points deduction.
@@ -239,10 +277,17 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const orderNo = await generateOrderNo(new Date());
 
-  // Money moves here: deduct points via the atomic RPC immediately before the
-  // order INSERT to keep the compensation window minimal. The RPC's
-  // CHECK(points_balance >= 0) is the double-spend guard — a concurrent
-  // overdraw between the balance read above and this call fails the RPC.
+  // FS-X-FIX-A P1-2: the coupon is NOT consumed here. createOrder only reserves
+  // the discount by freezing coupon_code/coupon_discount in the INSERT below; the
+  // atomic consume (used_count CAS + member redemptions INSERT) runs at the PAID
+  // transition (confirmPayment). Orders sit at CREATED until paid, so a coupon
+  // reserved by an abandoned/failed order is simply never consumed — no member
+  // slot is burned and there is no coupon compensation to run in this path.
+
+  // Deduct points via the atomic RPC immediately before the order INSERT to
+  // keep the compensation window minimal. The RPC's CHECK(points_balance >= 0)
+  // is the double-spend guard — a concurrent overdraw between the balance read
+  // above and this call fails the RPC.
   let pointsDeducted = 0;
   if (redeemRequested > 0 && redeemUserId != null) {
     const tx = await redeemPoints(
@@ -312,11 +357,19 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       ...(receipt
         ? { receipt_type: receipt.type, receipt_info: receipt.info }
         : {}),
+      // FS-X-01 (ADR-026): freeze the applied coupon. Conditional-spread keeps
+      // the legacy INSERT column set intact for coupon-less orders, so this
+      // still succeeds on a DB where migration 042 is not applied yet.
+      ...(coupon
+        ? { coupon_code: coupon.code, coupon_discount: coupon.discount }
+        : {}),
     })
     .select()
     .single();
 
   if (insErr || !orderRow) {
+    // Only points moved in this path (the coupon is consumed later, at PAID) —
+    // refund the deducted points. No coupon slot to release here.
     await compensateRedeem();
     throw new CreateOrderError(
       'SEQUENCE_FAILED',
@@ -440,7 +493,8 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   if (oiErr) {
     // The order row exists but is unusable — createOrder throws, so the client
     // never receives its orderNo and the order can never be paid. Refund the
-    // deducted points instead of stranding them on a dead order.
+    // deducted points instead of stranding them on a dead order. The coupon was
+    // never consumed (consume happens at PAID), so nothing to release.
     await compensateRedeem();
     throw new CreateOrderError('SEQUENCE_FAILED', oiErr.message);
   }
@@ -963,6 +1017,15 @@ export async function customerCancelOrder(
       redeemed: order.pointsRedeemed ?? 0,
       accrued: order.pointsAccrued ?? 0,
     });
+  }
+
+  // FS-X-FIX-A P1-1: restore the coupon usage slot ONLY when the order had been
+  // PAID — the coupon is consumed at the PAID transition (confirmPayment), not at
+  // creation. A CREATED→CANCELLED (unpaid) cancel never consumed it, so only the
+  // orders.coupon_code snapshot remains and there is nothing to release. Fire-and-
+  // forget mirror of the points reversal above (releaseCouponByOrder never throws).
+  if (order.status === 'PAID' && order.couponCode) {
+    void releaseCouponByOrder(order.couponCode, order.userId);
   }
 
   // Fire-and-forget customer notification (same pattern as admin cancel).

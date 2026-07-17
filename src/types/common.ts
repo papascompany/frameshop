@@ -37,6 +37,16 @@ export type CartProjectId = Brand<string, 'CartProjectId'>;
 export type ProjectLocalId = Brand<string, 'ProjectLocalId'>;
 
 /**
+ * FS-X 웨이브(ADR-026) — 세트·구성규칙·문의·위시·쿠폰 식별자.
+ * 전부 추가 전용(additive) 브랜드 — 기존 코드/런타임 무영향.
+ */
+export type SetTemplateId = Brand<string, 'SetTemplateId'>;
+export type BundleRuleId = Brand<string, 'BundleRuleId'>;
+export type InquiryId = Brand<string, 'InquiryId'>;
+export type WishlistItemId = Brand<string, 'WishlistItemId'>;
+export type CouponId = Brand<string, 'CouponId'>;
+
+/**
  * Client-generated UUID used to dedup cart items between LocalStorage and DB.
  * Distinct from CartItemId (server primary key).
  */

@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import type { OrderWithItems } from '@/types/order';
+import { groupOrderByGroupId } from '@/lib/order/grouping';
+import type { OrderItem, OrderWithItems } from '@/types/order';
 import type { OrderStatus } from '@/types/order';
 import {
   startProductionAction,
@@ -59,6 +60,35 @@ function maskReceiptInfo(info: string | null | undefined): string {
     .join('');
 }
 
+/**
+ * 묶음(세트) 라인 1행 — 그룹 트리의 구성 행과 단품 행이 공유한다.
+ * 행별 인쇄파일 링크는 015 불변식(렌더 파이프라인 산출물 경로) 그대로 유지.
+ */
+function OrderItemRow({ item }: { item: OrderItem }) {
+  return (
+    <div className="flex-1 min-w-0 space-y-1">
+      <p className="text-sm font-medium">{item.snapshot.productName}</p>
+      <p className="text-xs text-muted-fg">
+        {item.snapshot.sizeLabel} / {item.snapshot.colorLabel}
+      </p>
+      <p className="text-xs text-muted-fg">
+        수량: {item.quantity} &nbsp;|&nbsp; 단가:{' '}
+        {item.snapshot.unitPrice.toLocaleString('ko-KR')}원
+      </p>
+      {item.printFileUrl && (
+        <a
+          href={item.printFileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-accent hover:underline"
+        >
+          인쇄 파일 다운로드
+        </a>
+      )}
+    </div>
+  );
+}
+
 type Props = {
   order: OrderWithItems;
   /** 038(orders.refunded_amount) 적용 여부 — false 면 부분환불 UI 비노출. */
@@ -101,6 +131,22 @@ export function AdminOrderDetailClient({ order, partialRefundAvailable }: Props)
     (status === 'PAID' || status === 'IN_PRODUCTION' || status === 'SHIPPED' || status === 'DELIVERED');
 
   const hasPrintFiles = order.items.some((item) => item.printFileUrl);
+
+  // FS-X-05: 묶음(세트) 트리 — 그룹 키는 snapshot.groupLabel(ADR-025 동결).
+  const grouped = groupOrderByGroupId(order.items);
+
+  // 할인 분해(031/042 계약): 상품합계 + 배송비 + 추가배송비 − 쿠폰 − 적립금
+  // = totalPrice(net 저장). 할인이 하나라도 있으면 분해 라인을 노출한다.
+  // couponCode/couponDiscount 는 042 스냅샷(mapOrder — 미적용 시 null/0 폴백).
+  const couponCode = order.couponCode ?? null;
+  const couponDiscount = order.couponDiscount ?? 0;
+  const pointsRedeemed = order.pointsRedeemed ?? 0;
+  const surchargeFee = order.surchargeFee ?? 0;
+  const itemsSubtotal = order.items.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0,
+  );
+  const hasDiscounts = couponDiscount > 0 || pointsRedeemed > 0;
 
   async function handleStartProduction() {
     setLoading(true);
@@ -267,6 +313,57 @@ export function AdminOrderDetailClient({ order, partialRefundAvailable }: Props)
               {order.totalPrice.toLocaleString('ko-KR')}원
             </dd>
           </div>
+          {/* FS-X-05: 쿠폰/적립 할인 분해 (couponDiscount·pointsRedeemed > 0 시) */}
+          {hasDiscounts && (
+            <div className="col-span-2 border-t border-border pt-2">
+              <dl className="space-y-1 text-sm" data-testid="order-discount-breakdown">
+                <div className="flex justify-between">
+                  <dt className="text-muted-fg">상품합계</dt>
+                  <dd className="tabular-nums">
+                    {itemsSubtotal.toLocaleString('ko-KR')}원
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-fg">배송비</dt>
+                  <dd className="tabular-nums">
+                    {order.shippingFee.toLocaleString('ko-KR')}원
+                  </dd>
+                </div>
+                {surchargeFee > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-fg">추가 배송비</dt>
+                    <dd className="tabular-nums">
+                      {surchargeFee.toLocaleString('ko-KR')}원
+                    </dd>
+                  </div>
+                )}
+                {couponDiscount > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-fg">
+                      쿠폰 할인{couponCode ? ` (${couponCode})` : ''}
+                    </dt>
+                    <dd className="tabular-nums text-danger">
+                      -{couponDiscount.toLocaleString('ko-KR')}원
+                    </dd>
+                  </div>
+                )}
+                {pointsRedeemed > 0 && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-fg">적립금 사용</dt>
+                    <dd className="tabular-nums text-danger">
+                      -{pointsRedeemed.toLocaleString('ko-KR')}원
+                    </dd>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-border pt-1 font-medium">
+                  <dt>결제 금액</dt>
+                  <dd className="tabular-nums">
+                    {order.totalPrice.toLocaleString('ko-KR')}원
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          )}
           {refunded > 0 && (
             <>
               <div>
@@ -391,28 +488,33 @@ export function AdminOrderDetailClient({ order, partialRefundAvailable }: Props)
           )}
         </div>
         <ul className="divide-y divide-border">
-          {order.items.map((item) => (
-            <li key={item.id as string} className="py-3 flex items-start gap-4">
-              <div className="flex-1 min-w-0 space-y-1">
-                <p className="text-sm font-medium">{item.snapshot.productName}</p>
-                <p className="text-xs text-muted-fg">
-                  {item.snapshot.sizeLabel} / {item.snapshot.colorLabel}
+          {/* 묶음(세트) 그룹 — 헤더(라벨 + 구성 수 + 소계) + 구성 행 트리 */}
+          {grouped.groups.map((group) => (
+            <li key={group.key} className="py-3" data-testid="admin-order-group">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold">
+                  {group.key}{' '}
+                  <span className="text-xs font-normal text-muted-fg">
+                    구성 {group.lines.length}개
+                  </span>
                 </p>
-                <p className="text-xs text-muted-fg">
-                  수량: {item.quantity} &nbsp;|&nbsp; 단가:{' '}
-                  {item.snapshot.unitPrice.toLocaleString('ko-KR')}원
+                <p className="text-sm font-medium tabular-nums">
+                  {group.subtotal.toLocaleString('ko-KR')}원
                 </p>
-                {item.printFileUrl && (
-                  <a
-                    href={item.printFileUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-accent hover:underline"
-                  >
-                    인쇄 파일 다운로드
-                  </a>
-                )}
               </div>
+              <ul className="mt-2 border-l-2 border-border pl-3 divide-y divide-border">
+                {group.lines.map((item) => (
+                  <li key={item.id as string} className="py-2 flex items-start gap-4">
+                    <OrderItemRow item={item} />
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+          {/* 단품 — 현행 평면 행 그대로 */}
+          {grouped.singles.map((item) => (
+            <li key={item.id as string} className="py-3 flex items-start gap-4">
+              <OrderItemRow item={item} />
             </li>
           ))}
         </ul>

@@ -95,11 +95,21 @@ vi.mock('@/lib/payment/toss', () => ({
   },
 }));
 
+// FS-X-FIX-A P1-1: cancel/refund restore the coupon usage slot only for orders
+// that had been PAID (coupon consumed at PAID). Mocked so this seam test never
+// touches the coupons table.
+vi.mock('@/lib/db/coupons', () => ({
+  releaseCouponByOrder: vi.fn(async () => {}),
+  validateCoupon: vi.fn(),
+}));
+
 import { customerCancelOrder } from '@/lib/db/order';
 import { reversePointsForOrder } from '@/lib/db/points';
+import { releaseCouponByOrder } from '@/lib/db/coupons';
 import { tossClient } from '@/lib/payment/toss';
 
 const reverseMock = vi.mocked(reversePointsForOrder);
+const releaseCouponMock = vi.mocked(releaseCouponByOrder);
 const cancelMock = vi.mocked(tossClient.cancel);
 
 const ORDER_ID = asBrand<OrderId>('order-uuid-1');
@@ -196,5 +206,42 @@ describe('customerCancelOrder — 원장 정합 위임(전이 성공 후)', () =
 
     expect(result.ok).toBe(false);
     expect(reverseMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('customerCancelOrder — 쿠폰 복원 위임 (FS-X-FIX-A P1-1)', () => {
+  it('PAID 주문 취소 성공 후 스냅샷 coupon_code 로 복원을 위임한다', async () => {
+    state.orderRow = makeOrderRow({ status: 'PAID', coupon_code: 'WELCOME5' });
+
+    const result = await customerCancelOrder(ORDER_ID, USER_ID, '단순 변심');
+
+    expect(result).toEqual({ ok: true });
+    expect(state.orderRow.status).toBe('CANCELLED');
+    expect(releaseCouponMock).toHaveBeenCalledTimes(1);
+    expect(releaseCouponMock).toHaveBeenCalledWith('WELCOME5', USER_ID);
+  });
+
+  it('미결제(CREATED) 주문 취소는 쿠폰을 복원하지 않는다 (애초에 소비 전)', async () => {
+    // CREATED 는 결제 전 — 쿠폰은 PAID 에서만 소비되므로 되돌릴 것이 없다.
+    state.orderRow = makeOrderRow({
+      status: 'CREATED',
+      payment_id: null,
+      coupon_code: 'WELCOME5',
+    });
+
+    const result = await customerCancelOrder(ORDER_ID, USER_ID);
+
+    expect(result).toEqual({ ok: true });
+    expect(state.orderRow.status).toBe('CANCELLED');
+    expect(releaseCouponMock).not.toHaveBeenCalled();
+  });
+
+  it('쿠폰 없는 PAID 주문은 복원을 시도하지 않는다', async () => {
+    state.orderRow = makeOrderRow({ status: 'PAID' });
+
+    const result = await customerCancelOrder(ORDER_ID, USER_ID);
+
+    expect(result).toEqual({ ok: true });
+    expect(releaseCouponMock).not.toHaveBeenCalled();
   });
 });

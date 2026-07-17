@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { requireAdmin } from '@/lib/db/admin';
 import { transitionTo, getOrder, setOrderMemo } from '@/lib/db/order';
 import { reversePointsForOrder } from '@/lib/db/points';
+import { releaseCouponByOrder } from '@/lib/db/coupons';
 import { isPartialRefundAvailable } from '@/lib/db/feature-probe';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
 import { canTransition } from '@/lib/order/state';
@@ -204,6 +205,14 @@ export async function cancelOrderAction(
       });
     }
 
+    // FS-X-FIX-A P1-1: restore the coupon usage slot only when the order had been
+    // PAID — the coupon is consumed at the PAID transition, not at creation. A
+    // CREATED→CANCELLED (unpaid) cancel never consumed it (snapshot only). Fire-and-
+    // forget mirror of the points reversal above (releaseCouponByOrder never throws).
+    if (order.status !== 'CREATED' && order.couponCode) {
+      void releaseCouponByOrder(order.couponCode, order.userId);
+    }
+
     // Fire-and-forget customer notification (same pattern as shipOrderAction).
     void notifyCancelled(order, trimmedReason);
 
@@ -290,6 +299,13 @@ async function fullRefund(
         redeemed: order.pointsRedeemed ?? 0,
         accrued: order.pointsAccrued ?? 0,
       });
+    }
+
+    // FS-X-FIX-A P1-1: a full refund always follows a PAID order (requires
+    // paymentId), so the coupon was consumed — restore its usage slot. Fire-and-
+    // forget mirror of the points reversal above (releaseCouponByOrder never throws).
+    if (order.couponCode) {
+      void releaseCouponByOrder(order.couponCode, order.userId);
     }
 
     // Fire-and-forget customer notification (same pattern as shipOrderAction).

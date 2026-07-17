@@ -20,6 +20,7 @@ import type { OrderWithItems } from '@/types/order';
 import { TOSS_STATUS_TO_ORDER_STATUS } from '@/types/payment';
 import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionTo } from '../db/order';
+import { consumeCouponByCode } from '../db/coupons';
 import { enqueuePrintRender } from '../render/enqueue';
 import { getServiceRoleSupabase } from '../supabase/service';
 import { notifyNewOrder } from '../notify';
@@ -144,6 +145,35 @@ export async function confirmPayment(
   }
 
   await transitionTo(order.id, 'PAID', { paymentKey: input.paymentKey });
+
+  // FS-X-FIX-A P1-2: consume the coupon at PAID, not at order creation. createOrder
+  // only RESERVED the discount (orders.coupon_code snapshot); consuming here means a
+  // failed/abandoned payment never burns a member's one-per-user coupon. This runs
+  // in the payment_events-lock-owning branch (the insert above succeeded), so a
+  // confirm retry short-circuits at the dedup branch above and never re-consumes;
+  // member re-use is additionally blocked by coupon_redemptions UNIQUE, and a guest's
+  // used_count cannot double-increment because a second confirm never reaches here.
+  // Fail-open: a consume failure after a successful charge keeps the paid order (the
+  // customer already paid the discounted total) and only logs — under-counting
+  // used_count is the safe direction per ADR-026. NOTE: Toss keys are placeholders,
+  // so this path is logic/test-verified only; a real-payment smoke test is still
+  // required (ADR-026 Postscript).
+  if (order.couponCode) {
+    const consumed = await consumeCouponByCode(
+      order.couponCode,
+      order.userId,
+      order.orderNo,
+    );
+    if (!consumed.ok) {
+      console.error(
+        JSON.stringify({
+          event: 'coupon_consume_after_paid_failed',
+          orderNo: order.orderNo,
+          errorCode: consumed.errorCode,
+        }),
+      );
+    }
+  }
 
   // ADR-005: kick off 300dpi print renders as soon as the order is paid.
   // Fire-and-forget — failures here must not bubble back to the buyer.
