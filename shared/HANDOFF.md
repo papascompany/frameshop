@@ -199,3 +199,70 @@ probe 폴백 — 미적용 시 평면 저장(묶음 정보는 주문 스냅샷 j
 추가 금지 — project 컬럼은 probe true 일 때만 conditional-spread(ADR-023/024). `kind:'basic'` 의
 `setSize`/`setOrientation` entries 초기화는 의도된 현행 동작 — 제거 금지(베이직 회귀 테스트가 고정).
 variantId 는 저장하지 않고 `variantsByKey[variantKey(selectedOptions)]` 로 파생(이중 진실 방지).
+
+---
+
+### [2026-07-16] FS-X 통합 웨이브(orchestrator) → 다음 세션 — P2·P3·쿠폰·문의·위시 핸드오프
+
+**브랜치:** `feat/p2-p3-commerce` (base: main@a186121). 이 요약만 읽고 이어받을 수 있게 작성.
+
+**컨텍스트(완료 — 구현 7유닛, X-00~06):**
+1. **X-00 기반(architect)** — 마이그 036(set_templates+cart_projects FK)/037(bundle_rules)/
+   040(inquiries)/041(wishlists)/042(coupons+redemptions+orders 스냅샷 2컬럼) 작성(비파괴·멱등·graceful) ·
+   타입 4본(`src/types/{set,inquiry,wishlist,coupon}.ts`) · feature-probe 5종(isSetTemplates/isBundleRules/
+   isInquiries/isWishlist/isCouponsAvailable) · 그룹핑 뷰모델(`groupCartByProject`/`groupOrderByGroupId` 순수) ·
+   쿠폰 순수 계산(`src/lib/coupon/calc.ts`) · ADR-026.
+2. **X-01 쿠폰 서버** — 조건부 UPDATE 원자 소비(CAS, 0행=COUPON_EXHAUSTED) + 실패 보상(used_count 원복
+   + redemptions 삭제 — redeem 보상 패턴 미러) · createOrder 통합(쿠폰 검증→원자 사용→할인 확정→redeem
+   재계산) · `/api/coupons/validate` · route seam.
+3. **X-02 문의·위시** — 4레이어(lib/db → /api/account → account 페이지 → admin actions) + 답변 이메일
+   (notifyInquiryReplied, contact_email, fire-and-forget).
+4. **X-03 admin 워크스페이스** — `/admin/products/[id]` 6탭(유형 게이트 — single→extended 승격) ·
+   set_templates 슬롯빌더(mm 4필드 폼) + WallCanvas 읽기전용 미니맵 · bundle_rules 폼.
+5. **X-04 커머스 FE** — cart 묶음 카드 + 세트 원자 선택(ADR-021 — 그룹 헤더 일괄 토글, 부분선택 불가) ·
+   checkout 쿠폰 카드 + 그룹 요약 · lookup projection+그룹 · success 그룹 요약 · Order 쿠폰 옵셔널.
+6. **X-05 주문·admin FE** — MyOrders 그룹 · **reorder 세트 복원 버그 수정**(project 필드 드롭 →
+   snapshot.groupLabel 기준 새 projectLocalId 복원) · admin 주문상세 그룹 트리+할인 분해 · 쿠폰 CRUD ·
+   문의 답변 UI · adminNav.
+7. **X-06 위시·문의 FE** — 하트 아일랜드('use client', ISR 페이지는 마운트 후 배치 하이드레이션) ·
+   카탈로그/상세 와이어링(ProductCard `wishlistSlot` — 버튼 중첩 금지) · account 위시/문의+작성폼 ·
+   NAV · i18n.
+
+**정책(ADR-026, CTO 확정):** 쿠폰 = 정액(fixed, 원)/정률(percent, bps — subtotal 기준·상한 payable) ·
+min_subtotal · expires_at · 전체 usage_limit 조건부 UPDATE 원자 차감 · 회원 1인1회(coupon_redemptions
+UNIQUE — 비회원 미기록, 전체 한도만) · 비회원 코드 입력 허용 · **할인 순서: subtotal+shipping+surcharge
+−쿠폰−적립금 = totalPrice(net 저장, 031 계약 유지 — confirm.ts 무변경)**. **세트할인 createOrder 적용
+보류**(세트 SKU/갤러리월 출시 시 — bundle_rules 는 폼·저장·타입까지만, 현행 라인별 가격 검증 유지).
+위시 로그인 전용 · 문의 비밀글 고정(전부 비공개).
+
+**검증:** tsc 0 · eslint 0 · next build exit 0 · **vitest 773 passed | 14 todo**(베이스라인 535 → +238).
+
+**마이그레이션(5본 — 작성 완료·미적용):** 036/037/040/041/042. probe 게이트로 적용 전 무해(UI 비노출,
+42703/42P01 노출 금지 — ADR-024 패턴). **이 웨이브 머지·배포 후 브라우저 세션으로 적용 예정(CTO 승인済)**
+— 가이드 = `docs/MIGRATIONS-APPLY.md` **"2차 적용 대기"** 절(활성화 항목·검증 쿼리·롤백 포함,
+036→042 오름차순).
+
+**다음 액션(개발, 후속 후보):**
+- **갤러리월**(벽 슬롯 에디터 드래그 · 세트 SKU 주문 플로우) — P2 후기. 슬롯 빌더는 mm 폼+미니맵
+  프리뷰까지 완료된 상태에서 이어받는다.
+- 세트할인 createOrder 적용(ADR-026 보류 해제 시 — ADR-021 비례배분 경로 활성화).
+- SMS/카카오 알림톡 · 회원정보 관리 · 배송 추적 API · 부분환불 적립 비례 조정 · REDEMPTION 원장
+  order_id 사후 링크 · 통계 규칙 보완 · 정산 요약(이상 BACKLOG §5).
+
+**다음 액션(CTO, 잔여):**
+1. **마이그 5본 적용** — 머지·배포 후 브라우저 세션(승인済). `docs/MIGRATIONS-APPLY.md` 2차 절.
+2. **Toss 실키 설정** — 프로덕션 클라키 `test_ck_placeholder` 라 결제 완주 불가(BACKLOG §6, 런칭 전 과제).
+3. **법률 자문** — `/terms` `/privacy` 초안(`LEGAL_DRAFT_NOTICE` 게시 중). 시행일 확정 필요.
+4. **`src/lib/legal/company.ts` placeholder 확정**(SSOT — 통신판매업신고번호·문의 이메일·호스팅 표기·
+   배송사·국외 이전 고지 2건·시행일).
+5. **surcharge 실요금 확정** — `shipping_methods.surcharge_fee_jeju/remote` 운영 요금 설정.
+
+**참고 파일:** `shared/context/FS-X-wave.md`(컨텍스트 패키지) · `shared/DECISIONS.md` ADR-026 ·
+`docs/MIGRATIONS-APPLY.md`(2차 적용 대기 절) · `docs/BACKLOG.md` §1/§1A/§5 ·
+`docs/specs/extended-product.md` §8 · `shared/STATUS.md`(FS-X 섹션).
+
+**주의사항:** 배포~마이그 적용 사이 창을 위해 **probe 게이트 유지** — 신규 스키마 의존 기능은 probe
+false 시 UI 비노출/명시 에러. orders INSERT 는 conditional-spread(coupon_code/coupon_discount 포함).
+FROZEN 타입은 옵셔널 추가만. coupons SELECT 는 service-role 전용(코드 열거 방지 — 검증은
+`/api/coupons/validate` 경유). 주문 그룹 키는 `snapshot.groupLabel`(035 컬럼 무관 durable) — 깨진 키는
+단품 폴백 렌더.

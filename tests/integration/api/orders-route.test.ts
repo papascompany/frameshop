@@ -46,8 +46,10 @@ vi.mock('@/lib/ratelimit', () => ({
 
 import { POST } from '@/app/api/orders/route';
 import { createOrder } from '@/lib/db/order';
+import { checkRate } from '@/lib/ratelimit';
 
 const createOrderMock = vi.mocked(createOrder);
+const checkRateMock = vi.mocked(checkRate);
 
 const FAKE_ORDER = {
   id: 'order-uuid-1',
@@ -150,11 +152,33 @@ describe('POST /api/orders — redeemPoints/receipt 브리지 (P0-001)', () => {
   });
 });
 
+describe('POST /api/orders — couponCode 브리지 (FS-X-01, P0-001 교훈)', () => {
+  it('couponCode 를 createOrder input 까지 그대로 전달한다', async () => {
+    const { status } = await call(makeBody({ couponCode: 'WELCOME5' }));
+
+    expect(status).toBe(200);
+    const input = createOrderMock.mock.calls[0][0] as CreateOrderInput;
+    expect(input.couponCode).toBe('WELCOME5');
+  });
+
+  it('미지정이면 couponCode=undefined (레거시 무파손)', async () => {
+    const { status } = await call(makeBody());
+
+    expect(status).toBe(200);
+    const input = createOrderMock.mock.calls[0][0] as CreateOrderInput;
+    expect(input.couponCode).toBeUndefined();
+  });
+});
+
 describe('POST /api/orders — 신규 에러코드 status 매핑 (P2-003)', () => {
   it.each([
     ['POINTS_UNAVAILABLE'],
     ['POINTS_INSUFFICIENT'],
     ['RECEIPT_UNAVAILABLE'],
+    // FS-X-01 (ADR-026): 쿠폰 거부는 사용자 교정 가능 — 422.
+    ['COUPON_INVALID'],
+    ['COUPON_EXHAUSTED'],
+    ['COUPON_ALREADY_USED'],
   ] as const)('%s → 422 (500 으로 새지 않는다)', async (code) => {
     createOrderMock.mockRejectedValue(new CreateOrderError(code));
 
@@ -171,5 +195,36 @@ describe('POST /api/orders — 신규 에러코드 status 매핑 (P2-003)', () =
 
     expect(status).toBe(403);
     expect(body).toMatchObject({ ok: false, code: 'PHOTO_OWNERSHIP' });
+  });
+});
+
+describe('POST /api/orders — 레이트리밋 키 (Sec-2)', () => {
+  it('body sessionId 를 레이트리밋 키 폴백으로 쓰지 않는다 (쿠키/유저 부재 → IP)', async () => {
+    mockState.user = null;
+    mockState.cookies = {};
+
+    const { status } = await call(makeBody({ sessionId: 'attacker-rotated-sid' }));
+
+    expect(status).toBe(200);
+    expect(checkRateMock).toHaveBeenCalledTimes(1);
+    const [namespace, key] = checkRateMock.mock.calls[0];
+    expect(namespace).toBe('order_create');
+    // 공격자가 매 요청 회전시키는 body sessionId 는 키에 반영되면 안 된다.
+    expect(key).not.toBe('attacker-rotated-sid');
+    // 쿠키·유저 부재 → IP 폴백(test 환경엔 x-real-ip 헤더 없음 → 'unknown').
+    expect(key).toBe('unknown');
+    // 단, body sessionId 는 photo-ownership 검증용으로 createOrder 에 그대로 전달.
+    const input = createOrderMock.mock.calls[0][0] as CreateOrderInput;
+    expect(input.sessionId).toBe('attacker-rotated-sid');
+  });
+
+  it('HttpOnly 쿠키 sessionId 는 키로 쓴다 (변조 불가 신원)', async () => {
+    mockState.user = null;
+    mockState.cookies = { 'fs-guest-sid': 'cookie-sid' };
+
+    await call(makeBody({ sessionId: 'body-sid' }));
+
+    const key = checkRateMock.mock.calls[0][1];
+    expect(key).toBe('cookie-sid');
   });
 });

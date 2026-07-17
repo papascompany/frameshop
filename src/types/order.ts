@@ -248,6 +248,14 @@ export type Order = {
   pointsAccrued?: number;
   /** 제주/도서산간 추가 배송비 스냅샷(ADR-008). migration 030; → 0 폴백. */
   surchargeFee?: number;
+  /**
+   * FS-X-04(ADR-026) — 적용 쿠폰 스냅샷. migration 042 의 orders.coupon_code /
+   * coupon_discount 노출(totalPrice 는 이미 할인 차감 후 net). 옵셔널(FROZEN
+   * 무파손) — mapOrder 가 undefined-safe 로 null / 0 폴백을 채운다.
+   */
+  couponCode?: string | null;
+  /** 쿠폰 확정 할인액(KRW). migration 042; → 0 폴백. */
+  couponDiscount?: number;
   createdAt: IsoTimestamp;
   paidAt: IsoTimestamp | null;
   shippedAt: IsoTimestamp | null;
@@ -284,6 +292,12 @@ export type CreateOrderInput = {
   redeemPoints?: number;
   /** 현금영수증 신청(migration 039). null/미지정 = 미신청. */
   receipt?: CashReceiptRequest | null;
+  /**
+   * FS-X-01(ADR-026): 적용할 쿠폰 코드(정규화 전 원문). 서버가
+   * normalizeCouponCode + validateCoupon 으로 권위 있게 재검증하고 할인을
+   * 확정한다 — 클라이언트 할인액은 결코 신뢰하지 않는다. 미지정 = 미사용.
+   */
+  couponCode?: string;
 };
 
 export type CreateOrderErrorCode =
@@ -300,7 +314,13 @@ export type CreateOrderErrorCode =
   /** redeemPoints 가 잔액 또는 maxRedeemable 상한을 초과. */
   | 'POINTS_INSUFFICIENT'
   /** receipt 신청인데 현금영수증 기능 불가(039 미적용 등). */
-  | 'RECEIPT_UNAVAILABLE';
+  | 'RECEIPT_UNAVAILABLE'
+  /** FS-X-01(ADR-026): 쿠폰 부재/비활성/만료/최소금액 미달/기능 불가(042 미적용). */
+  | 'COUPON_INVALID'
+  /** FS-X-01(ADR-026): 쿠폰 전체 사용 한도 소진. */
+  | 'COUPON_EXHAUSTED'
+  /** FS-X-01(ADR-026): 회원 쿠폰 재사용(1인 1회 위반). */
+  | 'COUPON_ALREADY_USED';
 
 export class CreateOrderError extends Error {
   public readonly code: CreateOrderErrorCode;
@@ -393,6 +413,8 @@ export const createOrderInputSchema = z.object({
   redeemPoints: z.number().int().nonnegative().optional(),
   /** FS-EC-00: 현금영수증 신청. null/미지정 = 미신청. */
   receipt: cashReceiptRequestSchema.nullable().optional(),
+  /** FS-X-01(ADR-026): 쿠폰 코드(서버 재검증). couponApplyInputSchema 와 동일 제약. */
+  couponCode: z.string().trim().min(2).max(30).optional(),
 });
 
 export const transitionMetaSchema = z.object({

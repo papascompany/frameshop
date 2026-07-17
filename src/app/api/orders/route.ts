@@ -71,8 +71,12 @@ export async function POST(request: Request): Promise<Response> {
   const sessionId = guestSidFromCookie ?? parsed.data.sessionId ?? null;
 
   // Throttle order creation (each order fans out to DB inserts + render jobs).
-  // Key by the most specific identity available so one actor can't flood.
-  const rateKey = userId ?? sessionId ?? getClientIp(request);
+  // Key by a TAMPER-PROOF identity only: the authenticated userId, the HttpOnly
+  // guest cookie, or the client IP. The body sessionId (parsed.data.sessionId) is
+  // attacker-rotatable, so it is EXCLUDED from the rate-limit key (Sec-2) — an
+  // actor could otherwise mint a fresh sessionId per request to evade the throttle.
+  // It is still forwarded to createOrder below for photo-ownership verification.
+  const rateKey = userId ?? guestSidFromCookie ?? getClientIp(request);
   const orderRate = await checkRate('order_create', rateKey, { max: 10, windowMs: 60_000 });
   if (!orderRate.ok) {
     return NextResponse.json(
@@ -101,6 +105,10 @@ export async function POST(request: Request): Promise<Response> {
     // receipt requests. createOrder re-validates both server-side.
     redeemPoints: parsed.data.redeemPoints,
     receipt: parsed.data.receipt ?? null,
+    // FS-X-01 (ADR-026): forward the coupon code — same P0-001 lesson as
+    // redeemPoints/receipt above (dropping it here would silently charge the
+    // undiscounted amount). createOrder re-validates + consumes atomically.
+    couponCode: parsed.data.couponCode,
   };
 
   try {
@@ -119,6 +127,10 @@ export async function POST(request: Request): Promise<Response> {
         : err.code === 'POINTS_UNAVAILABLE' ? 422
         : err.code === 'POINTS_INSUFFICIENT' ? 422
         : err.code === 'RECEIPT_UNAVAILABLE' ? 422
+        // FS-X-01 (ADR-026): coupon rejections are user-correctable — 422.
+        : err.code === 'COUPON_INVALID' ? 422
+        : err.code === 'COUPON_EXHAUSTED' ? 422
+        : err.code === 'COUPON_ALREADY_USED' ? 422
         : 500;
       return NextResponse.json(
         { ok: false, code: err.code, message: err.message },

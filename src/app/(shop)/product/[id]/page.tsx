@@ -7,7 +7,9 @@ import { getProductDetail, getProductOptions } from '@/lib/db/product';
 import { asBrand } from '@/types/common';
 import type { ProductId } from '@/types/common';
 import { StartEditorButton, StartMultiEditorButton } from './StartEditorButton';
+import { WishlistHeart } from '@/components/wishlist/WishlistHeart';
 import Image from 'next/image';
+import Link from 'next/link';
 import {
   buildProductMeta,
   buildProductJsonLd,
@@ -205,6 +207,19 @@ export default async function ProductPage({
                 {t('optionPrepairing')}
               </Button>
             )}
+
+            {/* FS-X-06: 위시 하트 + 1:1 문의 진입. 페이지가 ISR(revalidate 300)
+                이라 하트 상태는 서버에서 굽지 않고 클라 마운트 후 개별 fetch 로
+                하이드레이션한다(initialWishlisted 미전달). */}
+            <div className="flex items-center gap-4">
+              <WishlistHeart productId={id} />
+              <Link
+                href={`/account/inquiries/new?productId=${id}`}
+                className="text-sm text-muted-fg underline underline-offset-4 hover:text-ink"
+              >
+                {t('inquiryCta')}
+              </Link>
+            </div>
           </div>
         </div>
 

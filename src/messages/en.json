@@ -100,7 +100,11 @@
     "productionGuide": "Production Guide",
     "imagePrepairing": "Image Preparing",
     "optionPrepairing": "Options Preparing",
-    "multiCta": "Make multiple prints"
+    "multiCta": "Make multiple prints",
+    "wishlistAdd": "Add to wishlist",
+    "wishlistRemove": "Remove from wishlist",
+    "wishlistUnavailable": "Wishlist is not available yet.",
+    "inquiryCta": "1:1 Inquiry"
   },
   "cart": {
     "title": "Cart",
@@ -195,7 +199,58 @@
     "reviewDone": "Review Done",
     "printFile": "View Print File",
     "login": "Log In",
-    "logout": "Log Out"
+    "logout": "Log Out",
+    "wishlist": {
+      "navLabel": "Wishlist",
+      "title": "Wishlist",
+      "unavailable": "The wishlist feature is not activated yet. Please check back soon.",
+      "empty": "Your wishlist is empty.",
+      "emptyHint": "Tap the heart on a product you like to collect it here.",
+      "browse": "Browse products",
+      "viewProduct": "View product",
+      "remove": "Remove",
+      "soldOut": "Sold out",
+      "deletedProduct": "This product is no longer available",
+      "removeFailed": "Failed to remove. Please try again shortly."
+    },
+    "inquiries": {
+      "navLabel": "1:1 Inquiries",
+      "title": "1:1 Inquiries",
+      "unavailable": "The inquiry feature is not activated yet. Please check back soon.",
+      "empty": "You have no inquiries yet.",
+      "emptyHint": "Leave a 1:1 inquiry anytime you have a question.",
+      "new": "New inquiry",
+      "reply": "Reply",
+      "status": {
+        "OPEN": "Awaiting reply",
+        "ANSWERED": "Answered",
+        "CLOSED": "Closed"
+      },
+      "form": {
+        "title": "New 1:1 Inquiry",
+        "category": "Category",
+        "categoryPlaceholder": "Select a category (optional)",
+        "categoryProduct": "Product",
+        "categoryOrder": "Order / Payment",
+        "categoryShipping": "Shipping",
+        "categoryEtc": "Other",
+        "subject": "Subject",
+        "subjectRequired": "Please enter a subject.",
+        "subjectTooLong": "Subject must be 100 characters or fewer.",
+        "body": "Message",
+        "bodyRequired": "Please enter your message.",
+        "bodyTooLong": "Message must be 2000 characters or fewer.",
+        "contactEmail": "Reply-to email",
+        "emailInvalid": "Please enter a valid email address.",
+        "productRef": "The related product will be attached to this inquiry.",
+        "orderRef": "The related order will be attached to this inquiry.",
+        "submit": "Submit inquiry",
+        "cancel": "Cancel",
+        "rateLimited": "You can submit up to 5 inquiries per hour. Please try again later.",
+        "unavailable": "The inquiry feature is not activated yet. Please try again later.",
+        "submitFailed": "Failed to submit your inquiry. Please check your input and try again."
+      }
+    }
   },
   "studio": {
     "loadingEditor": "Loading editor...",

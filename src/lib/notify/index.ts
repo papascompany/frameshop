@@ -252,7 +252,80 @@ async function sendRefundedEmail(
   }
 }
 
+// ─── 1:1 문의 답변 이메일 (고객 수신, FS-X-02) ───────────────────────────────
+
+async function sendInquiryRepliedEmail(
+  toEmail: string,
+  resendApiKey: string,
+  subject: string,
+  replyText: string,
+): Promise<void> {
+  const text = [
+    '안녕하세요, FrameShop입니다.',
+    '문의하신 내용에 답변이 등록되었습니다.',
+    '',
+    `문의 제목: ${subject}`,
+    '',
+    '답변:',
+    replyText,
+    '',
+    '추가 문의는 마이페이지 > 1:1 문의를 이용해 주세요.',
+    'FrameShop 드림',
+  ].join('\n');
+
+  const body = {
+    from: 'FrameShop <noreply@frameshop.kr>',
+    to: [toEmail],
+    subject: `[FrameShop] 1:1 문의에 답변이 등록되었습니다 — ${subject}`,
+    text,
+  };
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    console.warn('[notify] 문의 답변 알림 이메일 발송 실패:', res.status, t);
+  }
+}
+
 // ─── 공개 API ────────────────────────────────────────────────────────────────
+
+/**
+ * 1:1 문의 답변 고객 알림 (FS-X-02).
+ * 수신 이메일이 없거나 Resend API 키가 없으면 no-op.
+ * 실패해도 상위 호출(답변 저장)에 영향 없음 — warn only.
+ */
+export async function notifyInquiryReplied(
+  toEmail: string,
+  payload: { subject: string; replyText: string },
+): Promise<void> {
+  if (!toEmail) return;
+
+  const settings = await getSettings(['resend_api_key']).catch(
+    (): Record<string, string> => ({}),
+  );
+
+  const resendApiKey =
+    process.env.RESEND_API_KEY ?? settings['resend_api_key'];
+
+  if (!resendApiKey) return;
+
+  await sendInquiryRepliedEmail(
+    toEmail,
+    resendApiKey,
+    payload.subject,
+    payload.replyText,
+  ).catch((e: unknown) => {
+    console.warn('[notify] 문의 답변 알림 예외:', e);
+  });
+}
 
 /**
  * 배송 시작 고객 알림.

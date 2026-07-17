@@ -8,7 +8,7 @@
 
 import { z } from 'zod';
 import { httpsUrl } from '../lib/validation/url';
-import { matteCodeSchema, paperCodeSchema } from './product';
+import { matteCodeSchema, paperCodeSchema, productTypeSchema } from './product';
 import {
   curationDeviceSchema,
   curationTypeSchema,
@@ -19,7 +19,7 @@ import type {
   ProductId,
   UserId,
 } from './common';
-import type { ProductImageType } from './product';
+import type { ProductImageType, ProductType } from './product';
 import type { CurationPayload } from './curation';
 
 // ---------- Admin auth ----------
@@ -45,6 +45,12 @@ export type ProductFormInput = {
   sortOrder: number;
   /** Print bleed in mm added around inner_rect when generating the print crop. */
   bleedMm: number;
+  /**
+   * 확장형 분기축(ADR-026, FS-X-03 — FROZEN 옵셔널 추가). 미지정 = upsertProduct 가
+   * product_type 컬럼을 건드리지 않음(INSERT 는 DB DEFAULT 'single', UPDATE 는 기존값
+   * 유지). 명시 지정 = single→extended 승격(비파괴 update) 경로.
+   */
+  productType?: ProductType;
 };
 
 /** File-bearing input used by the form-data path. */
@@ -73,6 +79,8 @@ export const productFormSchema = z.object({
   isActive: z.boolean(),
   sortOrder: z.number().int().nonnegative(),
   bleedMm: z.number().min(0).max(50),
+  // ADR-026 (FS-X-03): 옵셔널 추가만 — 기존 폼 payload 는 그대로 통과한다.
+  productType: productTypeSchema.optional(),
 });
 
 // ---------- Category admin inputs ----------

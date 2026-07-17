@@ -89,6 +89,19 @@ const IconTag = () => (
   </svg>
 );
 
+// FS-X-05: 문의(말풍선) / 쿠폰(티켓) — adminNav 신규 키의 사이드바 표면 아이콘.
+const IconChat = () => (
+  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden>
+    <path fillRule="evenodd" d="M10 2c-2.236 0-4.43.18-6.57.524C1.993 2.755 1 4.014 1 5.426v5.148c0 1.413.993 2.67 2.43 2.902.848.137 1.705.248 2.57.331v3.443a.75.75 0 0 0 1.28.53l3.58-3.579a.78.78 0 0 1 .527-.224 41.202 41.202 0 0 0 5.183-.501c1.437-.232 2.43-1.49 2.43-2.902V5.426c0-1.413-.993-2.67-2.43-2.902A41.289 41.289 0 0 0 10 2Z" clipRule="evenodd" />
+  </svg>
+);
+
+const IconTicket = () => (
+  <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden>
+    <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-.75.75 2 2 0 1 0 0 4 .75.75 0 0 1 .75.75v2.5a.75.75 0 0 1-.75.75H2.75a.75.75 0 0 1-.75-.75v-2.5A.75.75 0 0 1 2.75 12a2 2 0 1 0 0-4A.75.75 0 0 1 2 7.25v-2.5Zm10.5.75a.75.75 0 0 1 1.5 0v.5a.75.75 0 0 1-1.5 0v-.5Zm.75 3a.75.75 0 0 0-.75.75v.5a.75.75 0 0 0 1.5 0v-.5a.75.75 0 0 0-.75-.75Zm-.75 4.5a.75.75 0 0 1 1.5 0v.5a.75.75 0 0 1-1.5 0v-.5Z" clipRule="evenodd" />
+  </svg>
+);
+
 // Route metadata lives in the adminNav SSOT; icons stay local to this surface
 // (the sidebar uses a tag glyph for 카테고리, distinct from the tiles surface).
 const ICONS: Record<AdminNavKey, React.ReactNode> = {
@@ -99,6 +112,8 @@ const ICONS: Record<AdminNavKey, React.ReactNode> = {
   options: <IconSliders />,
   orders: <IconList />,
   reviews: <IconStar />,
+  inquiries: <IconChat />,
+  coupons: <IconTicket />,
   curation: <IconSparkles />,
   artworks: <IconPainting />,
   landing: <IconLayout />,

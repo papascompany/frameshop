@@ -98,3 +98,34 @@ export function isConfirmAvailable(): Promise<boolean> {
 export function isProjectCartAvailable(): Promise<boolean> {
   return probeFeature('projectCart', 'cart_items', 'project_id');
 }
+
+// ---------- FS-X 웨이브 probes (ADR-026 — 배포~적용 창 graceful 게이트) ----------
+
+/** 세트 템플릿(036): set_templates.id — 어드민 세트 탭·카탈로그 세트 노출 게이트. */
+export function isSetTemplatesAvailable(): Promise<boolean> {
+  return probeFeature('setTemplates', 'set_templates', 'id');
+}
+
+/** 구성 규칙(037): bundle_rules.id — 어드민 구성규칙 탭·구성 검증 게이트. */
+export function isBundleRulesAvailable(): Promise<boolean> {
+  return probeFeature('bundleRules', 'bundle_rules', 'id');
+}
+
+/** 1:1 문의(040): inquiries.id — 문의 작성/목록·admin/inquiries 게이트. */
+export function isInquiriesAvailable(): Promise<boolean> {
+  return probeFeature('inquiries', 'inquiries', 'id');
+}
+
+/** 위시리스트(041): wishlists.id — 하트 아일랜드·account/wishlist 게이트. */
+export function isWishlistAvailable(): Promise<boolean> {
+  return probeFeature('wishlist', 'wishlists', 'id');
+}
+
+/**
+ * 쿠폰(042): coupons.code — 042 는 coupons/coupon_redemptions/orders 스냅샷
+ * 2컬럼(coupon_code/coupon_discount)을 한 파일에서 함께 만들므로 단일 probe 로
+ * 충분하다. false → 체크아웃 쿠폰 입력 카드 비노출 + createOrder 쿠폰 경로 거부.
+ */
+export function isCouponsAvailable(): Promise<boolean> {
+  return probeFeature('coupons', 'coupons', 'code');
+}

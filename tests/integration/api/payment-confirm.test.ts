@@ -19,7 +19,14 @@ type MockOrder = {
   totalPrice: number;
   status: 'CREATED' | 'PAID' | 'CANCELLED';
   paymentId: string | null;
+  /** FS-X-FIX-A P1-2: coupon snapshot frozen at order creation (or null). */
+  couponCode?: string | null;
+  userId?: string | null;
 };
+
+type CouponConsumeResult =
+  | { ok: true }
+  | { ok: false; errorCode: string; error: string };
 
 const mockState: {
   order: MockOrder | null;
@@ -35,6 +42,9 @@ const mockState: {
   }>;
   tossShouldThrow: boolean;
   paymentEventsInsertError: { message: string; code: string } | null;
+  /** FS-X-FIX-A P1-2: records every consumeCouponByCode call the route makes. */
+  couponConsumeCalls: Array<{ code: string; userId: string | null; orderNo: string }>;
+  couponConsumeResult: CouponConsumeResult;
 } = {
   order: null,
   transitionCalls: [],
@@ -42,7 +52,21 @@ const mockState: {
   tossShouldThrow: false,
   // null → insert succeeds (P1-03 lock acquired); non-null → UNIQUE conflict
   paymentEventsInsertError: null,
+  couponConsumeCalls: [],
+  couponConsumeResult: { ok: true },
 };
+
+// FS-X-FIX-A P1-2: the coupon is consumed at PAID (here), not at order creation.
+vi.mock('@/lib/db/coupons', () => ({
+  consumeCouponByCode: async (
+    code: string,
+    userId: string | null,
+    orderNo: string,
+  ): Promise<CouponConsumeResult> => {
+    mockState.couponConsumeCalls.push({ code, userId, orderNo });
+    return mockState.couponConsumeResult;
+  },
+}));
 
 // Mock service-role Supabase used by confirmPayment for P1-03 atomic lock.
 vi.mock('@/lib/supabase/service', () => ({
@@ -71,7 +95,7 @@ vi.mock('@/lib/db/order', () => ({
     return {
       id: mockState.order.id,
       orderNo: mockState.order.orderNo,
-      userId: null,
+      userId: mockState.order.userId ?? null,
       status: mockState.order.status,
       totalPrice: mockState.order.totalPrice,
       shippingFee: 0,
@@ -79,6 +103,9 @@ vi.mock('@/lib/db/order', () => ({
       paymentId: mockState.order.paymentId,
       trackingNumber: null,
       courier: null,
+      // FS-X-FIX-A P1-2: coupon snapshot the confirm route reads to consume at PAID.
+      couponCode: mockState.order.couponCode ?? null,
+      couponDiscount: mockState.order.couponCode ? 5000 : 0,
       orderer: { name: '홍길동', phone: '010-0000-0000', email: 'a@b.com' },
       shipping: { name: '', phone: '', zip: '', addr1: '', addr2: '', memo: '' },
       createdAt: new Date().toISOString(),
@@ -155,6 +182,8 @@ beforeEach(() => {
   mockState.tossConfirmCalls = [];
   mockState.tossShouldThrow = false;
   mockState.paymentEventsInsertError = null;
+  mockState.couponConsumeCalls = [];
+  mockState.couponConsumeResult = { ok: true };
 });
 
 afterEach(() => {
@@ -345,5 +374,116 @@ describe('POST /api/payment/confirm', () => {
       target: 'PAID',
       paymentKey: 'pk-test-success',
     });
+  });
+});
+
+describe('POST /api/payment/confirm — 쿠폰 소비 시점 이동 (FS-X-FIX-A P1-2)', () => {
+  function paidBody(paymentKey = 'pk-coupon'): Request {
+    return new Request('http://localhost/api/payment/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentKey, orderId: '20260512-0001', amount: 12000 }),
+    });
+  }
+
+  it('couponCode 스냅샷이 있으면 PAID 전이 성공 후 consumeCouponByCode 를 1회 호출한다', async () => {
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = {
+      id: 'order-uuid-1',
+      orderNo: '20260512-0001',
+      totalPrice: 12000,
+      status: 'CREATED',
+      paymentId: null,
+      couponCode: 'WELCOME5',
+      userId: 'user-1',
+    };
+    const res = await POST(paidBody());
+    expect(res.status).toBe(200);
+    // 전이가 먼저, 소비가 그 뒤 — 소비는 PAID 를 소유한 브랜치에서만 일어난다.
+    expect(mockState.transitionCalls).toHaveLength(1);
+    expect(mockState.couponConsumeCalls).toEqual([
+      { code: 'WELCOME5', userId: 'user-1', orderNo: '20260512-0001' },
+    ]);
+  });
+
+  it('couponCode 가 없으면 consumeCouponByCode 를 호출하지 않는다', async () => {
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = {
+      id: 'order-uuid-1',
+      orderNo: '20260512-0001',
+      totalPrice: 12000,
+      status: 'CREATED',
+      paymentId: null,
+      couponCode: null,
+    };
+    const res = await POST(paidBody());
+    expect(res.status).toBe(200);
+    expect(mockState.couponConsumeCalls).toHaveLength(0);
+  });
+
+  it('이미 PAID 인 재확정(멱등)은 다시 소비하지 않는다', async () => {
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = {
+      id: 'order-uuid-1',
+      orderNo: '20260512-0001',
+      totalPrice: 12000,
+      status: 'PAID',
+      paymentId: 'pk-original',
+      couponCode: 'WELCOME5',
+      userId: 'user-1',
+    };
+    const res = await POST(paidBody('pk-retry'));
+    expect(res.status).toBe(200);
+    // 멱등 재확정 — Toss 도 전이도 소비도 없다.
+    expect(mockState.tossConfirmCalls).toHaveLength(0);
+    expect(mockState.transitionCalls).toHaveLength(0);
+    expect(mockState.couponConsumeCalls).toHaveLength(0);
+  });
+
+  it('payment_events dedup(웹훅 선점) 경로에서는 소비하지 않는다 (비회원 이중 차감 방지)', async () => {
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    // 웹훅이 먼저 payment_events 를 선점 → confirm insert 는 UNIQUE 충돌.
+    mockState.paymentEventsInsertError = { message: 'duplicate', code: '23505' };
+    mockState.order = {
+      id: 'order-uuid-1',
+      orderNo: '20260512-0001',
+      totalPrice: 12000,
+      status: 'CREATED',
+      paymentId: null,
+      couponCode: 'WELCOME5',
+      userId: null, // 비회원 — used_count 이중 증가가 위험한 케이스.
+    };
+    const res = await POST(paidBody());
+    expect(res.status).toBe(200);
+    // 잠금을 얻지 못한 브랜치 → 전이도 소비도 하지 않는다(락 소유자가 담당).
+    expect(mockState.transitionCalls).toHaveLength(0);
+    expect(mockState.couponConsumeCalls).toHaveLength(0);
+  });
+
+  it('소비 실패(EXHAUSTED)여도 결제는 성사 유지 — fail-open', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.couponConsumeResult = {
+      ok: false,
+      errorCode: 'COUPON_EXHAUSTED',
+      error: 'usage limit reached',
+    };
+    mockState.order = {
+      id: 'order-uuid-1',
+      orderNo: '20260512-0001',
+      totalPrice: 12000,
+      status: 'CREATED',
+      paymentId: null,
+      couponCode: 'WELCOME5',
+      userId: 'user-1',
+    };
+    const res = await POST(paidBody());
+    const body = (await res.json()) as { ok: boolean };
+    // 결제는 이미 성사 — 주문은 PAID 로 유지되고 성공을 돌려준다.
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(mockState.transitionCalls).toHaveLength(1);
+    expect(mockState.couponConsumeCalls).toHaveLength(1);
+    errSpy.mockRestore();
   });
 });

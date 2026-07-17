@@ -9,8 +9,23 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { courierTrackingUrl } from '@/lib/shipping/courier';
 import { addToCart } from '@/lib/cart/client';
+import { groupOrderByGroupId } from '@/lib/order/grouping';
+import type { OrderGroup } from '@/lib/order/grouping';
 import type { AddToCartInput } from '@/types/cart';
-import type { OrderStatus, OrderWithItems } from '@/types/order';
+import type { OrderItem, OrderStatus, OrderWithItems } from '@/types/order';
+
+/**
+ * 묶음(세트) 그룹 요약 라벨 (순수 함수, 테스트용 export) — FS-X-05 (ADR-021).
+ * "[묶음 1] 상품명 외 N건" 형태. 구성 1건이면 "외 N건" 없이 상품명만.
+ */
+export function groupSummaryLabel(
+  group: Pick<OrderGroup, 'key' | 'lines'>,
+): string {
+  const first = group.lines[0];
+  const name = first ? first.snapshot.productName : '';
+  const rest = group.lines.length - 1;
+  return rest > 0 ? `[${group.key}] ${name} 외 ${rest}건` : `[${group.key}] ${name}`;
+}
 
 /**
  * 주문 상태 → 한국어 레이블 매핑 (순수 함수, 테스트용 export).
@@ -329,8 +344,11 @@ export function MyOrdersClient({ orders }: Props) {
 
       <ul className="flex flex-col gap-4">
         {orders.map((order) => {
-          const firstTwo = order.items.slice(0, 2);
-          const rest = order.items.length - 2;
+          // FS-X-05: 묶음(세트)은 그룹 요약 + 구성 펼침, 단품은 현행 그대로.
+          const grouped = groupOrderByGroupId(order.items);
+          const hasGroups = grouped.groups.length > 0;
+          const firstTwo = grouped.singles.slice(0, 2);
+          const rest = grouped.singles.length - 2;
           const orderId = order.id as string;
           const isReordering = reorderingId === orderId;
           const isDelivered = order.status === 'DELIVERED';
@@ -365,8 +383,34 @@ export function MyOrdersClient({ orders }: Props) {
                   </Badge>
                 </div>
 
-                {/* 상품 목록 요약 */}
+                {/* 상품 목록 요약 — 묶음(세트)은 그룹 요약 + 구성 펼침 */}
                 <div className="border-t border-border pt-3 space-y-1">
+                  {grouped.groups.map((group) => (
+                    <details key={group.key} data-testid="order-group-summary">
+                      <summary className="cursor-pointer list-none text-sm text-foreground [&::-webkit-details-marker]:hidden">
+                        <span className="underline underline-offset-2 decoration-border">
+                          {groupSummaryLabel(group)}
+                        </span>{' '}
+                        <span className="text-muted-fg text-xs tabular-nums">
+                          {group.subtotal.toLocaleString('ko-KR')}원
+                        </span>
+                      </summary>
+                      <ul className="mt-1 mb-2 space-y-0.5 border-l-2 border-border pl-3">
+                        {group.lines.map((item: OrderItem) => (
+                          <li
+                            key={item.id as string}
+                            className="text-sm text-foreground truncate"
+                          >
+                            {item.snapshot.productName}{' '}
+                            <span className="text-muted-fg text-xs">
+                              {item.snapshot.sizeLabel} / {item.snapshot.colorLabel}
+                              {item.quantity > 1 ? ` x${item.quantity}` : ''}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ))}
                   {firstTwo.map((item) => (
                     <p key={item.id as string} className="text-sm text-foreground truncate">
                       {item.snapshot.productName}{' '}
@@ -477,6 +521,13 @@ export function MyOrdersClient({ orders }: Props) {
                     </Button>
                   </div>
                 </div>
+
+                {/* ADR-021: 세트 포함 주문은 부분취소 불가 — 주문 단위 취소만 */}
+                {canCancel && hasGroups ? (
+                  <p className="text-xs text-muted-fg text-right">
+                    세트는 주문 단위로만 취소됩니다
+                  </p>
+                ) : null}
 
                 {/* 주문취소 / 구매확정 인라인 메시지 */}
                 {message ? (

@@ -96,6 +96,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
     totalPrice: order.totalPrice,
     shippingFee: order.shippingFee,
+    // FS-X-04: 합계 분해 표시용 스냅샷 — 해당 마이그레이션(030/031/042) 미적용
+    // 이면 mapOrder 폴백(0/null)이라 클라이언트가 행을 그리지 않는다(graceful).
+    surchargeFee: order.surchargeFee ?? 0,
+    pointsRedeemed: order.pointsRedeemed ?? 0,
+    couponCode: order.couponCode ?? null,
+    couponDiscount: order.couponDiscount ?? 0,
     trackingNumber: order.trackingNumber ?? null,
     courier: order.courier ?? null,
     items: order.items.map((item) => ({
@@ -105,6 +111,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       colorLabel: item.snapshot.colorLabel,
       quantity: item.quantity,
       price: item.price,
+      // FS-X-04 (ADR-025 스냅샷): 묶음 그룹 렌더용 — 단품/레거시 행은 null.
+      groupLabel: item.snapshot.groupLabel ?? null,
+      orientation: item.snapshot.orientation ?? null,
     })),
   });
 }

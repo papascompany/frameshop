@@ -7,8 +7,26 @@ import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { formatPhone } from '@/lib/checkout/validate';
+import { groupOrderByGroupId } from '@/lib/order/grouping';
 import { courierTrackingUrl } from '@/lib/shipping/courier';
+import {
+  ORIENTATION_LABELS,
+  composeOrientationChips,
+} from '../../cart/group-view';
 import { ORDER_STATUSES, type OrderStatus } from '@/types/order';
+import type { Orientation } from '@/types/project';
+
+type LookupItem = {
+  id: string;
+  productName: string;
+  sizeLabel: string;
+  colorLabel: string;
+  quantity: number;
+  price: number;
+  /** FS-X-04 — 라우트 확장 전 캐시/구응답 호환을 위해 옵셔널. */
+  groupLabel?: string | null;
+  orientation?: Orientation | null;
+};
 
 type LookupResult = {
   orderNo: string;
@@ -18,16 +36,14 @@ type LookupResult = {
   shipping: { name: string; zip: string; addr1: string; addr2: string };
   totalPrice: number;
   shippingFee: number;
+  /** FS-X-04 합계 분해 — 미적용 마이그레이션이면 0/null(행 비표시). */
+  surchargeFee?: number;
+  pointsRedeemed?: number;
+  couponCode?: string | null;
+  couponDiscount?: number;
   trackingNumber: string | null;
   courier: string | null;
-  items: Array<{
-    id: string;
-    productName: string;
-    sizeLabel: string;
-    colorLabel: string;
-    quantity: number;
-    price: number;
-  }>;
+  items: LookupItem[];
 };
 
 export function OrderLookupClient() {
@@ -129,14 +145,67 @@ export function OrderLookupClient() {
 
           <div>
             <p className="font-medium mb-1">주문 상품</p>
-            {result.items.map((item) => (
-              <div key={item.id} className="flex justify-between py-1">
-                <span>
-                  {item.productName} ({item.sizeLabel} / {item.colorLabel}) × {item.quantity}
-                </span>
-                <span>{item.price.toLocaleString('ko-KR')}원</span>
-              </div>
-            ))}
+            {(() => {
+              // FS-X-04: snapshot.groupLabel 기준 그룹 렌더(X-00 뷰모델 공용).
+              // 프로젝션은 평면이라 스냅샷 형태로 어댑트해 넘긴다.
+              const grouped = groupOrderByGroupId(
+                result.items.map((item) => ({
+                  ...item,
+                  snapshot: { groupLabel: item.groupLabel ?? undefined },
+                })),
+              );
+              return (
+                <>
+                  {grouped.groups.map((group) => (
+                    <div
+                      key={group.key}
+                      className="border border-border p-2 mb-2"
+                      data-testid="lookup-group"
+                    >
+                      <div className="flex justify-between font-medium">
+                        <span>
+                          {group.key}{' '}
+                          <span className="text-xs text-muted-fg font-normal">
+                            {composeOrientationChips(
+                              group.lines.map((l) => l.orientation),
+                            )}
+                          </span>
+                        </span>
+                        <span className="tabular-nums">
+                          {group.subtotal.toLocaleString('ko-KR')}원
+                        </span>
+                      </div>
+                      {group.lines.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex justify-between py-1 text-muted-fg"
+                        >
+                          <span>
+                            {item.productName} ({item.sizeLabel} / {item.colorLabel}
+                            {item.orientation
+                              ? ` / ${ORIENTATION_LABELS[item.orientation]}형`
+                              : ''}
+                            ) × {item.quantity}
+                          </span>
+                          <span>{item.price.toLocaleString('ko-KR')}원</span>
+                        </div>
+                      ))}
+                      <p className="text-xs text-muted-fg mt-1">
+                        세트는 주문 단위로만 취소할 수 있습니다
+                      </p>
+                    </div>
+                  ))}
+                  {grouped.singles.map((item) => (
+                    <div key={item.id} className="flex justify-between py-1">
+                      <span>
+                        {item.productName} ({item.sizeLabel} / {item.colorLabel}) × {item.quantity}
+                      </span>
+                      <span>{item.price.toLocaleString('ko-KR')}원</span>
+                    </div>
+                  ))}
+                </>
+              );
+            })()}
           </div>
 
           <hr className="border-muted" />
@@ -145,6 +214,28 @@ export function OrderLookupClient() {
             <span>배송비</span>
             <span>{result.shippingFee.toLocaleString('ko-KR')}원</span>
           </div>
+          {(result.surchargeFee ?? 0) > 0 ? (
+            <div className="flex justify-between">
+              <span>제주/도서산간 추가 배송비</span>
+              <span>+{(result.surchargeFee ?? 0).toLocaleString('ko-KR')}원</span>
+            </div>
+          ) : null}
+          {(result.couponDiscount ?? 0) > 0 ? (
+            <div className="flex justify-between" data-testid="lookup-coupon-row">
+              <span>쿠폰 할인{result.couponCode ? ` (${result.couponCode})` : ''}</span>
+              <span className="text-sale">
+                -{(result.couponDiscount ?? 0).toLocaleString('ko-KR')}원
+              </span>
+            </div>
+          ) : null}
+          {(result.pointsRedeemed ?? 0) > 0 ? (
+            <div className="flex justify-between" data-testid="lookup-redeem-row">
+              <span>적립금 사용</span>
+              <span className="text-sale">
+                -{(result.pointsRedeemed ?? 0).toLocaleString('ko-KR')}원
+              </span>
+            </div>
+          ) : null}
           <div className="flex justify-between font-semibold">
             <span>합계</span>
             <span>{result.totalPrice.toLocaleString('ko-KR')}원</span>

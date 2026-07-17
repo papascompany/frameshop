@@ -57,10 +57,17 @@ export function FramesClient({
   products,
   selectedProductId,
   frames,
+  embedded = false,
 }: {
   products: Product[];
   selectedProductId: string | null;
   frames: FrameAsset[];
+  /**
+   * FS-X-03: /admin/products/[id] 워크스페이스 임베드 모드 — 상품 dropdown 을
+   * 숨기고 selectedProductId 를 고정한다(router.push 이동 없음). 단독 페이지
+   * (/admin/frames) 동작은 기본값 false 로 문자 그대로 유지된다.
+   */
+  embedded?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -138,16 +145,18 @@ export function FramesClient({
     <div className="space-y-4">
       <Card padding="md" className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-          <div className="flex-1">
-            <Select
-              label="상품 선택"
-              value={selectedProductId ?? ''}
-              onChange={(e) => onProductChange(e.target.value)}
-              options={productOptions}
-              placeholder={products.length === 0 ? '활성 상품이 없습니다' : '상품을 선택하세요'}
-              disabled={products.length === 0}
-            />
-          </div>
+          {embedded ? null : (
+            <div className="flex-1">
+              <Select
+                label="상품 선택"
+                value={selectedProductId ?? ''}
+                onChange={(e) => onProductChange(e.target.value)}
+                options={productOptions}
+                placeholder={products.length === 0 ? '활성 상품이 없습니다' : '상품을 선택하세요'}
+                disabled={products.length === 0}
+              />
+            </div>
+          )}
           <Button
             variant="primary"
             onClick={openCreate}

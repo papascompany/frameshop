@@ -4,7 +4,7 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-07-06 (확장형 P1 — 034/035 를 쓰는 코드 라이브, "선택"에서 **적용 권장**으로 격상).
+> 최종 갱신: 2026-07-16 (FS-X 웨이브 — 036/037/040/041/042 "2차 적용 대기" 절 신설).
 >
 > **✅ 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
@@ -13,11 +13,90 @@
 
 ---
 
+## ★ 2차 적용 대기 — 036/037/040/041/042 (2026-07-16 작성, FS-X 웨이브)
+
+> FS-X 웨이브(브랜치 `feat/p2-p3-commerce`, ADR-026)에서 작성된 5본. 전부 **비파괴 + 멱등**.
+> **미적용 상태에서도 앱 정상** — feature-probe 게이트가 해당 기능 UI 를 숨긴다(42P01/42703 노출 금지).
+> **적용 시점: 이 웨이브 머지·배포 후 브라우저 세션으로 적용(CTO 승인済).** 적용하면 코드 배포 없이
+> 자동 활성화(probe TTL 60초). **036 → 042 오름차순** 적용 권장(036 이 034 의 cart_projects 에 FK 를 건다).
+
+| # | 파일 | 활성화되는 것 | 지금 적용? |
+|---|---|---|---|
+| 036 | `036_set_templates.sql` | 세트 프리셋: 어드민 세트템플릿 탭(슬롯 빌더+미니맵)·카탈로그 세트 노출 + `cart_projects.set_template_id` FK 이행(034 예고) | ⏳ 배포 후 — probe `isSetTemplatesAvailable` |
+| 037 | `037_bundle_rules.sql` | 구성 검증/가격 규칙 폼(어드민 구성규칙 탭). **세트할인 createOrder 적용은 ADR-026 보류** — 금전 경로 무영향 | ⏳ 배포 후 — probe `isBundleRulesAvailable` |
+| 040 | `040_inquiries.sql` | 1:1 문의: account 작성/목록 + admin 답변 + 답변 이메일. 비밀글 고정(공개 정책 없음) | ⏳ 배포 후 — probe `isInquiriesAvailable` |
+| 041 | `041_wishlists.sql` | 위시리스트(로그인 전용): 하트 아일랜드 + `/account/wishlist` | ⏳ 배포 후 — probe `isWishlistAvailable` |
+| 042 | `042_coupons.sql` | 쿠폰: 체크아웃 쿠폰 카드·`/api/coupons/validate`·createOrder 쿠폰 경로(원자 소비+보상)·admin 쿠폰 CRUD + orders 스냅샷 2컬럼 | ⏳ 배포 후 — probe `isCouponsAvailable` |
+
+### 적용 후 검증 쿼리 (2차 — SQL Editor 에서 실행)
+
+#### 036 — 세트 템플릿
+```sql
+SELECT to_regclass('public.set_templates');                          -- set_templates 면 OK
+SELECT conname FROM pg_constraint
+ WHERE conname='cart_projects_set_template_fk'
+   AND conrelid='public.cart_projects'::regclass;                    -- 1행(FK 이행 확인)
+```
+앱 검증(probe TTL 60초 후): admin 상품 워크스페이스(extended 상품)에 세트템플릿 탭 노출 →
+mm 폼 저장 + WallCanvas 미니맵 프리뷰 렌더.
+
+#### 037 — 구성 규칙
+```sql
+SELECT to_regclass('public.bundle_rules');                           -- bundle_rules 면 OK
+```
+앱 검증(probe TTL 60초 후): admin 상품 워크스페이스(extended 상품)에 구성규칙 탭 노출 → 폼 저장.
+가격 전략(sum 외)은 저장만 되고 주문 금전 경로에는 미적용(ADR-026 보류)이 정상.
+
+#### 040 — 1:1 문의
+```sql
+SELECT to_regclass('public.inquiries');                              -- inquiries 면 OK
+```
+앱 검증(probe TTL 60초 후): `/account/inquiries` 작성폼 노출 → 접수(OPEN) → admin/inquiries 에서
+답변 저장 시 ANSWERED + `answered_at` 기록 + contact_email 로 답변 메일 발송.
+
+#### 041 — 위시리스트
+```sql
+SELECT to_regclass('public.wishlists');                              -- wishlists 면 OK
+```
+앱 검증(probe TTL 60초 후): 로그인 상태에서 카탈로그/상세 하트 노출·토글(멱등) →
+`/account/wishlist` 목록 반영. 비로그인은 하트 미노출(로그인 전용)이 정상.
+
+#### 042 — 쿠폰
+```sql
+SELECT to_regclass('public.coupons');                                -- coupons 면 OK
+SELECT to_regclass('public.coupon_redemptions');                     -- coupon_redemptions 면 OK
+SELECT column_name FROM information_schema.columns
+ WHERE table_name='orders'
+   AND column_name IN ('coupon_code','coupon_discount');             -- 2행
+```
+앱 검증(probe TTL 60초 후): admin/coupons 에서 쿠폰 생성 → 체크아웃 쿠폰 카드에 코드 입력 →
+할인 반영(쿠폰→적립금 순서, net totalPrice) → 주문 스냅샷(coupon_code/coupon_discount) 확인.
+회원 재사용 시 `COUPON_ALREADY_USED`, 한도 소진 시 `COUPON_EXHAUSTED`(422) 거부.
+
+### 롤백 메모 (2차)
+
+전부 추가 전용 — 필요 시 신규 컬럼/테이블만 DROP 하면 된다(DROP 후에도 probe 가 기능을 다시 숨겨 앱 정상):
+```sql
+-- 예: 036/037/040/041/042 되돌리기 (필요 시에만 — 역순 권장)
+ALTER TABLE orders DROP COLUMN IF EXISTS coupon_code, DROP COLUMN IF EXISTS coupon_discount;
+DROP TABLE IF EXISTS coupon_redemptions;
+DROP TABLE IF EXISTS coupons;
+DROP TABLE IF EXISTS wishlists;
+DROP TABLE IF EXISTS inquiries;
+DROP TABLE IF EXISTS bundle_rules;
+ALTER TABLE cart_projects DROP CONSTRAINT IF EXISTS cart_projects_set_template_fk;  -- 036 FK 선해제
+DROP TABLE IF EXISTS set_templates;
+```
+적용 후 데이터(세트 프리셋·문의·위시·쿠폰 원장/주문 스냅샷)가 쌓이기 시작하면 롤백 비권장.
+
+---
+
 ## 적용 순서 (번호 오름차순, 한 번에 또는 나눠서)
 
 각 SQL 본문은 `supabase/migrations/<파일>` 에 있다. SQL Editor 에 파일 내용을 그대로 붙여넣고 실행하면 된다.
 **029 → 039 오름차순**으로 적용한다(같은 테이블을 건드리는 마이그레이션이 있어 순서 권장).
-036/037 은 결번 — 확장형 P2(`set_templates`/`bundle_rules`)용 예약 번호로 파일이 아직 없다.
+036/037 은 이 절(1차) 시점엔 결번이었으나 **FS-X 웨이브(2026-07-16)에서 040/041/042 와 함께 작성 완료**
+— 위 "2차 적용 대기" 절 참조. 아래 표(1차분)는 적용 완료 이력이다.
 
 | # | 파일 | 활성화되는 것 | 지금 적용? |
 |---|---|---|---|

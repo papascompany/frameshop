@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
@@ -270,6 +271,14 @@ export function ProductsClient({
                       </button>
                     </td>
                     <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
+                      {/* FS-X-03: 상품 워크스페이스([id]) 진입 — 기존 Dialog 수정은 병행 유지 */}
+                      <Link
+                        href={`/admin/products/${p.id as string}`}
+                        className="inline-flex items-center px-2.5 py-1 text-xs font-semibold text-ink hover:underline underline-offset-2"
+                        data-testid={`workspace-link-${p.id as string}`}
+                      >
+                        워크스페이스
+                      </Link>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -352,6 +361,13 @@ export function ProductsClient({
                   {p.isActive ? '활성' : '비활성'}
                 </button>
                 <div className="flex gap-1">
+                  {/* FS-X-03: 상품 워크스페이스([id]) 진입 */}
+                  <Link
+                    href={`/admin/products/${p.id as string}`}
+                    className="inline-flex items-center px-2 py-1 text-xs font-semibold text-ink hover:underline underline-offset-2"
+                  >
+                    워크스페이스
+                  </Link>
                   <Button
                     size="sm"
                     variant="ghost"
