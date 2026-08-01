@@ -4,8 +4,8 @@
 
 **Project:** FrameShop
 **Started:** 2026-05-12
-**Current Phase:** FS-X 통합 웨이브(P2·P3·쿠폰·문의·위시) — 구현 7유닛 완료·검증 GREEN, 리뷰/Merge Gate/배포 대기 (2026-07-16)
-**Branch:** `feat/p2-p3-commerce` (base: main@a186121 — P1 편집기 배포 + 마이그 029~039 적용 완료)
+**Current Phase:** FS-X 완료 — 머지·배포(#63) + 마이그 2차(036/037/040/041/042) 프로덕션 적용 완료, 전 기능 런타임 활성화 (2026-08-01)
+**Branch:** `main` (FS-X 는 #63 으로 머지·배포됨 — 마이그 001~042 전부 적용)
 
 ## FS-X 통합 웨이브 (2026-07-16, 오케스트레이션 하네스 집행) — P2 세트·어드민 + P3 묶음 시각화 + 쿠폰·1:1문의·위시리스트
 - 브랜치: `feat/p2-p3-commerce` (base: main@a186121) · 컨텍스트 패키지: `shared/context/FS-X-wave.md` · 계약: ADR-026
@@ -18,8 +18,8 @@
 - [x] X-06 위시·문의 FE(frontend-dev): 하트 아일랜드+배치 하이드레이션 · 카탈로그/상세 와이어링 · account 위시/문의+작성폼 · NAV · i18n
 - [x] Verification Gate — **tsc 0 · eslint 0 · next build exit 0 · vitest 773 passed | 14 todo(베이스라인 535 → +238)**
 - 정책(ADR-026): 쿠폰 정액/정률(bps)·최소금액·만료·전체한도 원자·회원 1인1회·비회원 허용 · 할인 순서 쿠폰→적립금(net totalPrice, 031 계약 유지) · **세트할인 createOrder 보류**(세트 SKU 출시 시) · 위시 로그인 전용 · 문의 비밀글 고정
-- graceful: 마이그 5본 **작성 완료·미적용** — probe 게이트로 적용 전 무해(UI 비노출, 42703/42P01 노출 금지). **머지·배포 후 브라우저 세션으로 적용 예정(CTO 승인済)** — `docs/MIGRATIONS-APPLY.md` "2차 적용 대기" 절
-- [ ] 리뷰(Security∥Final) → Merge Gate → PR/배포 → 마이그 5본 적용 → 프로덕션 스모크
+- graceful: 마이그 5본 probe 게이트로 적용 전 무해(UI 비노출, 42703/42P01 노출 금지) — **✅ 2026-08-01 프로덕션 적용 완료**(검증 21행 일치 + 체크아웃 RSC `coupons:true`, 재배포 0) — `docs/MIGRATIONS-APPLY.md` "2차 적용 완료" 절
+- [x] 리뷰 → Merge Gate → PR/배포(#63, 2026-07-27 main 라이브) → **마이그 5본 적용(2026-08-01)** — 잔여: 쿠폰 실결제 스모크(Toss 실키 설정 후)
 - 후속: 갤러리월 드래그 에디터·세트 SKU 주문 플로우(P2 후기) · 세트할인 createOrder 적용(보류 해제 시)
 
 ---
@@ -246,4 +246,5 @@ landing → catalog → product → studio → cart → checkout (배송 방법 
 - 2026-07-06: [x] **확장형 P1 편집기 웨이브(FS-P1-00~03) 완료 + 문서 정합** — 브랜치 `feat/extended-p1-editor`(base: main@2e9a738), 계약 ADR-025. 4유닛: 기반(옵셔널 계약·드래프트 v2·스냅샷 확장·probe) / 스토어(kind 분기·photoPool·라인 액션 5종·라인별 totals) / 서버(createOrder 그룹 동결·cart_projects upsert·sync probe 폴백) / UI(mode=multi·묶음 담기·CTA·i18n 24키). CTO 케이스 1~4 커버, 베이직 회귀 0. 검증: tsc 0 · eslint 0 · build 0 · **vitest 510 passed | 14 todo**(451→+59). 문서: BACKLOG §1/§1A · extended-product §8 · MIGRATIONS-APPLY(034/035 권장 격상) · HANDOFF P1 절. 다음: Merge Gate → PR/배포 + CTO 034/035 적용.
 - 2026-07-03: [x] **EC 웨이브 적대 리뷰(Security+Final) → P0 수정 랜딩 + 문서 보정** — verdict NO-GO(P0 1건: /api/orders route가 redeemPoints/receipt를 createOrder로 미전달) → 수정 완료(필드 전달+POINTS_*/RECEIPT_* 422 매핑+라우트 seam 통합 테스트). 동반: 적립 회수 자동화 격상(전액 환불·취소 시 reversePointsForOrder — 사용분 ADJUSTMENT+/적립분 REFUND−, (order_id,type) 멱등, fire-and-forget, 031 미적용 skip; 부분환불 무조정=문서화된 한계), 딥링크 진입 시 편집 드래프트 보존(ADR-022 정합), receipt_info PII 서버측 마스킹, ZIP fetch Supabase origin 제한, 현금영수증 식별번호 최소 숫자 8자리. **최종 vitest 451 passed | 14 todo(직접 실행 확인 — 관리자취소 회수 +4 포함).** 문서 보정: ADR-024 Postscript·BACKLOG §3/§5/§7·HANDOFF EC 절.
 - 2026-07-06: [x] **마이그레이션 029~039 프로덕션 적용 완료** — CTO 브라우저 로그인(yohan73) + Claude가 SQL Editor 통합 실행(전부 비파괴·멱등). 검증 24행 일치. 런타임 자동 활성화 확증(체크아웃 RSC features 3종 true — 재배포 0). BL-010 Resolved. 활성화됨: 주문메모·주소록·구매확정·적립금·추가배송비·부분환불·현금영수증·로그인 묶음 카트 동기화(034/035).
+- 2026-08-01: [x] **마이그레이션 2차(036/037/040/041/042) 프로덕션 적용 완료** — CTO 브라우저 로그인(yohan73) + Claude 가 SQL Editor 에서 036→042 통합 실행(비파괴·멱등, "Success. No rows returned"). 검증 쿼리 21행 전부 일치(테이블 6 · cart_projects FK 1 · orders 쿠폰 컬럼 2 · RLS 6 true · 정책 6). 런타임 자동 활성화 확증: 프로덕션 `/checkout` RSC flight `coupons:true`(+기존 points/receipt/surcharge true), 재배포 0. **마이그 001~042 전부 적용 — 세트템플릿·구성규칙·문의·위시·쿠폰 런타임 활성화.** 잔여: 쿠폰 실결제 스모크는 Toss 실키 설정 후(런칭 전 CTO 액션).
 - 2026-07-16: [x] **FS-X 통합 웨이브(X-00~06) 완료 + 문서 정합** — 브랜치 `feat/p2-p3-commerce`(base: main@a186121), 계약 ADR-026. 7유닛: 기반(마이그 5본·타입 4본·probe 5종·그룹핑 뷰모델·쿠폰 계산) / 쿠폰 서버(원자 소비·보상·createOrder 통합·validate API) / 문의·위시 서버(4레이어+답변 이메일) / admin 워크스페이스 6탭(슬롯빌더+미니맵·bundle_rules 폼·승격) / 커머스 FE(cart 묶음 카드·세트 원자 선택·쿠폰 카드) / 주문·admin FE(MyOrders 그룹·reorder 세트 복원 수정·그룹 트리·쿠폰 CRUD·문의 답변) / 위시·문의 FE(하트 아일랜드·account·i18n). 검증: tsc 0 · eslint 0 · build 0 · **vitest 773 passed | 14 todo**(535→+238). 마이그 036/037/040/041/042 작성·적용 대기(probe 게이트 무해 — 머지·배포 후 적용, CTO 승인済). 문서: BACKLOG §1/§1A/§5 · MIGRATIONS-APPLY "2차 적용 대기" 절 · extended-product §8 · HANDOFF FS-X 절. 다음: 리뷰 → Merge Gate → PR/배포 → 마이그 적용.
