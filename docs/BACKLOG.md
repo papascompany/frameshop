@@ -8,13 +8,13 @@
 
 ---
 
-## §1. 마이그레이션 — 029~039 ✅ 적용 완료(2026-07-06) · 036/037/040~042 적용 대기(FS-X)
+## §1. 마이그레이션 — 001~042 전부 ✅ 적용 완료(1차 2026-07-06 · 2차 2026-08-01)
 
-> **029~039 적용 완료**: CTO 브라우저 로그인(yohan73) 후 SQL Editor에서 통합 실행. 검증 쿼리 24행 일치,
-> 프로덕션 런타임 자동 활성화 확증(체크아웃 probe points/receipt/surcharge 전부 true).
-> BL-010 Resolved. **036/037/040/041/042 는 FS-X 웨이브(2026-07-16)에서 작성 완료 — 미적용(적용 대기)**:
-> 이 웨이브 머지·배포 후 브라우저 세션으로 적용 예정(CTO 승인済). probe 게이트로 적용 전 무해.
-> 아래 표는 이력 참고 + 적용 대기 추적용으로 유지.
+> **1차(029~039) 적용 완료(2026-07-06)**: CTO 브라우저 로그인(yohan73) 후 SQL Editor에서 통합 실행.
+> 검증 쿼리 24행 일치, 런타임 자동 활성화 확증(체크아웃 probe points/receipt/surcharge 전부 true).
+> BL-010 Resolved. **2차(036/037/040/041/042) 적용 완료(2026-08-01)**: 같은 방식으로 통합 실행,
+> 검증 쿼리 21행 전부 일치 + 체크아웃 RSC `coupons:true` 확증(재배포 0).
+> 아래 표는 이력 참고용으로 유지.
 
 | 마이그레이션 | 기능 | 코드 상태 | SQL |
 |---|---|---|---|
@@ -27,16 +27,15 @@
 | `035_cart_items_project_link` | 확장형 기반: cart/order 프로젝트 링크 | **P1 라이브** — 적용 시 로그인 묶음 카트 동기화 자동 활성화(probe) | 파일 참조 |
 | `038_orders_refunded_amount` | 부분환불 누적액 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
 | `039_orders_cash_receipt` | 현금영수증 신청·Toss 발급 (EC 웨이브) | 라이브(feature-probe, 적용 시 자동 활성화) | 파일 참조 |
-| `036_set_templates` | 확장형 P2: 세트 프리셋 + cart_projects FK 이행 (FS-X) | **작성 완료·적용 대기** — probe `isSetTemplatesAvailable`, 적용 시 자동 활성화 | 파일 참조 |
-| `037_bundle_rules` | 확장형 P2: 구성 검증/가격 규칙 (FS-X — 세트할인 적용은 ADR-026 보류) | **작성 완료·적용 대기** — probe `isBundleRulesAvailable` | 파일 참조 |
-| `040_inquiries` | 1:1 문의(비밀글 고정) + admin 답변 (FS-X) | **작성 완료·적용 대기** — probe `isInquiriesAvailable` | 파일 참조 |
-| `041_wishlists` | 위시리스트(로그인 전용) (FS-X) | **작성 완료·적용 대기** — probe `isWishlistAvailable` | 파일 참조 |
-| `042_coupons` | 쿠폰 + 사용 원장 + orders 쿠폰 스냅샷 (FS-X) | **작성 완료·적용 대기** — probe `isCouponsAvailable` | 파일 참조 |
+| `036_set_templates` | 확장형 P2: 세트 프리셋 + cart_projects FK 이행 (FS-X) | ✅ **적용 완료(2026-08-01)** — probe `isSetTemplatesAvailable` 활성 | 파일 참조 |
+| `037_bundle_rules` | 확장형 P2: 구성 검증/가격 규칙 (FS-X — 세트할인 적용은 ADR-026 보류) | ✅ **적용 완료(2026-08-01)** — probe `isBundleRulesAvailable` 활성 | 파일 참조 |
+| `040_inquiries` | 1:1 문의(비밀글 고정) + admin 답변 (FS-X) | ✅ **적용 완료(2026-08-01)** — probe `isInquiriesAvailable` 활성 | 파일 참조 |
+| `041_wishlists` | 위시리스트(로그인 전용) (FS-X) | ✅ **적용 완료(2026-08-01)** — probe `isWishlistAvailable` 활성 | 파일 참조 |
+| `042_coupons` | 쿠폰 + 사용 원장 + orders 쿠폰 스냅샷 (FS-X) | ✅ **적용 완료(2026-08-01)** — probe `isCouponsAvailable` 활성, 체크아웃 RSC 확증 | 파일 참조 |
 
 → **적용 가이드(순서·검증쿼리·롤백)**: `docs/MIGRATIONS-APPLY.md` (CTO 전달용 단일 문서).
-→ **2차 적용 대기(FS-X, 2026-07-16 작성)**: 036/037/040/041/042 — 전부 비파괴·멱등, 미적용 상태에서도
-  probe 게이트로 앱 정상(해당 UI 비노출). 적용 시 코드 배포 없이 자동 활성화(probe TTL 60초).
-  절차·검증쿼리·롤백 = `docs/MIGRATIONS-APPLY.md` "2차 적용 대기" 절.
+→ **2차 적용 완료(2026-08-01)**: 036/037/040/041/042 — 검증쿼리·이력 = `docs/MIGRATIONS-APPLY.md`
+  "2차 적용 완료" 절.
 → **권장**: 029~039 전부 적용. **P1 편집기 라이브로 034/035 도 권장 격상** — 미적용 시 로그인 묶음 카트
   동기화만 평면 저장 폴백(묶음 정보는 주문 스냅샷 jsonb 에 보존), 적용 시 자동 활성화(probe).
 → **029~039 전부 미적용 상태에서도 앱 정상**(graceful probe/conditional-spread, ADR-024) — 적용 시 코드 배포 없이 자동 활성화(probe TTL 60초).

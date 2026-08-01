@@ -1,17 +1,15 @@
 # 새 세션 시작 프롬프트 (복사해서 새 Claude Code 세션 첫 메시지로 붙여넣기)
 
-> 최종 갱신: 2026-07-21. 이 블록 전체를 새 세션에 붙여넣으면 맥락을 이어 작업할 수 있다.
+> 최종 갱신: 2026-08-01 (마이그 2차 적용 완료 반영). 이 블록 전체를 새 세션에 붙여넣으면 맥락을 이어 작업할 수 있다.
 
 ---
 
 당신은 FrameShop(Next.js 16 App Router + Supabase + Toss Payments, 맞춤형 액자/사진 인쇄 이커머스)의 엔지니어로서 CTO(yohan)의 작업을 이어서 진행합니다. **한국어 경어(존댓말) 필수.** 작업 방식은 서브에이전트 오케스트레이션(하네스: 정찰→Review Gate→Foundation→병렬 배치→적대 리뷰(Security∥Final)→수정→문서→PR/머지/배포→마이그 적용→런타임 검증). 동시 병렬 상한 3, 파일 소유권 disjoint.
 
-## 0. 가장 먼저 — 즉시 할 일 (미완 1건)
-**마이그레이션 036/037/040/041/042 프로덕션 적용이 유일한 미완.** 코드·리뷰·배포는 전부 끝났고(main `cea4432` 배포 READY), 이 5본만 적용하면 P2/P3·쿠폰·문의·위시가 런타임 활성화된다. 미적용 상태에서도 feature-probe 게이트로 **앱은 완전 정상**(신규 기능 UI만 숨김).
-- **제약**: FrameShop DB는 `yohan73@gmail.com` 계정. Claude의 Supabase MCP/CLI는 papascompany 계정이라 접근 불가 → **CTO가 브라우저(claude-in-chrome)에서 yohan73로 Supabase 로그인**해야 Claude가 SQL Editor에서 적용 가능(로그인=Claude 대행 불가). 세션이 자주 만료되니 로그인 직후 바로 진행.
-- **통합 SQL 이미 작성됨**: 각 파일 `supabase/migrations/036·037·040·041·042.sql`. 순서 **036→042**(036이 034 cart_projects에 FK를 건다). 전부 비파괴·멱등.
-- **가이드**: `docs/MIGRATIONS-APPLY.md` "★ 2차 적용 대기" 절 — 5본 표·검증 쿼리·롤백 SQL 완비.
-- **적용 후 런타임 검증**: probe TTL 60초 후 → 체크아웃 쿠폰 카드 노출, `/account/wishlist`·`/account/inquiries` 동작, `/admin/coupons`·`/admin/inquiries` 조회, admin 상품 워크스페이스(extended) 세트/규칙 탭. 검증 쿼리(테이블 5·orders coupon 2컬럼·cart_projects FK).
+## 0. 가장 먼저 — 현재 상태 (개발 미완 0건)
+**마이그레이션 2차(036/037/040/041/042)까지 2026-08-01 프로덕션 적용 완료 — 코드·리뷰·배포·마이그 전부 끝났다.** 검증 쿼리 21행 일치 + 체크아웃 RSC `coupons:true` 런타임 확증(재배포 0). P2/P3·쿠폰·문의·위시 전부 런타임 활성화 상태. 다음 우선순위는 §4의 **런칭 전 CTO 액션**(Toss 실키→쿠폰 실결제 스모크 포함)과 후속 개발 후보다.
+- **DB 접근 제약(상시)**: FrameShop DB는 `yohan73@gmail.com` 계정. Claude의 Supabase MCP/CLI는 papascompany 계정이라 접근 불가 → DB 작업은 **CTO가 브라우저에서 yohan73로 Supabase 로그인** 후 Claude가 SQL Editor에서 실행(로그인=Claude 대행 불가).
+- 마이그 적용 이력·검증 쿼리 = `docs/MIGRATIONS-APPLY.md`(1차 2026-07-06 · 2차 2026-08-01).
 
 ## 1. 먼저 읽을 것 (순서대로)
 1. `shared/HANDOFF.md` 말미 — 웨이브별 인계(EC/P1/FS-X). **다음 세션이 이것만 읽고 이어받도록 작성됨.**
@@ -25,11 +23,11 @@
 ## 2. 정본 경로 / 배포 / 계정
 - **정본 로컬**: `/Users/yohan/Developer/frameshop` (iCloud 밖). `~/Documents/frameshop`은 stale 사본이라 git 쓰기 멈춤 — 사용 금지(메모리 project-icloud-git-stall).
 - **프로덕션**: https://frameshop-snowy.vercel.app (icn1/서울). `frameshop.vercel.app`은 stale 별칭.
-- **현재 HEAD**: main `cea4432`, origin 동기, 배포 READY. git author = `PapasCompany`(68457172+papascompany@users.noreply.github.com) 여야 자동 배포(확인: `git config user.email`).
+- **현재 HEAD**: `git log --oneline -5` 로 확인(문서 갱신 시점 main = 마이그 2차 적용 기록 커밋). git author = `PapasCompany`(68457172+papascompany@users.noreply.github.com) 여야 자동 배포(확인: `git config user.email`).
 - **Supabase 프로젝트**: yohan73 계정 / project ref `acxsxjmqgvkceqahwkpz`(name=frameshop, Yohan73 Org). MCP는 papascompany라 미접근.
 - **Vercel**: team `team_dOpgsAqfLyl4qNlVgSiFVm6B`, project `prj_sZpuZWqjUqPdxx8oChrQ2gTEi72n`.
 
-## 3. 완료된 내역 (전부 라이브 — 코드/배포 기준, 마이그 2차 적용 대기 제외)
+## 3. 완료된 내역 (전부 라이브 — 코드·배포·마이그 001~042 적용 기준)
 현황: **확장형 상품 P0~P3 + 이커머스 기본 + 커머스 확장(쿠폰/문의/위시) 전부 완성.** vitest 798 passed | 14 todo.
 
 - **가로/세로·인쇄 photo-only·보안 Phase0·리전 icn1·주문관리 Phase A/B-1** (이전 세션들, #47~#56).
@@ -42,10 +40,9 @@
   - **쿠폰(042)**: 정액/정률·최소금액·만료(KST)·전체한도(CAS 원자)·회원 1인1회. 서버 재검증·net totalPrice·**소비=결제 confirm 시점**(재시도 소실 방지)·취소 시 복원. `/admin/coupons` CRUD.
   - **1:1문의(040)**: account 작성/목록+admin 답변(이메일)+비밀글.
   - **위시리스트(041)**: 로그인 전용·하트 아일랜드(배치 하이드레이션)·카탈로그/상세/`/account/wishlist`.
-- **마이그 1차 029~039 프로덕션 적용 완료**(2026-07-06, BL-010 Resolved). 검증 24행 일치, probe 런타임 활성화 확증.
+- **마이그 1차 029~039 적용 완료**(2026-07-06, BL-010 Resolved) + **2차 036/037/040/041/042 적용 완료**(2026-08-01, 검증 21행 일치·`coupons:true` 확증) — **001~042 전부 적용, 전 기능 런타임 활성화.**
 
 ## 4. 예정/남은 내역
-- **[즉시] 마이그 2차 적용 036/037/040/041/042** — §0 참조(로그인 필요).
 - **런칭 전 CTO 액션(코드 아닌 운영)**: ① Toss 실키 설정(쿠폰 소비=confirm 이동으로 **실결제 스모크 필요**) ② 제주/도서산간 surcharge 실요금 admin 설정(현재 0원) ③ 약관/방침 법률 자문 ④ `src/lib/legal/company.ts` placeholder 확정.
 - **확장형 후속(P2 후기/P3+)**: 갤러리월 드래그 슬롯 에디터·세트 SKU 주문 플로우·**세트할인 createOrder 적용**(ADR-026 보류 해제 시 — 이때 P2-006 세트 원자성 **서버 강제**가 P0 선결과제, 현재는 sessionStorage 기반이라 세트가 무영향) · 재크롭 배지 드래프트 영속화 · extended 명화/Google Photos 소스 · 서버 드래프트(교차기기).
 - **Phase C 남은 항목**: SMS/카카오 알림톡 · 회원정보 관리(수정/탈퇴) · 배송추적 API 연동 · 부분환불 적립 비례 조정(ADR-024 잔여) · 비회원 1:1문의(ADR-026 §11 — 현재 회원 전용).
@@ -61,4 +58,4 @@
 - **마이그 직접 적용 불가**: §0·§2 — CTO 브라우저 로그인 후 SQL Editor.
 
 ## 6. 지금 할 일
-CTO가 Supabase(yohan73)에 로그인돼 있으면 **즉시 마이그 036/037/040/041/042 적용 + 검증 + probe 런타임 확인**(§0). 로그인 안 돼 있으면 로그인 요청. 그 외 새 작업 지시가 있으면 위 §4에서 우선순위를 CTO와 확인 후 오케스트레이션으로 착수.
+개발 미완 0건 — 새 작업 지시가 있으면 위 §4(런칭 전 CTO 액션 / 확장형 후속 / Phase C / 보안 Phase 1·2)에서 우선순위를 CTO와 확인 후 착수. Toss 실키가 설정되면 **쿠폰 소비=confirm 경로 실결제 스모크**부터 진행.

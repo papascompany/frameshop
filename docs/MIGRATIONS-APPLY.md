@@ -4,29 +4,31 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-07-16 (FS-X 웨이브 — 036/037/040/041/042 "2차 적용 대기" 절 신설).
+> 최종 갱신: 2026-08-01 (2차 036/037/040/041/042 적용 완료 — 001~042 전부 적용됨).
 >
-> **✅ 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
+> **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
-> (체크아웃 probe `points/receipt/surcharge` 전부 true). 이 문서는 이후 신규 마이그레이션(036/037 등)
-> 적용 시의 절차 참고용으로 유지한다. 상세: `shared/BLOCKERS.md` BL-010(Resolved).
+> (체크아웃 probe `points/receipt/surcharge` 전부 true). 상세: `shared/BLOCKERS.md` BL-010(Resolved).
+> **✅ 2차 적용 완료 (2026-08-01):** 036/037/040/041/042 — 아래 절 참조. 이 문서는 이후 신규
+> 마이그레이션 적용 시의 절차 참고용으로 유지한다.
 
 ---
 
-## ★ 2차 적용 대기 — 036/037/040/041/042 (2026-07-16 작성, FS-X 웨이브)
+## ★ 2차 적용 완료 — 036/037/040/041/042 (2026-08-01 프로덕션 적용)
 
 > FS-X 웨이브(브랜치 `feat/p2-p3-commerce`, ADR-026)에서 작성된 5본. 전부 **비파괴 + 멱등**.
-> **미적용 상태에서도 앱 정상** — feature-probe 게이트가 해당 기능 UI 를 숨긴다(42P01/42703 노출 금지).
-> **적용 시점: 이 웨이브 머지·배포 후 브라우저 세션으로 적용(CTO 승인済).** 적용하면 코드 배포 없이
-> 자동 활성화(probe TTL 60초). **036 → 042 오름차순** 적용 권장(036 이 034 의 cart_projects 에 FK 를 건다).
+> **✅ 2026-08-01 적용 완료** — CTO 브라우저 로그인(yohan73) 후 Claude 가 SQL Editor 에서
+> 036→042 통합 실행(1회, "Success. No rows returned"). **검증 쿼리 21행 전부 일치**(테이블 6 ·
+> FK 1 · orders 컬럼 2 · RLS 6 전부 true · 정책 6). **런타임 자동 활성화 확증** — 프로덕션
+> `/checkout` RSC flight 에서 probe `coupons:true`(+기존 points/receipt/surcharge true), 재배포 0.
 
-| # | 파일 | 활성화되는 것 | 지금 적용? |
+| # | 파일 | 활성화되는 것 | 적용 |
 |---|---|---|---|
-| 036 | `036_set_templates.sql` | 세트 프리셋: 어드민 세트템플릿 탭(슬롯 빌더+미니맵)·카탈로그 세트 노출 + `cart_projects.set_template_id` FK 이행(034 예고) | ⏳ 배포 후 — probe `isSetTemplatesAvailable` |
-| 037 | `037_bundle_rules.sql` | 구성 검증/가격 규칙 폼(어드민 구성규칙 탭). **세트할인 createOrder 적용은 ADR-026 보류** — 금전 경로 무영향 | ⏳ 배포 후 — probe `isBundleRulesAvailable` |
-| 040 | `040_inquiries.sql` | 1:1 문의: account 작성/목록 + admin 답변 + 답변 이메일. 비밀글 고정(공개 정책 없음) | ⏳ 배포 후 — probe `isInquiriesAvailable` |
-| 041 | `041_wishlists.sql` | 위시리스트(로그인 전용): 하트 아일랜드 + `/account/wishlist` | ⏳ 배포 후 — probe `isWishlistAvailable` |
-| 042 | `042_coupons.sql` | 쿠폰: 체크아웃 쿠폰 카드·`/api/coupons/validate`·createOrder 쿠폰 경로(원자 소비+보상)·admin 쿠폰 CRUD + orders 스냅샷 2컬럼 | ⏳ 배포 후 — probe `isCouponsAvailable` |
+| 036 | `036_set_templates.sql` | 세트 프리셋: 어드민 세트템플릿 탭(슬롯 빌더+미니맵)·카탈로그 세트 노출 + `cart_projects.set_template_id` FK 이행(034 예고) | ✅ 2026-08-01 — probe `isSetTemplatesAvailable` |
+| 037 | `037_bundle_rules.sql` | 구성 검증/가격 규칙 폼(어드민 구성규칙 탭). **세트할인 createOrder 적용은 ADR-026 보류** — 금전 경로 무영향 | ✅ 2026-08-01 — probe `isBundleRulesAvailable` |
+| 040 | `040_inquiries.sql` | 1:1 문의: account 작성/목록 + admin 답변 + 답변 이메일. 비밀글 고정(공개 정책 없음) | ✅ 2026-08-01 — probe `isInquiriesAvailable` |
+| 041 | `041_wishlists.sql` | 위시리스트(로그인 전용): 하트 아일랜드 + `/account/wishlist` | ✅ 2026-08-01 — probe `isWishlistAvailable` |
+| 042 | `042_coupons.sql` | 쿠폰: 체크아웃 쿠폰 카드·`/api/coupons/validate`·createOrder 쿠폰 경로(원자 소비+보상)·admin 쿠폰 CRUD + orders 스냅샷 2컬럼 | ✅ 2026-08-01 — probe `isCouponsAvailable`, 체크아웃 RSC `coupons:true` 확증 |
 
 ### 적용 후 검증 쿼리 (2차 — SQL Editor 에서 실행)
 
