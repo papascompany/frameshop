@@ -189,6 +189,7 @@ function renderCheckout() {
       <CheckoutClient
         shippingMethods={[STANDARD]}
         features={{ points: false, receipt: false, surcharge: false, coupons: true }}
+        tossClientKey="test_ck_test"
       />
     </NextIntlClientProvider>,
   );
