@@ -96,9 +96,11 @@ type AppliedCoupon = {
 type Props = {
   shippingMethods: ShippingMethodConfig[];
   features: CheckoutFeatures;
+  /** 서버(RSC)가 해석한 유효 Toss 클라이언트 키 — null 이면 결제 미구성. */
+  tossClientKey: string | null;
 };
 
-export function CheckoutClient({ shippingMethods, features }: Props) {
+export function CheckoutClient({ shippingMethods, features, tossClientKey }: Props) {
   const router = useRouter();
   const t = useTranslations('checkout');
   const [items, setItems] = useState<CartItem[]>([]);
@@ -399,6 +401,13 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
       setSubmitError('입력 내용을 다시 확인해 주세요.');
       return;
     }
+    // 결제 키 미구성 시 주문(PENDING) 생성 전에 차단 — 고아 주문 방지.
+    if (!tossClientKey) {
+      setSubmitError(
+        '결제 수단이 아직 설정되지 않았습니다. 잠시 후 다시 시도해 주세요.',
+      );
+      return;
+    }
     if (submittingRef.current) return; // block a rapid double-submit
     submittingRef.current = true;
     setErrors({});
@@ -454,15 +463,18 @@ export function CheckoutClient({ shippingMethods, features }: Props) {
       const order = body.order;
       const successUrl = `${envPublic.siteUrl()}/payment/success?orderNo=${order.orderNo}`;
       const failUrl = `${envPublic.siteUrl()}/payment/fail?orderNo=${order.orderNo}`;
-      await requestPayment({
-        orderNo: asBrand<OrderNo>(order.orderNo),
-        totalPrice: order.totalPrice,
-        orderName: `FrameShop ${items.length}건`,
-        customerName: form.orderer.name,
-        customerEmail: form.orderer.email,
-        successUrl,
-        failUrl,
-      });
+      await requestPayment(
+        {
+          orderNo: asBrand<OrderNo>(order.orderNo),
+          totalPrice: order.totalPrice,
+          orderName: `FrameShop ${items.length}건`,
+          customerName: form.orderer.name,
+          customerEmail: form.orderer.email,
+          successUrl,
+          failUrl,
+        },
+        tossClientKey,
+      );
       // requestPayment redirects on success — fallback if SDK no-ops.
       await clearCart(items.map((i) => i.localId));
     } catch (err) {

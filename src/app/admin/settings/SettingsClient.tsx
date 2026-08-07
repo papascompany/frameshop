@@ -24,21 +24,21 @@ const PAYMENT_SETTINGS: SettingMeta[] = [
     label: 'Toss 클라이언트 키',
     type: 'text',
     placeholder: 'test_ck_... 또는 live_ck_...',
-    hint: '결제 위젯 초기화에 사용됩니다 (공개 정보).',
+    hint: '결제 위젯 초기화에 사용됩니다 (공개 정보). 실값 환경변수가 있으면 env 우선, placeholder/미설정이면 이 값이 사용됩니다.',
   },
   {
     key: 'toss_secret_key',
     label: 'Toss 시크릿 키',
     type: 'password',
     placeholder: 'test_sk_... 또는 live_sk_...',
-    hint: '서버 전용. 환경변수 TOSS_SECRET_KEY가 있으면 DB값은 무시됩니다.',
+    hint: '서버 전용. 실값 환경변수 TOSS_SECRET_KEY가 있으면 env 우선, placeholder/미설정이면 이 값이 사용됩니다.',
   },
   {
     key: 'toss_webhook_secret',
     label: 'Toss 웹훅 시크릿',
     type: 'password',
     placeholder: '웹훅 검증 시크릿',
-    hint: '서버 전용. 환경변수 TOSS_WEBHOOK_SECRET가 있으면 DB값은 무시됩니다.',
+    hint: '서버 전용. 실값 환경변수 TOSS_WEBHOOK_SECRET가 있으면 env 우선, placeholder/미설정이면 이 값이 사용됩니다.',
   },
 ];
 

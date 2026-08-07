@@ -1,5 +1,6 @@
 import { Container } from '@/components/layout/Container';
 import { getShippingMethods } from '@/lib/db/shipping';
+import { getEffectiveTossClientKey } from '@/lib/env';
 import {
   isCouponsAvailable,
   isPointsAvailable,
@@ -28,6 +29,9 @@ export default async function CheckoutPage() {
     // FS-X-04: 042 미적용이면 쿠폰 입력 카드 자체를 비노출(probe 게이트).
     isCouponsAvailable().catch(() => false),
   ]);
+  // 어드민 설정(app_settings) 반영을 위해 요청 시점에 서버에서 해석 —
+  // 실값 env 우선, placeholder/미설정이면 DB. null = 결제 미구성(제출 시 안내).
+  const tossClientKey = await getEffectiveTossClientKey().catch(() => null);
   const t = await getTranslations('checkout');
   return (
     <Container size="md" className="py-6 md:py-10">
@@ -35,6 +39,7 @@ export default async function CheckoutPage() {
       <CheckoutClient
         shippingMethods={methods}
         features={{ points, receipt, surcharge, coupons }}
+        tossClientKey={tossClientKey}
       />
     </Container>
   );
