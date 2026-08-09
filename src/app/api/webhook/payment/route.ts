@@ -26,8 +26,15 @@ export async function POST(request: Request): Promise<Response> {
     webhookSecret = await getEffectiveTossWebhookSecret();
   } catch {
     console.error(JSON.stringify({ event: 'webhook_secret_missing' }));
-    // Return 200 so Toss stops retrying; log for investigation.
-    return NextResponse.json({ ok: false, code: 'CONFIG_ERROR' }, { status: 200 });
+    // 시크릿이 없으면 서명을 검증할 수 없다 = 페이로드를 신뢰할 수 없다.
+    // 200(성공)을 돌려주면 Toss 가 재시도를 멈춰 **이벤트가 영구 소실**된다
+    // (가상계좌 입금·PG측 취소 통지 유실). 5xx 로 재시도를 유도해 설정 복구
+    // 후 이벤트가 살아 돌아오게 한다. 결제 확정 주경로는 /payment/success
+    // → confirm 이므로 이 재시도가 결제 완료를 막지는 않는다.
+    return NextResponse.json(
+      { ok: false, code: 'CONFIG_ERROR' },
+      { status: 503 },
+    );
   }
 
   const verified = verifyWebhook(rawBody, signature, webhookSecret);

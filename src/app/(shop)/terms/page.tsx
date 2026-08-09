@@ -1,10 +1,7 @@
 import type { Metadata } from 'next';
 import { Container } from '@/components/layout/Container';
-import {
-  COMPANY,
-  LEGAL_DRAFT_NOTICE,
-  LEGAL_EFFECTIVE_DATE,
-} from '@/lib/legal/company';
+import { COMPANY } from '@/lib/legal/company';
+import { getLegalInfo } from '@/lib/legal/company-settings';
 
 /**
  * 이용약관 — 한국 전자상거래 표준 구성 정적 페이지. FS-EC-05.
@@ -148,12 +145,13 @@ const ARTICLES: Article[] = [
   },
 ];
 
-export default function TermsPage() {
+export default async function TermsPage() {
+  const legal = await getLegalInfo();
   return (
     <Container size="md" className="py-10 md:py-14">
       <h1 className="heading-xl mb-2">이용약관</h1>
       <p className="caption-md text-mute mb-10">
-        시행일: {LEGAL_EFFECTIVE_DATE}
+        시행일: {legal.effectiveDate}
       </p>
 
       <div className="space-y-8">
@@ -182,16 +180,19 @@ export default function TermsPage() {
         <section>
           <h2 className="body-strong text-ink mb-2">부칙</h2>
           <p className="text-sm text-mute leading-relaxed">
-            이 약관은 {LEGAL_EFFECTIVE_DATE}부터 시행합니다.
+            이 약관은 {legal.effectiveDate}부터 시행합니다.
           </p>
         </section>
       </div>
 
-      <hr className="my-10 border-t border-hairline" />
-
-      <p className="utility-xs text-mute leading-relaxed">
-        {LEGAL_DRAFT_NOTICE}
-      </p>
+      {legal.draftNotice ? (
+        <>
+          <hr className="my-10 border-t border-hairline" />
+          <p className="utility-xs text-mute leading-relaxed">
+            {legal.draftNotice}
+          </p>
+        </>
+      ) : null}
     </Container>
   );
 }

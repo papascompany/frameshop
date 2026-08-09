@@ -1,6 +1,6 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, updateTag } from 'next/cache';
 import { requireAdmin } from '@/lib/db/admin';
 import { bulkUpdateShippingMethods } from '@/lib/db/shipping';
 import { shippingMethodInputSchema } from '@/types/shipping';
@@ -16,6 +16,10 @@ export type ShippingMethodUpdate = {
   note: string | null;
   isActive: boolean;
   sortOrder: number;
+  /** 제주 추가 배송비(030) — STANDARD 전용. 미지정 = 0. */
+  surchargeFeeJeju?: number;
+  /** 도서산간 추가 배송비(030) — STANDARD 전용. 미지정 = 0. */
+  surchargeFeeRemote?: number;
 };
 
 export async function updateShippingMethodsAction(
@@ -59,9 +63,14 @@ export async function updateShippingMethodsAction(
         note: r.note,
         isActive: r.isActive,
         sortOrder: r.sortOrder,
+        surchargeFeeJeju: r.surchargeFeeJeju ?? 0,
+        surchargeFeeRemote: r.surchargeFeeRemote ?? 0,
       })),
     );
     revalidatePath('/admin/shipping');
+    // 고객 체크아웃은 unstable_cache(300s, tag 'shipping')를 읽는다 —
+    // 실요금 변경이 즉시 반영되도록 태그를 무효화한다.
+    updateTag('shipping');
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'unknown' };

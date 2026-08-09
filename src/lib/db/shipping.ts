@@ -10,6 +10,7 @@ import 'server-only';
 import { unstable_cache } from 'next/cache';
 import type { ShippingMethodConfig, ShippingMethodInput } from '@/types/shipping';
 import { mapShippingMethod } from './mappers';
+import { isSurchargeAvailable } from './feature-probe';
 import { getAnonSupabase } from '../supabase/anon';
 import { getServerSupabase } from '../supabase/server';
 import { getServiceRoleSupabase } from '../supabase/service';
@@ -56,6 +57,9 @@ export async function bulkUpdateShippingMethods(
   rows: ShippingMethodInput[],
 ): Promise<ShippingMethodConfig[]> {
   const supabase = getServiceRoleSupabase();
+  // 030 미적용 DB 에서도 UPDATE 가 42703 으로 깨지지 않도록 conditional-spread
+  // (ADR-024 graceful 패턴). 적용된 DB 에서는 제주/도서산간 실요금이 저장된다.
+  const surchargeOk = await isSurchargeAvailable().catch(() => false);
   const updates = rows.map((row) =>
     supabase
       .from('shipping_methods')
@@ -66,6 +70,12 @@ export async function bulkUpdateShippingMethods(
         note: row.note,
         is_active: row.isActive,
         sort_order: row.sortOrder,
+        ...(surchargeOk
+          ? {
+              surcharge_fee_jeju: row.surchargeFeeJeju ?? 0,
+              surcharge_fee_remote: row.surchargeFeeRemote ?? 0,
+            }
+          : {}),
       })
       .eq('code', row.code)
       .select()

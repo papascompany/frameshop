@@ -14,6 +14,10 @@ type RowState = {
   note: string;
   isActive: boolean;
   sortOrder: string;
+  /** 제주 추가 배송비(030) — STANDARD 전용. */
+  surchargeFeeJeju: string;
+  /** 도서산간 추가 배송비(030) — STANDARD 전용. */
+  surchargeFeeRemote: string;
 };
 
 function configToRow(m: ShippingMethodConfig): RowState {
@@ -25,7 +29,15 @@ function configToRow(m: ShippingMethodConfig): RowState {
     note: m.note ?? '',
     isActive: m.isActive,
     sortOrder: String(m.sortOrder),
+    surchargeFeeJeju: String(m.surchargeFeeJeju ?? 0),
+    surchargeFeeRemote: String(m.surchargeFeeRemote ?? 0),
   };
+}
+
+/** 빈 문자열/비수치 입력은 0 으로 — 서버 zod 는 정수만 받는다. */
+function toInt(value: string): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 export function ShippingClient({ methods }: { methods: ShippingMethodConfig[] }) {
@@ -52,6 +64,10 @@ export function ShippingClient({ methods }: { methods: ShippingMethodConfig[] })
         note: r.note || null,
         isActive: r.isActive,
         sortOrder: Number(r.sortOrder),
+        // STANDARD 외에는 0 강제 — zod refine(surcharge is STANDARD-only) 충족.
+        surchargeFeeJeju: r.code === 'STANDARD' ? toInt(r.surchargeFeeJeju) : 0,
+        surchargeFeeRemote:
+          r.code === 'STANDARD' ? toInt(r.surchargeFeeRemote) : 0,
       }));
       const result = await updateShippingMethodsAction(payload);
       if (!result.ok) {
@@ -72,6 +88,8 @@ export function ShippingClient({ methods }: { methods: ShippingMethodConfig[] })
               <th className="px-3 py-2">라벨</th>
               <th className="px-3 py-2">요금 (원)</th>
               <th className="px-3 py-2">무료 기준 (원)</th>
+              <th className="px-3 py-2">제주 추가 (원)</th>
+              <th className="px-3 py-2">도서산간 추가 (원)</th>
               <th className="px-3 py-2">비고</th>
               <th className="px-3 py-2 text-center">활성</th>
               <th className="px-3 py-2">정렬</th>
@@ -107,6 +125,40 @@ export function ShippingClient({ methods }: { methods: ShippingMethodConfig[] })
                       value={row.freeThreshold}
                       onChange={(e) => updateRow(i, { freeThreshold: e.target.value })}
                       placeholder="없음"
+                      disabled={pending}
+                    />
+                  ) : (
+                    <span className="text-muted-fg px-3">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {row.code === 'STANDARD' ? (
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={row.surchargeFeeJeju}
+                      onChange={(e) =>
+                        updateRow(i, { surchargeFeeJeju: e.target.value })
+                      }
+                      placeholder="0"
+                      disabled={pending}
+                    />
+                  ) : (
+                    <span className="text-muted-fg px-3">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-2">
+                  {row.code === 'STANDARD' ? (
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={row.surchargeFeeRemote}
+                      onChange={(e) =>
+                        updateRow(i, { surchargeFeeRemote: e.target.value })
+                      }
+                      placeholder="0"
                       disabled={pending}
                     />
                   ) : (

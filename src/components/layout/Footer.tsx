@@ -1,14 +1,17 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { Container } from './Container';
-import { COMPANY } from '@/lib/legal/company';
+import { getLegalInfo } from '@/lib/legal/company-settings';
 
 /**
  * Site footer — 사업자 정보 + 카탈로그·주문·법적 고지 링크.
  *
  * 사업자 실값은 src/lib/legal/company.ts(SSOT)만 참조한다 (FS-EC-05).
  */
-export function Footer() {
+export async function Footer() {
+  // 확정 대기 값(통신판매업신고번호·호스팅 표기 등)은 어드민 설정에서
+  // 덮어쓸 수 있다 — 미설정이면 company.ts 정적 값 그대로.
+  const { company: COMPANY } = await getLegalInfo();
   return (
     <footer className="mt-auto bg-canvas border-t border-hairline">
       <Container size="xl" className="py-12">

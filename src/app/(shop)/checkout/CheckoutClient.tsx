@@ -461,8 +461,16 @@ export function CheckoutClient({ shippingMethods, features, tossClientKey }: Pro
       }
       // Persist order id for the success page lookup and clear cart.
       const order = body.order;
-      const successUrl = `${envPublic.siteUrl()}/payment/success?orderNo=${order.orderNo}`;
-      const failUrl = `${envPublic.siteUrl()}/payment/fail?orderNo=${order.orderNo}`;
+      // 결제 복귀 URL 은 **브라우저 origin** 이 권위 — 별칭/프리뷰 도메인에서도
+      // 정확하고, NEXT_PUBLIC_SITE_URL 미주입 시 localhost 로 새는 사고를 막는다.
+      // (2026-08-08 실사고: env-public 동적 접근으로 localhost:3000 폴백 →
+      //  Toss 승인 후 /payment/success 미도달 → confirm 미호출.)
+      const baseUrl =
+        typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : envPublic.siteUrl();
+      const successUrl = `${baseUrl}/payment/success?orderNo=${order.orderNo}`;
+      const failUrl = `${baseUrl}/payment/fail?orderNo=${order.orderNo}`;
       await requestPayment(
         {
           orderNo: asBrand<OrderNo>(order.orderNo),
