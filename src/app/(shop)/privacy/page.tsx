@@ -1,11 +1,7 @@
 import type { Metadata } from 'next';
 import { Container } from '@/components/layout/Container';
-import {
-  COMPANY,
-  PRIVACY_PROCESSORS,
-  LEGAL_DRAFT_NOTICE,
-  LEGAL_EFFECTIVE_DATE,
-} from '@/lib/legal/company';
+import { COMPANY } from '@/lib/legal/company';
+import { getLegalInfo, type LegalInfo } from '@/lib/legal/company-settings';
 
 /**
  * 개인정보처리방침 — 한국 전자상거래 표준 구성 정적 페이지. FS-EC-05.
@@ -29,7 +25,8 @@ type Section = {
   items?: string[];
 };
 
-const SECTIONS: Section[] = [
+// 확정 대기 값(수탁 배송사 등)은 어드민 설정에서 채운다 — 미설정 시 정적 기본값.
+const buildSections = (legal: LegalInfo): Section[] => [
   {
     heading: '1. 수집하는 개인정보의 항목 및 수집 방법',
     paragraphs: [
@@ -78,7 +75,7 @@ const SECTIONS: Section[] = [
     paragraphs: [
       '회사는 서비스 제공을 위하여 다음과 같이 개인정보 처리 업무를 위탁하고 있으며, 위탁계약 시 개인정보 보호 관련 법규의 준수, 재위탁 제한 등을 명확히 규정합니다.',
     ],
-    items: PRIVACY_PROCESSORS.map((p) => `${p.name}: ${p.task}`),
+    items: legal.processors.map((p) => `${p.name}: ${p.task}`),
   },
   {
     heading: '6. 개인정보의 파기 절차 및 방법',
@@ -111,12 +108,14 @@ const SECTIONS: Section[] = [
   },
 ];
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  const legal = await getLegalInfo();
+  const SECTIONS = buildSections(legal);
   return (
     <Container size="md" className="py-10 md:py-14">
       <h1 className="heading-xl mb-2">개인정보처리방침</h1>
       <p className="caption-md text-mute mb-4">
-        시행일: {LEGAL_EFFECTIVE_DATE}
+        시행일: {legal.effectiveDate}
       </p>
       <p className="text-sm text-mute leading-relaxed mb-10">
         {COMPANY.name}(이하 &ldquo;회사&rdquo;)는 {COMPANY.serviceName} 서비스를
@@ -158,7 +157,7 @@ export default function PrivacyPage() {
             <li>
               연락처: {COMPANY.phone} ({COMPANY.businessHours})
             </li>
-            <li>이메일: {COMPANY.email}</li>
+            <li>이메일: {legal.company.email}</li>
             <li>카카오 채널: {COMPANY.kakaoChannel}</li>
           </ul>
           <p className="mt-2 text-sm text-mute leading-relaxed">
@@ -177,11 +176,14 @@ export default function PrivacyPage() {
         </section>
       </div>
 
-      <hr className="my-10 border-t border-hairline" />
-
-      <p className="utility-xs text-mute leading-relaxed">
-        {LEGAL_DRAFT_NOTICE}
-      </p>
+      {legal.draftNotice ? (
+        <>
+          <hr className="my-10 border-t border-hairline" />
+          <p className="utility-xs text-mute leading-relaxed">
+            {legal.draftNotice}
+          </p>
+        </>
+      ) : null}
     </Container>
   );
 }

@@ -9,6 +9,28 @@ import 'server-only';
 import { getSettings } from '@/lib/db/settings';
 import type { OrderWithItems } from '@/types/order';
 
+/**
+ * 기본 발신 주소 — 도메인 인증 전까지의 폴백(현행 동작 유지).
+ * Resend 는 인증된 도메인에서만 발송되므로, 도메인 확정 후 어드민
+ * 설정(`mail_from`)에서 실제 발신 주소로 교체한다.
+ */
+const DEFAULT_MAIL_FROM = 'FrameShop <noreply@frameshop.kr>';
+
+/**
+ * app_settings.mail_from 우선 → 미설정/조회 실패면 기본값.
+ * 설정 조회 실패가 메일 발송 자체를 막지 않도록 절대 throw 하지 않는다.
+ */
+async function resolveMailFrom(): Promise<string> {
+  try {
+    const settings = await getSettings(['mail_from']);
+    const value = settings['mail_from'];
+    if (value && value.trim() !== '') return value.trim();
+  } catch {
+    // 설정 조회 실패 → 기본 발신 주소 유지.
+  }
+  return DEFAULT_MAIL_FROM;
+}
+
 // ─── 공통 메시지 포맷 ────────────────────────────────────────────────────────
 
 function buildOrderSummary(order: OrderWithItems): string {
@@ -38,7 +60,7 @@ async function sendOrderEmail(
   order: OrderWithItems,
 ): Promise<void> {
   const body = {
-    from: 'FrameShop <noreply@frameshop.kr>',
+    from: await resolveMailFrom(),
     to: [adminEmail],
     subject: `[FrameShop] 새 주문 #${order.orderNo} — ${order.orderer.name}`,
     text: [
@@ -106,7 +128,7 @@ async function sendShippedEmail(
   ].join('\n');
 
   const body = {
-    from: 'FrameShop <noreply@frameshop.kr>',
+    from: await resolveMailFrom(),
     to: [customerEmail],
     subject: `[FrameShop] 주문 #${order.orderNo} 배송이 시작되었습니다`,
     text,
@@ -146,7 +168,7 @@ async function sendDeliveredEmail(
   ].join('\n');
 
   const body = {
-    from: 'FrameShop <noreply@frameshop.kr>',
+    from: await resolveMailFrom(),
     to: [customerEmail],
     subject: `[FrameShop] 주문 #${order.orderNo} 배송이 완료되었습니다`,
     text,
@@ -188,7 +210,7 @@ async function sendCancelledEmail(
   ].join('\n');
 
   const body = {
-    from: 'FrameShop <noreply@frameshop.kr>',
+    from: await resolveMailFrom(),
     to: [customerEmail],
     subject: `[FrameShop] 주문 #${order.orderNo} 이 취소되었습니다`,
     text,
@@ -231,7 +253,7 @@ async function sendRefundedEmail(
   ].join('\n');
 
   const body = {
-    from: 'FrameShop <noreply@frameshop.kr>',
+    from: await resolveMailFrom(),
     to: [customerEmail],
     subject: `[FrameShop] 주문 #${order.orderNo} 환불이 완료되었습니다`,
     text,
@@ -274,7 +296,7 @@ async function sendInquiryRepliedEmail(
   ].join('\n');
 
   const body = {
-    from: 'FrameShop <noreply@frameshop.kr>',
+    from: await resolveMailFrom(),
     to: [toEmail],
     subject: `[FrameShop] 1:1 문의에 답변이 등록되었습니다 — ${subject}`,
     text,

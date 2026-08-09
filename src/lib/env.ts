@@ -39,7 +39,6 @@ export const env = {
   // Public (re-exported via envPublic for ergonomics inside server modules).
   publicSupabaseUrl: () => envPublic.supabaseUrl(),
   publicSupabaseAnonKey: () => envPublic.supabaseAnonKey(),
-  publicTossClientKey: () => envPublic.tossClientKey(),
   publicSiteUrl: () => envPublic.siteUrl(),
 
   // Server-only secrets — never re-exported from env-public.

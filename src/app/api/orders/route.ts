@@ -23,6 +23,7 @@ import {
 import { asBrand } from '@/types/common';
 import type { UserId } from '@/types/common';
 import { createOrder } from '@/lib/db/order';
+import { getEffectiveTossClientKey } from '@/lib/env';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { isSameOrigin } from '@/lib/security/same-origin';
 import { checkRate } from '@/lib/ratelimit';
@@ -57,6 +58,20 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json(
       { ok: false, code: 'BAD_INPUT', message: parsed.error.message },
       { status: 422 },
+    );
+  }
+
+  // 결제 키 미구성이면 주문을 만들지 않는다 — 결제 불가 상태에서 주문만 생기면
+  // 적립금 차감(031)·쿠폰 예약 등 부수효과만 남는 고아 주문이 된다.
+  // 클라이언트 가드(CheckoutClient)와 이중화 — 직접 POST·키 회전 창 대비.
+  if (!(await getEffectiveTossClientKey().catch(() => null))) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: 'PAYMENT_UNAVAILABLE',
+        message: '결제 수단이 설정되지 않아 주문을 생성할 수 없습니다.',
+      },
+      { status: 503 },
     );
   }
 
