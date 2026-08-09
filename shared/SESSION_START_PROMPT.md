@@ -1,15 +1,17 @@
 # 새 세션 시작 프롬프트 (복사해서 새 Claude Code 세션 첫 메시지로 붙여넣기)
 
-> 최종 갱신: 2026-08-01 (마이그 2차 적용 완료 반영). 이 블록 전체를 새 세션에 붙여넣으면 맥락을 이어 작업할 수 있다.
+> 최종 갱신: 2026-08-08 (결제 P0 수정 + 런칭 게이트 정리). 이 블록 전체를 새 세션에 붙여넣으면 맥락을 이어 작업할 수 있다.
 
 ---
 
 당신은 FrameShop(Next.js 16 App Router + Supabase + Toss Payments, 맞춤형 액자/사진 인쇄 이커머스)의 엔지니어로서 CTO(yohan)의 작업을 이어서 진행합니다. **한국어 경어(존댓말) 필수.** 작업 방식은 서브에이전트 오케스트레이션(하네스: 정찰→Review Gate→Foundation→병렬 배치→적대 리뷰(Security∥Final)→수정→문서→PR/머지/배포→마이그 적용→런타임 검증). 동시 병렬 상한 3, 파일 소유권 disjoint.
 
-## 0. 가장 먼저 — 현재 상태 (개발 미완 0건)
-**마이그레이션 2차(036/037/040/041/042)까지 2026-08-01 프로덕션 적용 완료 — 코드·리뷰·배포·마이그 전부 끝났다.** 검증 쿼리 21행 일치 + 체크아웃 RSC `coupons:true` 런타임 확증(재배포 0). P2/P3·쿠폰·문의·위시 전부 런타임 활성화 상태. 다음 우선순위는 §4의 **런칭 전 CTO 액션**(Toss 실키→쿠폰 실결제 스모크 포함)과 후속 개발 후보다.
-- **DB 접근 제약(상시)**: FrameShop DB는 `yohan73@gmail.com` 계정. Claude의 Supabase MCP/CLI는 papascompany 계정이라 접근 불가 → DB 작업은 **CTO가 브라우저에서 yohan73로 Supabase 로그인** 후 Claude가 SQL Editor에서 실행(로그인=Claude 대행 불가).
-- 마이그 적용 이력·검증 쿼리 = `docs/MIGRATIONS-APPLY.md`(1차 2026-07-06 · 2차 2026-08-01).
+## 0. 가장 먼저 — 현재 상태 (2026-08-08)
+**남은 것은 CTO 액션 1건: `/admin/settings` → 결제 설정에 Toss 키 3개 입력.** 넣으면 곧바로 결제 가능하고, 이어서 쿠폰 실결제 스모크를 진행하면 된다. 전체 런칭 게이트는 `docs/BACKLOG.md` **§0** 이 SSOT.
+- 코드·마이그(001~042)·배포는 전부 완료. 2026-08-08 전수 감사에서 **실결제 100% 실패 P0 결함 2건**을 잡아 수정·배포했다(#67):
+  `env-public.ts` 의 `process.env[name]` **동적 접근**은 Next(Turbopack) 빌드타임 치환 대상이 아니라 브라우저에서 undefined 가 된다 → successUrl 이 localhost 로 폴백(결제 미완결)·supabase 브라우저 클라이언트 throw(로그인 카트 동기화 무음 실패). **NEXT_PUBLIC_* 은 반드시 리터럴 정적 접근으로 읽을 것**(회귀 테스트 `tests/unit/modules/launch-config.test.ts` 가 고정).
+- **DB 접근 제약(상시)**: FrameShop DB 는 `yohan73@gmail.com` 계정. Claude 의 Supabase MCP/CLI 는 papascompany 라 접근 불가 → DB 작업은 CTO 브라우저 로그인 후 SQL Editor.
+- **API 키 입력은 Claude 가 대행 불가**(정책) — 키·시크릿은 CTO 가 직접 입력한다.
 
 ## 1. 먼저 읽을 것 (순서대로)
 1. `shared/HANDOFF.md` 말미 — 웨이브별 인계(EC/P1/FS-X). **다음 세션이 이것만 읽고 이어받도록 작성됨.**
@@ -28,7 +30,7 @@
 - **Vercel**: team `team_dOpgsAqfLyl4qNlVgSiFVm6B`, project `prj_sZpuZWqjUqPdxx8oChrQ2gTEi72n`.
 
 ## 3. 완료된 내역 (전부 라이브 — 코드·배포·마이그 001~042 적용 기준)
-현황: **확장형 상품 P0~P3 + 이커머스 기본 + 커머스 확장(쿠폰/문의/위시) 전부 완성.** vitest 798 passed | 14 todo.
+현황: **확장형 상품 P0~P3 + 이커머스 기본 + 커머스 확장(쿠폰/문의/위시) 전부 완성.** vitest 812 passed | 14 todo.
 
 - **가로/세로·인쇄 photo-only·보안 Phase0·리전 icn1·주문관리 Phase A/B-1** (이전 세션들, #47~#56).
 - **EC 웨이브(#59, ADR-024)**: 적립금(earn/redeem/자동회수)·부분환불(Toss cancelAmount)·현금영수증·제주도서산간 배송비·법적고지(/terms·/privacy·404·사업자정보)·체크아웃 동의 2종·admin 통계 대시보드·주문 ZIP·명화 썸네일·**포토월 시뮬레이터 /wall**.
@@ -43,14 +45,15 @@
 - **마이그 1차 029~039 적용 완료**(2026-07-06, BL-010 Resolved) + **2차 036/037/040/041/042 적용 완료**(2026-08-01, 검증 21행 일치·`coupons:true` 확증) — **001~042 전부 적용, 전 기능 런타임 활성화.**
 
 ## 4. 예정/남은 내역
-- **런칭 전 CTO 액션(코드 아닌 운영)**: ① Toss 실키 설정(쿠폰 소비=confirm 이동으로 **실결제 스모크 필요**) ② 제주/도서산간 surcharge 실요금 admin 설정(현재 0원) ③ 약관/방침 법률 자문 ④ `src/lib/legal/company.ts` placeholder 확정.
+- **런칭 게이트 전체는 `docs/BACKLOG.md` §0 이 SSOT** — ① Toss 키 3개 입력(`/admin/settings`, 즉시 반영) → 쿠폰 실결제 스모크 ② 제주/도서산간 실요금(`/admin/shipping` 컬럼 신설됨, 현재 0원) ③ 사업자·법적 고지 확정값(`/admin/settings` 신설 탭 — 재배포 불필요) ④ Resend 도메인 인증 + `mail_from` ⑤ 외부: 토스 실계약·통신판매업 신고·법률 자문·Sentry DSN(빌드타임 env).
+- **코드 잔여 권장**: 결제 confirm 백스톱(현재 `/payment/success` 클라이언트 useEffect 단일 경로 — 탭 종료 시 미확정 주문 잔존) · app_settings 조회 캐시 · 설정값 unset 경로.
 - **확장형 후속(P2 후기/P3+)**: 갤러리월 드래그 슬롯 에디터·세트 SKU 주문 플로우·**세트할인 createOrder 적용**(ADR-026 보류 해제 시 — 이때 P2-006 세트 원자성 **서버 강제**가 P0 선결과제, 현재는 sessionStorage 기반이라 세트가 무영향) · 재크롭 배지 드래프트 영속화 · extended 명화/Google Photos 소스 · 서버 드래프트(교차기기).
 - **Phase C 남은 항목**: SMS/카카오 알림톡 · 회원정보 관리(수정/탈퇴) · 배송추적 API 연동 · 부분환불 적립 비례 조정(ADR-024 잔여) · 비회원 1:1문의(ADR-026 §11 — 현재 회원 전용).
 - **보안 Phase 1/2**: 분산 레이트리밋 Upstash env 설정(코드 완료) · CSP 강화 등.
 
 ## 5. 반드시 지킬 제약 (실패 경험 반영)
 - **이중 lockfile 함정**: Vercel은 `pnpm --frozen-lockfile`. 의존성 변경 시 `pnpm install --lockfile-only`로 pnpm-lock.yaml도 갱신 필수(#60 실사고). 커밋 전 `pnpm install --frozen-lockfile` exit 0 확인.
-- **검증 게이트**: `rm -rf .next/types && npx tsc --noEmit` · `npx eslint src tests --max-warnings=0` · `npx vitest run`(베이스라인 798) · `npx next build`. 전부 GREEN 후 커밋.
+- **검증 게이트**: `rm -rf .next/types && npx tsc --noEmit` · `npx eslint src tests --max-warnings=0` · `npx vitest run`(베이스라인 812, **Node 22 필수** — Node 26 은 jsdom localStorage 미지원으로 베이스라인 실패) · `npx next build`. 전부 GREEN 후 커밋.
 - **적대 리뷰 필수**: 금전/이음새(seam) 변경은 Security∥Final 2팀 적대 리뷰. 직전 웨이브들의 P0가 전부 **FE↔BE route 이음새**에서 나왔다 — seam 전 구간 추적 + route 통합 테스트 필수.
 - **FROZEN 타입**: 옵셔널 추가만, ADR 선승인. **graceful probe/conditional-spread**로 마이그 미적용에도 앱 정상 유지가 프로젝트 표준(ADR-023/024).
 - **오케스트레이션**: 규모 작업은 Workflow 계층형(데이터→서버→UI). 워크플로 구조화 출력은 **간결 제약**(facts/plan 개수·길이 상한)을 걸어야 실패 안 함(FS-X 정찰서 2회 초과 실패 경험). 리뷰 서브에이전트는 `.md` 파일 못 씀 → 페이로드 텍스트로 반환.
@@ -58,4 +61,4 @@
 - **마이그 직접 적용 불가**: §0·§2 — CTO 브라우저 로그인 후 SQL Editor.
 
 ## 6. 지금 할 일
-개발 미완 0건 — 새 작업 지시가 있으면 위 §4(런칭 전 CTO 액션 / 확장형 후속 / Phase C / 보안 Phase 1·2)에서 우선순위를 CTO와 확인 후 착수. Toss 실키가 설정되면 **쿠폰 소비=confirm 경로 실결제 스모크**부터 진행.
+Toss 키가 입력돼 있으면(`/admin/settings` 결제 탭에 "현재 저장된 값 ****" 표시) **즉시 쿠폰 실결제 스모크**: `/admin/coupons` 테스트 쿠폰 생성 → 체크아웃 적용 → 테스트 결제 완주 → 주문 PAID·`orders.coupon_code/coupon_discount`·`coupons.used_count` 확인. 미입력이면 CTO 에게 입력을 요청한다(키 입력은 Claude 대행 불가). 그 외 지시는 `docs/BACKLOG.md` §0 우선순위로 착수.

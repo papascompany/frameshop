@@ -1,10 +1,45 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-07-16 (FS-X 웨이브 — P2/P3·쿠폰·문의·위시 반영).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-08-08 (런칭 준비 감사 — 결제 env 인라인 P0 수정 + 확정값 설정화).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
+
+---
+
+## §0. 런칭 게이트 — 지금 남은 것 (2026-08-08 전수 감사)
+
+> 코드는 전부 라이브. **CTO 액션만 남았다.** 순서대로 처리하면 실판매 가능.
+
+### [즉시] Toss 키 3개 입력 — `/admin/settings` → 결제 설정
+`toss_client_key` · `toss_secret_key` · `toss_webhook_secret`. **반드시 같은 상점·같은 접두사**
+(test_ 또는 live_)로 3개를 한 번에 넣는다(짝이 어긋나면 승인 후 `NOT_FOUND_PAYMENT_SESSION`).
+실값 env 가 없고 프로덕션 env 는 placeholder 라 DB 값이 즉시 반영된다(재배포 불필요).
+**미입력 시**: 체크아웃이 "결제 수단이 아직 설정되지 않았습니다"로 graceful 차단 + `/api/orders`
+가 503 PAYMENT_UNAVAILABLE → 주문 자체가 생성되지 않는다(고아 주문 없음). 즉 **매출 0**.
+
+### [입력 후] 쿠폰 실결제 스모크
+`/admin/coupons` 테스트 쿠폰 생성 → 체크아웃 적용 → 테스트 결제 완주 → 주문 PAID·
+`orders.coupon_code/coupon_discount` 스냅샷·`coupons.used_count` 증가 확인(소비 시점 = confirm).
+
+### [운영값] 어드민에서 지금 채울 수 있는 것 (재배포 불필요)
+| 항목 | 위치 | 미설정 시 |
+|---|---|---|
+| 제주·도서산간 추가배송비 | `/admin/shipping` (제주/도서산간 컬럼) | 0원 — 도서지역 배송 손실 |
+| 배송 방법·요금·무료 기준 | `/admin/shipping` | 최소 1개 활성 없으면 **주문 불가** |
+| 상품 옵션 매트릭스·프레임 에셋·블리드 | `/admin/options`·`/admin/frames`·`/admin/products` | 해당 상품 판매 불가/재단 여백 없음 |
+| 신규주문 알림(admin_email·resend_api_key·mail_from·slack) | `/admin/settings` → 알림 | 주문은 정상, 알림만 0 |
+| 사업자·법적 고지 확정값 | `/admin/settings` → 사업자·법적 고지 | placeholder 문구 노출(전자상거래법 표기 미비) |
+
+### [외부] 리드타임 있는 것
+토스페이먼츠 실계약(라이브 키) · Resend 도메인 인증(SPF/DKIM) · 통신판매업 신고번호 ·
+약관/방침 법률 자문 · Sentry DSN(빌드타임 env `NEXT_PUBLIC_SENTRY_DSN` — DB 설정 아님).
+
+### [코드] 잔여 권장 (런칭 차단은 아님)
+- **confirm 백스톱**: 현재 결제 확정은 `/payment/success` 클라이언트 `useEffect` 단일 경로 —
+  승인 직후 탭 종료·네트워크 단절 시 미확정 주문이 남는다. 서버측 confirm 또는 스윕 크론 권장.
+- `app_settings` 조회 캐시(Toss 호출마다 DB 왕복) · 어드민 설정값 삭제(unset) 경로 부재.
 
 ---
 
