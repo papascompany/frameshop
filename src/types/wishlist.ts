@@ -19,6 +19,7 @@ import type {
   UserId,
   WishlistItemId,
 } from './common';
+import { uuidLike } from './common';
 
 // ---------- Domain types ----------
 
@@ -37,7 +38,7 @@ export type WishlistItem = {
  * 세션에서 주입한다(스푸핑 방지).
  */
 export const wishlistInputSchema = z.object({
-  productId: z.string().uuid(),
+  productId: uuidLike,
 });
 
 export type WishlistInput = z.infer<typeof wishlistInputSchema>;

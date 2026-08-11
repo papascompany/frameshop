@@ -7,6 +7,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { z } from 'zod';
+import { uuidLike } from '@/types/common';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
 import { createReview, getOrderReview } from '@/lib/db/reviews';
@@ -16,8 +17,8 @@ import { checkRate } from '@/lib/ratelimit';
 export const dynamic = 'force-dynamic';
 
 const reviewSchema = z.object({
-  orderId: z.string().uuid(),
-  productId: z.string().uuid().optional().nullable(),
+  orderId: uuidLike,
+  productId: uuidLike.optional().nullable(),
   rating: z.number().int().min(1).max(5),
   body: z.string().max(2000).optional().nullable(),
   photoUrl: z.string().url().optional().nullable(),

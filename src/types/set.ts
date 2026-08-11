@@ -25,6 +25,7 @@ import type {
   ProductId,
   SetTemplateId,
 } from './common';
+import { uuidLike } from './common';
 
 // ---------- Enums / unions ----------
 
@@ -123,7 +124,7 @@ export const setTemplateSlotSchema = z.object({
  * pricing_strategy 가 결정하고, 세트가 적용 자체가 ADR-026 보류 상태.
  */
 export const setTemplateInputSchema = z.object({
-  productId: z.string().uuid(),
+  productId: uuidLike,
   name: z.string().min(1).max(60),
   slots: z.array(setTemplateSlotSchema).min(1).max(50),
   wallWMm: z.number().int().min(1).max(100_000).nullable().optional(),
@@ -142,7 +143,7 @@ export type SetTemplateInput = z.infer<typeof setTemplateInputSchema>;
  */
 export const bundleRuleInputSchema = z
   .object({
-    productId: z.string().uuid(),
+    productId: uuidLike,
     minSlots: z.number().int().min(1).max(50),
     maxSlots: z.number().int().min(1).max(50),
     allowedSizeCodes: z.array(z.string().min(1).max(40)).max(50),

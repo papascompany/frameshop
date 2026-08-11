@@ -21,6 +21,7 @@ import type {
   ProductId,
   UserId,
 } from './common';
+import { uuidLike } from './common';
 
 // ---------- Enums / unions ----------
 
@@ -61,8 +62,8 @@ export const inquiryStatusSchema = z.enum(INQUIRY_STATUSES);
  * 세션에서 주입한다(스푸핑 방지). email 규칙은 ordererSchema 와 동일 계열.
  */
 export const inquiryInputSchema = z.object({
-  orderId: z.string().uuid().optional(),
-  productId: z.string().uuid().optional(),
+  orderId: uuidLike.optional(),
+  productId: uuidLike.optional(),
   contactEmail: z.string().email().max(254),
   category: z.string().min(1).max(30).optional(),
   subject: z.string().min(1).max(100),

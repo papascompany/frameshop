@@ -18,7 +18,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { wishlistInputSchema } from '@/types/wishlist';
-import { asBrand } from '@/types/common';
+import { asBrand, uuidLike } from '@/types/common';
 import type { ProductId, UserId } from '@/types/common';
 import {
   addToWishlist,
@@ -33,7 +33,7 @@ import { isSameOrigin } from '@/lib/security/same-origin';
 import { checkRate } from '@/lib/ratelimit';
 
 /** 카탈로그 한 페이지(≤100) 하이드레이션이 상한 — 무한 IN 목록 방지. */
-const productIdsQuerySchema = z.array(z.string().uuid()).min(1).max(100);
+const productIdsQuerySchema = z.array(uuidLike).min(1).max(100);
 
 async function getUserId(): Promise<UserId | null> {
   const supabase = await getServerSupabase();

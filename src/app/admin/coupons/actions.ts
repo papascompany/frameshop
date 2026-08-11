@@ -12,7 +12,6 @@
  */
 
 import { revalidatePath } from 'next/cache';
-import { z } from 'zod';
 import { requireAdmin } from '@/lib/db/admin';
 import {
   deleteCoupon,
@@ -21,7 +20,7 @@ import {
 } from '@/lib/db/coupons';
 import { isCouponsAvailable } from '@/lib/db/feature-probe';
 import { couponInputSchema } from '@/types/coupon';
-import { asBrand } from '@/types/common';
+import { asBrand, uuidLike } from '@/types/common';
 import type { CouponId } from '@/types/common';
 import type { Coupon } from '@/types/coupon';
 
@@ -31,7 +30,7 @@ export type CouponActionResult =
 
 export type CouponDeleteResult = { ok: true } | { ok: false; error: string };
 
-const couponIdSchema = z.string().uuid();
+const couponIdSchema = uuidLike;
 
 // 쿠폰 스키마(042) 미적용 창의 명시적 안내 — raw 42P01 이 UI 로 새지 않게
 // 각 액션이 선제 probe 게이트한다(워크스페이스 액션 X-03 패턴 미러).
