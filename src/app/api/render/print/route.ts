@@ -22,7 +22,7 @@ import 'server-only';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { asBrand } from '@/types/common';
+import { asBrand, uuidLike } from '@/types/common';
 import type { OrderItemId } from '@/types/common';
 import { env } from '@/lib/env';
 import { getServerSupabase } from '@/lib/supabase/server';
@@ -34,7 +34,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const inputSchema = z.object({
-  orderItemId: z.string().uuid(),
+  orderItemId: uuidLike,
 });
 
 export async function POST(request: Request): Promise<Response> {

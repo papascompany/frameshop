@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * Common branded ID types and shared primitives.
  *
@@ -96,3 +98,19 @@ export type Paginated<T> = {
 /** Default page sizes (kept here so all modules agree). */
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
+
+
+// ---------- Runtime ID validation ----------
+
+/**
+ * DB 식별자(PK/FK)용 UUID 형식 검증. **`z.uuid()` / `z.string().uuid()` 를 쓰지 말 것.**
+ *
+ * Zod v4 의 `uuid` 는 RFC 4122 의 **버전·variant 비트까지** 강제한다. 그래서
+ * `00000000-0000-0000-0000-000000000010` 같은 시드/고정 식별자를 거부한다
+ * (2026-08-08 실사고: 시드 상품의 `/api/cart`·`/api/orders` 가 전부 422 BAD_INPUT
+ *  → 로그인 사용자 장바구니가 조용히 비고, 주문 생성 자체가 불가능했다).
+ *
+ * `z.guid()` 는 8-4-4-4-12 hex 형식만 검사한다 — Postgres `uuid` 캐스팅 실패(22P02)와
+ * 문자열 주입 차단이라는 본래 목적(FS-P1 security P1-001)은 그대로 달성한다.
+ */
+export const uuidLike = z.guid();

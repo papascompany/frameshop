@@ -11,7 +11,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { asBrand } from '@/types/common';
+import { asBrand, uuidLike } from '@/types/common';
 import type { ProductId, SetTemplateId } from '@/types/common';
 import { productTypeSchema } from '@/types/product';
 import { setTemplateInputSchema, bundleRuleInputSchema } from '@/types/set';
@@ -59,7 +59,7 @@ function workspacePath(productId: string): string {
 // ---------- product_type 전환 ----------
 
 const promoteSchema = z.object({
-  productId: z.string().uuid(),
+  productId: uuidLike,
   productType: productTypeSchema,
 });
 
@@ -170,8 +170,8 @@ export async function upsertSetTemplateAction(
 }
 
 const templateRefSchema = z.object({
-  id: z.string().uuid(),
-  productId: z.string().uuid(),
+  id: uuidLike,
+  productId: uuidLike,
 });
 
 export async function deleteSetTemplateAction(
