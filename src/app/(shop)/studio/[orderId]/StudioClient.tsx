@@ -17,7 +17,7 @@ import {
   useEditorStore,
   useEditorTotals,
 } from '@/store/editor';
-import { addToCart } from '@/lib/cart/client';
+import { addToCart, CartSyncError } from '@/lib/cart/client';
 import {
   clearEditorDraft,
   loadEditorDraft,
@@ -644,6 +644,14 @@ export function StudioClient({
       clearEntries();
       clearEditorDraft(sessionId, productId);
       router.push('/cart');
+    } catch (err) {
+      // 서버 장바구니 동기화 실패는 반드시 노출한다 — 조용히 빈 장바구니가
+      // 되는 것을 막고, 사용자가 재시도할 수 있게 편집 상태를 보존한다.
+      setUploadError(
+        err instanceof CartSyncError
+          ? err.message
+          : '장바구니 담기에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      );
     } finally {
       setConfirming(false);
     }
@@ -715,6 +723,12 @@ export function StudioClient({
       poolPhotosRef.current.clear();
       clearEditorDraft(sessionId, productId);
       router.push('/cart');
+    } catch (err) {
+      setUploadError(
+        err instanceof CartSyncError
+          ? err.message
+          : '묶음 담기에 실패했습니다. 잠시 후 다시 시도해 주세요.',
+      );
     } finally {
       setConfirming(false);
     }

@@ -19,6 +19,17 @@ import { clampQuantity, getCartSummary } from './summary';
 import { clearLocalCart, readLocalCart, writeLocalCart } from './storage';
 import { getBrowserSupabase } from '../supabase/client';
 
+/**
+ * 로그인 사용자의 서버 장바구니 동기화 실패. 호출자(편집기)가 잡아
+ * 사용자에게 알린다 — 조용히 빈 장바구니가 되는 것을 막는다.
+ */
+export class CartSyncError extends Error {
+  constructor() {
+    super('장바구니 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    this.name = 'CartSyncError';
+  }
+}
+
 async function isAuthed(): Promise<boolean> {
   try {
     const supabase = getBrowserSupabase();
@@ -41,11 +52,23 @@ export async function addToCart(input: AddToCartInput): Promise<CartItem> {
   writeLocalCart([item, ...items]);
 
   if (await isAuthed()) {
-    await fetch('/api/cart', {
+    // 로그인 사용자는 getCart 가 DB 를 SSOT 로 읽는다 — 이 동기화가 실패하면
+    // localStorage 에만 남아 화면상 "빈 장바구니"가 된다(2026-08-08 실사고:
+    // 시드 상품 productId 가 엄격 uuid 검증에 걸려 422, 무음 실패).
+    // 응답을 반드시 확인해 호출자가 사용자에게 알릴 수 있게 한다.
+    const res = await fetch('/api/cart', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(item),
     });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      console.error(
+        `[cart] sync failed (${res.status}): ${detail.slice(0, 300)}`,
+      );
+      throw new CartSyncError();
+    }
   }
 
   return item;
