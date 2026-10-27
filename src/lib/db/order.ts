@@ -552,6 +552,77 @@ export async function transitionTo(
   return mapOrder(updated);
 }
 
+/**
+ * CAS 전이 — 현재 상태가 `from` 일 때만 `to` 로 바꾼다. 0행이면 false(다른 경로가
+ * 먼저 처리함). 결제 백스톱 스윕처럼 동시에 돌 수 있는 경로가 같은 주문을 두 번
+ * 처리(쿠폰 이중 소비·적립금 이중 복원)하지 않게 하는 원자 가드다. transitionTo 는
+ * 읽고-쓰기 사이에 상태 가드가 없어 이 용도로 쓰지 않는다.
+ */
+export async function transitionIfStatus(
+  orderId: OrderId,
+  from: OrderStatus,
+  to: OrderStatus,
+  meta: Pick<TransitionMeta, 'paymentKey'> = {},
+): Promise<boolean> {
+  if (from === to || !canTransition(from, to)) {
+    throw new InvalidStateTransitionError(from, to);
+  }
+
+  const patch: Record<string, unknown> = { status: to };
+  if (to === 'PAID') {
+    patch.paid_at = new Date().toISOString();
+    if (meta.paymentKey) patch.payment_id = meta.paymentKey as string;
+  }
+
+  const supabase = getServiceRoleSupabase();
+  const { data, error } = await supabase
+    .from('orders')
+    .update(patch)
+    .eq('id', orderId as string)
+    .eq('status', from)
+    .select('id');
+
+  if (error) {
+    throw new Error(`transitionIfStatus update failed: ${error.message}`);
+  }
+  return (data?.length ?? 0) > 0;
+}
+
+export type StaleCreatedOrder = {
+  id: OrderId;
+  orderNo: OrderNo;
+  totalPrice: number;
+  createdAt: string;
+};
+
+/**
+ * 결제 확정이 끝나지 않은 채 `createdBefore` 이전에 생성된 CREATED 주문(오래된 순).
+ * 결제 백스톱 스윕 전용 — 명시 컬럼만 읽는다(미적용 마이그 컬럼 무관, ADR-023).
+ */
+export async function listStaleCreatedOrders(
+  createdBefore: Date,
+  limit: number,
+): Promise<StaleCreatedOrder[]> {
+  const supabase = getServiceRoleSupabase();
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_no, total_price, created_at')
+    .eq('status', 'CREATED')
+    .lt('created_at', createdBefore.toISOString())
+    .order('created_at', { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(`listStaleCreatedOrders failed: ${error.message}`);
+  }
+  return (data ?? []).map((row) => ({
+    id: asBrand<OrderId>(row.id as string),
+    orderNo: asBrand<OrderNo>(row.order_no as string),
+    totalPrice: row.total_price as number,
+    createdAt: row.created_at as string,
+  }));
+}
+
 // ---------- getOrder / findOrderByGuest ----------
 
 export async function getOrder(

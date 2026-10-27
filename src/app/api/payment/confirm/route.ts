@@ -11,6 +11,10 @@ import { confirmPaymentInputSchema, type ConfirmPaymentInput } from '@/types/pay
 import { asBrand } from '@/types/common';
 import type { OrderNo, PaymentKey } from '@/types/common';
 import { confirmPayment } from '@/lib/payment/confirm';
+import {
+  CONFIRM_RATE_PER_IP,
+  CONFIRM_RATE_PER_ORDER,
+} from '@/lib/payment/redirect-confirm';
 import { isSameOrigin } from '@/lib/security/same-origin';
 import { checkRate } from '@/lib/ratelimit';
 import { getClientIp } from '@/lib/security/client-ip';
@@ -32,10 +36,11 @@ export async function POST(request: Request): Promise<Response> {
 
   // Throttle to curb orderNo brute-force + Toss-API-quota exhaustion (the money
   // path is already guarded by server-side amount + Toss response validation).
-  const ipRate = await checkRate('payment_confirm_ip', getClientIp(request), {
-    max: 20,
-    windowMs: 60_000,
-  });
+  const ipRate = await checkRate(
+    'payment_confirm_ip',
+    getClientIp(request),
+    CONFIRM_RATE_PER_IP,
+  );
   if (!ipRate.ok) return tooMany(ipRate.retryAfterSec);
 
   let body: unknown;
@@ -58,10 +63,11 @@ export async function POST(request: Request): Promise<Response> {
 
   // Per-order cap: bounds attempts (with forged paymentKeys) against any single
   // order regardless of IP rotation.
-  const orderRate = await checkRate('payment_confirm_order', parsed.data.orderId, {
-    max: 10,
-    windowMs: 10 * 60_000,
-  });
+  const orderRate = await checkRate(
+    'payment_confirm_order',
+    parsed.data.orderId,
+    CONFIRM_RATE_PER_ORDER,
+  );
   if (!orderRate.ok) return tooMany(orderRate.retryAfterSec);
 
   // Explicit branded-ID mapping at the IO boundary (P2-01). The Zod schema

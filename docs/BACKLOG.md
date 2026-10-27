@@ -1,7 +1,7 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-08-08 (런칭 준비 감사 + 쿠폰 스모크 — 결제 차단 결함 4건 수정).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-10-28 (결제 confirm 백스톱 완료 — §0 [코드]).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
@@ -55,8 +55,24 @@
 약관/방침 법률 자문 · Sentry DSN(빌드타임 env `NEXT_PUBLIC_SENTRY_DSN` — DB 설정 아님).
 
 ### [코드] 잔여 권장 (런칭 차단은 아님)
-- **confirm 백스톱**: 현재 결제 확정은 `/payment/success` 클라이언트 `useEffect` 단일 경로 —
-  승인 직후 탭 종료·네트워크 단절 시 미확정 주문이 남는다. 서버측 confirm 또는 스윕 크론 권장.
+- ✅ **confirm 백스톱 — 완료(2026-10-28).** 사실관계(Toss 문서): 인증 후 10분 안에 승인 API 를
+  호출하지 않으면 결제는 EXPIRED(청구 없음). 즉 기존 위험은 "돈만 빠짐"이 아니라 **고객은 결제했다고
+  믿는데 주문은 CREATED 로 남고, 체크아웃에서 차감한 적립금이 묶이는 것**이었다. 3단 방어로 해소:
+  ① `/payment/success` **서버 렌더가 승인 호출**(`src/lib/payment/redirect-confirm.ts`, `after()` 로
+  스트림이 끊겨도 완주 · 재시도 버튼과 레이트리밋 버킷 공유) — 클라이언트 JS 무관.
+  ② `confirmPayment` 가 `ALREADY_PROCESSED_PAYMENT` 를 결제 조회로 수렴(서버 확정·재시도·스윕 경합 시
+  패자도 PAID 로 수렴. 이 경로에서는 불일치여도 **절대 취소하지 않음** — 다른 주문 결제 재사용 시 환불 방지).
+  ③ **스윕 크론** `/api/cron/payment-sweep`(매일 18:00 UTC = 03:00 KST, `src/lib/payment/sweep.ts`):
+  15분 지난 CREATED 주문을 orderId 결제 조회로 판정 — DONE 이면 PAID 정산(끊긴 payment_events 락은
+  CAS 인수), 결제 없음/READY/EXPIRED/ABORTED/CANCELED 이고 24시간 지났으면 **CANCELLED 로 만료 +
+  사용 적립금 복원**(고객 알림 없음), 조회 실패·가상계좌 대기·부분취소는 무변경. **Toss 키 미설정이면
+  아무것도 하지 않는다.** ⚠️ 키 입력 후 첫 실행에서 24시간 지난 과거 CREATED 주문(개발·데모 잔여)이
+  1회 20건씩 만료된다(의도된 정리).
+- **웹훅 후속 2건(백스톱 작업 중 발견, 미수정)**: ① `payment_events.payment_key` UNIQUE 라 같은
+  결제의 **두 번째 이후 상태 웹훅(예: Toss 대시보드 취소 CANCELED)은 버려진다** — 이벤트 키를
+  (payment_key, status) 로 넓히는 마이그 + handleWebhook 정리 필요. ② 웹훅 DONE 이 confirm 보다 먼저
+  락을 잡으면 `handleWebhook` PAID 경로는 **쿠폰을 소비하지 않는다**(confirm 은 소비) — 카드 결제는
+  보통 confirm 이 먼저라 드물지만 경로 비대칭.
 - `app_settings` 조회 캐시(Toss 호출마다 DB 왕복) · 어드민 설정값 삭제(unset) 경로 부재.
 
 ---
