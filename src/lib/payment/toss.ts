@@ -101,6 +101,32 @@ async function call<T>(
   }
 }
 
+async function get<T>(path: string): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MAX_PAYMENT_CONFIRM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${TOSS_API_BASE}${path}`, {
+      method: 'GET',
+      headers: {
+        Authorization: await getAuthHeader(),
+      },
+      signal: controller.signal,
+    });
+    const json: unknown = await res.json();
+    if (!res.ok) {
+      const err = json as { code?: string; message?: string };
+      throw new TossApiError(
+        res.status,
+        err.code ?? 'TOSS_REJECTED',
+        err.message ?? 'Toss API error',
+      );
+    }
+    return json as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function mergeSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
   const ctrl = new AbortController();
   const onA = () => ctrl.abort(a.reason);
@@ -157,24 +183,19 @@ export const tossClient = {
 
   /** GET wrapper. */
   async getPayment(paymentKey: PaymentKey): Promise<TossConfirmResponse> {
-    const res = await fetch(
-      `${TOSS_API_BASE}/payments/${encodeURIComponent(paymentKey)}`,
-      {
-        method: 'GET',
-        headers: {
-          Authorization: await getAuthHeader(),
-        },
-      },
+    return get<TossConfirmResponse>(
+      `/payments/${encodeURIComponent(paymentKey)}`,
     );
-    const json: unknown = await res.json();
-    if (!res.ok) {
-      const err = json as { code?: string; message?: string };
-      throw new TossApiError(
-        res.status,
-        err.code ?? 'TOSS_REJECTED',
-        err.message ?? 'Toss API error',
-      );
-    }
-    return json as TossConfirmResponse;
+  },
+
+  /**
+   * orderId(= 우리 orderNo)로 결제 조회 (GET /v1/payments/orders/{orderId}).
+   * paymentKey 를 모르는 쪽(결제 백스톱 스윕)이 쓴다. 결제가 없으면
+   * TossApiError(404, 'NOT_FOUND_PAYMENT').
+   */
+  async getPaymentByOrderId(orderId: string): Promise<TossConfirmResponse> {
+    return get<TossConfirmResponse>(
+      `/payments/orders/${encodeURIComponent(orderId)}`,
+    );
   },
 };

@@ -10,6 +10,10 @@
  *   5. On Toss success → transition the order to PAID + attach paymentKey.
  *
  * Never trust the client's `amount` — DB is the source of truth.
+ *
+ * Callers: the /payment/success server render (primary — runs the moment the
+ * buyer's browser lands back from Toss, no client JS needed), the
+ * /api/payment/confirm retry button, and the payment-sweep cron backstop.
  */
 
 import 'server-only';
@@ -19,14 +23,28 @@ import type { ConfirmPaymentInput, ConfirmResult, WebhookEvent } from '@/types/p
 import type { OrderWithItems } from '@/types/order';
 import { TOSS_STATUS_TO_ORDER_STATUS } from '@/types/payment';
 import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
-import { getOrder, transitionTo } from '../db/order';
+import { getOrder, transitionIfStatus, transitionTo } from '../db/order';
 import { consumeCouponByCode } from '../db/coupons';
 import { enqueuePrintRender } from '../render/enqueue';
 import { getServiceRoleSupabase } from '../supabase/service';
 import { notifyNewOrder } from '../notify';
 
+export type ConfirmOptions = {
+  /**
+   * 결제 백스톱 스윕 전용. payment_events 락은 이미 있는데 주문이 아직 CREATED 면
+   * 락을 잡은 경로가 PAID 전이 전에 죽은 것이다(Toss 는 승인 완료 = 돈은 이미 받음).
+   * true 면 CAS(CREATED→PAID)로 넘겨받아 쿠폰 소비·렌더·알림까지 마무리한다.
+   * 라이브 경로(성공 페이지·재시도 버튼)는 락 소유자가 아직 진행 중일 수 있어 쓰지 않는다.
+   */
+  takeOverStaleLock?: boolean;
+};
+
+/** Toss: 이미 승인된 결제에 승인 API 를 다시 호출하면 400 ALREADY_PROCESSED_PAYMENT. */
+const ALREADY_PROCESSED = 'ALREADY_PROCESSED_PAYMENT';
+
 export async function confirmPayment(
   input: ConfirmPaymentInput,
+  opts: ConfirmOptions = {},
 ): Promise<ConfirmResult> {
   const order = await getOrder(input.orderId as string);
   if (!order) {
@@ -52,6 +70,9 @@ export async function confirmPayment(
 
   // Call Toss confirm.
   let tossResp: TossConfirmResponse;
+  // true when Toss had already approved this paymentKey and we adopted its
+  // current state via GET instead of a fresh approval.
+  let recovered = false;
   try {
     tossResp = await tossClient.confirm({
       paymentKey: input.paymentKey,
@@ -59,14 +80,32 @@ export async function confirmPayment(
       amount: input.amount,
     });
   } catch (err) {
-    if (err instanceof TossApiError) {
+    if (err instanceof TossApiError && err.code === ALREADY_PROCESSED) {
+      // The server-side confirm on /payment/success, a retry-button click and
+      // the sweep can all race on one paymentKey; only the first approval
+      // succeeds. Adopt Toss's view of the already-approved payment and run it
+      // through the same validation + payment_events lock below, so every
+      // caller converges on PAID instead of the loser showing a failure.
+      try {
+        tossResp = await tossClient.getPayment(input.paymentKey);
+        recovered = true;
+      } catch (lookupErr) {
+        return {
+          ok: false,
+          code: 'TOSS_REJECTED',
+          message:
+            lookupErr instanceof Error ? lookupErr.message : err.message,
+        };
+      }
+    } else if (err instanceof TossApiError) {
       return { ok: false, code: 'TOSS_REJECTED', message: err.message };
+    } else {
+      return {
+        ok: false,
+        code: 'INTERNAL',
+        message: err instanceof Error ? err.message : 'unknown',
+      };
     }
-    return {
-      ok: false,
-      code: 'INTERNAL',
-      message: err instanceof Error ? err.message : 'unknown',
-    };
   }
 
   // P0-01: Validate every field in the Toss response against our stored order.
@@ -80,17 +119,23 @@ export async function confirmPayment(
   ) {
     // Best-effort cancel — Toss may reject if the payment is already in a
     // non-cancellable state, but we must never mark the order as PAID.
-    try {
-      await tossClient.cancel({
-        paymentKey: input.paymentKey,
-        cancelReason: 'Payment response mismatch — internal security check',
-      });
-    } catch {
-      // Cancellation failure is logged at Toss's end; we still refuse to confirm.
+    // Never on the recovered path: that payment was approved by an earlier
+    // call — possibly for a DIFFERENT, legitimately paid order whose
+    // paymentKey is being replayed here. Cancelling it would refund that order.
+    if (!recovered) {
+      try {
+        await tossClient.cancel({
+          paymentKey: input.paymentKey,
+          cancelReason: 'Payment response mismatch — internal security check',
+        });
+      } catch {
+        // Cancellation failure is logged at Toss's end; we still refuse to confirm.
+      }
     }
     console.error(
       JSON.stringify({
         event: 'payment_response_mismatch',
+        recovered,
         orderId: input.orderId,
         expected: { orderId: input.orderId, amount: input.amount, status: 'DONE' },
         received: {
@@ -125,6 +170,32 @@ export async function confirmPayment(
     // UNIQUE conflict: handleWebhook already processed this paymentKey.
     // Re-fetch current order state and return idempotent success.
     const current = await getOrder(input.orderId as string);
+
+    // Sweep backstop: the lock exists but the order never left CREATED, so the
+    // lock owner died between its insert and the PAID transition while Toss
+    // holds an approved (charged) payment. Take over via CAS so concurrent
+    // sweeps settle the order exactly once.
+    if (opts.takeOverStaleLock && current?.status === 'CREATED') {
+      const won = await transitionIfStatus(current.id, 'CREATED', 'PAID', {
+        paymentKey: input.paymentKey,
+      });
+      if (won) {
+        console.warn(
+          JSON.stringify({
+            event: 'payment_stale_lock_takeover',
+            orderNo: current.orderNo,
+            paymentKey: input.paymentKey,
+          }),
+        );
+        await settlePaidOrder(current, tossResp);
+      }
+      return {
+        ok: true,
+        orderNo: current.orderNo,
+        paymentKey: input.paymentKey,
+      };
+    }
+
     // Fallback render enqueue: the webhook owns rendering in this race, but its
     // transition/enqueue is best-effort (its errors are swallowed). If the order
     // is PAID, ensure renders are queued here too. createRenderJob is idempotent
@@ -145,12 +216,29 @@ export async function confirmPayment(
   }
 
   await transitionTo(order.id, 'PAID', { paymentKey: input.paymentKey });
+  await settlePaidOrder(order, tossResp);
 
+  return {
+    ok: true,
+    orderNo: asBrand<OrderNo>(input.orderId as string),
+    paymentKey: input.paymentKey,
+  };
+}
+
+/**
+ * Side effects owed exactly once when an order becomes PAID: coupon consume,
+ * print renders, admin notification, cash receipt. Callers must own the
+ * PAID transition (payment_events lock + transitionTo, or the sweep's CAS).
+ */
+async function settlePaidOrder(
+  order: OrderWithItems,
+  tossResp: TossConfirmResponse,
+): Promise<void> {
   // FS-X-FIX-A P1-2: consume the coupon at PAID, not at order creation. createOrder
   // only RESERVED the discount (orders.coupon_code snapshot); consuming here means a
   // failed/abandoned payment never burns a member's one-per-user coupon. This runs
-  // in the payment_events-lock-owning branch (the insert above succeeded), so a
-  // confirm retry short-circuits at the dedup branch above and never re-consumes;
+  // only for the caller that owns the PAID transition (see doc above), so a
+  // confirm retry short-circuits at the dedup branch and never re-consumes;
   // member re-use is additionally blocked by coupon_redemptions UNIQUE, and a guest's
   // used_count cannot double-increment because a second confirm never reaches here.
   // Fail-open: a consume failure after a successful charge keeps the paid order (the
@@ -177,7 +265,6 @@ export async function confirmPayment(
 
   // ADR-005: kick off 300dpi print renders as soon as the order is paid.
   // Fire-and-forget — failures here must not bubble back to the buyer.
-  // The full order (with items) was loaded above; reuse its items.
   for (const item of order.items) {
     enqueuePrintRender(item.id);
   }
@@ -190,12 +277,6 @@ export async function confirmPayment(
   // FS-EC-03: 현금영수증 발급 훅 — 신청 주문 + 현금성 결제만. fire-and-forget,
   // 발급 실패는 로그만 남기고 결제 확정 결과에 영향을 주지 않는다.
   void issueCashReceiptIfEligible(order, tossResp.method);
-
-  return {
-    ok: true,
-    orderNo: asBrand<OrderNo>(input.orderId as string),
-    paymentKey: input.paymentKey,
-  };
 }
 
 // ---------- Cash receipt hook (FS-EC-03, migration 039) ----------

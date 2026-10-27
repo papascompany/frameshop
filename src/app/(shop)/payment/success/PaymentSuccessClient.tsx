@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
@@ -12,16 +12,35 @@ type Props = {
   paymentKey: string;
   orderId: string;
   amount: number;
+  /** Why the server-side confirm (page.tsx) failed — the first thing shown. */
+  initialMessage: string;
 };
 
-export function PaymentSuccessClient({ paymentKey, orderId, amount }: Props) {
+/** "확인 중" UI — shared by the streamed loading.tsx and the retry state. */
+export function PaymentConfirmingNotice() {
+  return (
+    <div className="flex flex-col items-center gap-3 py-8 text-center">
+      <span
+        className="inline-block w-8 h-8 rounded-full border-2 border-hairline border-t-ink animate-spin"
+        aria-hidden
+      />
+      <p className="text-sm font-medium">결제를 확인하고 있어요.</p>
+      <p className="text-xs text-muted-fg">창을 닫지 말고 잠시만 기다려 주세요.</p>
+    </div>
+  );
+}
+
+/**
+ * Rendered only when the server-side confirm did not succeed: shows the reason
+ * and lets the buyer retry via /api/payment/confirm (idempotent — a payment
+ * already approved by an earlier attempt converges on PAID, never a double charge).
+ */
+export function PaymentSuccessClient({ paymentKey, orderId, amount, initialMessage }: Props) {
   const router = useRouter();
-  const [status, setStatus] = useState<Status>('pending');
-  const [message, setMessage] = useState<string>('');
+  const [status, setStatus] = useState<Status>('failed');
+  const [message, setMessage] = useState<string>(initialMessage);
   const [retrying, setRetrying] = useState(false);
 
-  // Runs the confirm POST. Does NOT set 'pending' itself (callers control that)
-  // so it never triggers a synchronous setState inside the mount effect.
   async function confirm() {
     try {
       const res = await fetch('/api/payment/confirm', {
@@ -43,25 +62,8 @@ export function PaymentSuccessClient({ paymentKey, orderId, amount }: Props) {
     }
   }
 
-  useEffect(() => {
-    // confirm() only setStates AFTER an awaited fetch, never synchronously in
-    // the effect body, so the set-state-in-effect warning is a false positive.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void confirm();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paymentKey, orderId, amount]);
-
   if (status === 'pending') {
-    return (
-      <div className="flex flex-col items-center gap-3 py-8 text-center">
-        <span
-          className="inline-block w-8 h-8 rounded-full border-2 border-hairline border-t-ink animate-spin"
-          aria-hidden
-        />
-        <p className="text-sm font-medium">결제를 확인하고 있어요.</p>
-        <p className="text-xs text-muted-fg">창을 닫지 말고 잠시만 기다려 주세요.</p>
-      </div>
-    );
+    return <PaymentConfirmingNotice />;
   }
 
   if (status === 'failed') {

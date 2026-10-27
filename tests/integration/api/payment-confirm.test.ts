@@ -10,6 +10,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { asBrand } from '@/types/common';
+import type { OrderNo, PaymentKey } from '@/types/common';
 
 // ---------- Shared mock state (mutated per test) ----------
 
@@ -41,19 +43,37 @@ const mockState: {
     amount: number;
   }>;
   tossShouldThrow: boolean;
+  /** Toss confirm rejects with this TossApiError code (e.g. ALREADY_PROCESSED_PAYMENT). */
+  tossConfirmErrorCode: string | null;
+  /** What GET /payments/{paymentKey} returns (recovered path). */
+  tossGetPaymentResponse: {
+    paymentKey: string;
+    orderId: string;
+    status: string;
+    totalAmount: number;
+  };
+  tossCancelCalls: string[];
   paymentEventsInsertError: { message: string; code: string } | null;
   /** FS-X-FIX-A P1-2: records every consumeCouponByCode call the route makes. */
   couponConsumeCalls: Array<{ code: string; userId: string | null; orderNo: string }>;
   couponConsumeResult: CouponConsumeResult;
+  /** Sweep stale-lock takeover CAS (transitionIfStatus). */
+  casCalls: Array<{ orderId: string; from: string; to: string; paymentKey?: string }>;
+  casResult: boolean;
 } = {
   order: null,
   transitionCalls: [],
   tossConfirmCalls: [],
   tossShouldThrow: false,
+  tossConfirmErrorCode: null,
+  tossGetPaymentResponse: { paymentKey: '', orderId: '', status: 'DONE', totalAmount: 0 },
+  tossCancelCalls: [],
   // null → insert succeeds (P1-03 lock acquired); non-null → UNIQUE conflict
   paymentEventsInsertError: null,
   couponConsumeCalls: [],
   couponConsumeResult: { ok: true },
+  casCalls: [],
+  casResult: true,
 };
 
 // FS-X-FIX-A P1-2: the coupon is consumed at PAID (here), not at order creation.
@@ -126,6 +146,15 @@ vi.mock('@/lib/db/order', () => ({
     });
     return {};
   },
+  transitionIfStatus: async (
+    orderId: string,
+    from: string,
+    to: string,
+    meta: { paymentKey?: string } = {},
+  ) => {
+    mockState.casCalls.push({ orderId, from, to, paymentKey: meta.paymentKey });
+    return mockState.casResult;
+  },
   // Unused by the confirm route, but exported for completeness.
   createOrder: async () => ({}),
   generateOrderNo: async () => '20260512-0001',
@@ -151,6 +180,13 @@ vi.mock('@/lib/payment/toss', async () => {
         if (mockState.tossShouldThrow) {
           throw new actual.TossApiError(400, 'TOSS_REJECTED', 'rejected');
         }
+        if (mockState.tossConfirmErrorCode) {
+          throw new actual.TossApiError(
+            400,
+            mockState.tossConfirmErrorCode,
+            '이미 처리된 결제 입니다.',
+          );
+        }
         return {
           paymentKey: input.paymentKey,
           orderId: input.orderId,
@@ -160,18 +196,16 @@ vi.mock('@/lib/payment/toss', async () => {
           approvedAt: new Date().toISOString(),
         };
       },
-      cancel: async () => ({
-        paymentKey: '',
-        orderId: '',
-        status: 'CANCELED',
-        totalAmount: 0,
-      }),
-      getPayment: async () => ({
-        paymentKey: '',
-        orderId: '',
-        status: 'DONE',
-        totalAmount: 0,
-      }),
+      cancel: async (input: { paymentKey: string }) => {
+        mockState.tossCancelCalls.push(input.paymentKey);
+        return {
+          paymentKey: '',
+          orderId: '',
+          status: 'CANCELED',
+          totalAmount: 0,
+        };
+      },
+      getPayment: async () => mockState.tossGetPaymentResponse,
     },
   };
 });
@@ -181,9 +215,19 @@ beforeEach(() => {
   mockState.transitionCalls = [];
   mockState.tossConfirmCalls = [];
   mockState.tossShouldThrow = false;
+  mockState.tossConfirmErrorCode = null;
+  mockState.tossGetPaymentResponse = {
+    paymentKey: '',
+    orderId: '',
+    status: 'DONE',
+    totalAmount: 0,
+  };
+  mockState.tossCancelCalls = [];
   mockState.paymentEventsInsertError = null;
   mockState.couponConsumeCalls = [];
   mockState.couponConsumeResult = { ok: true };
+  mockState.casCalls = [];
+  mockState.casResult = true;
 });
 
 afterEach(() => {
@@ -485,5 +529,140 @@ describe('POST /api/payment/confirm — 쿠폰 소비 시점 이동 (FS-X-FIX-A 
     expect(mockState.transitionCalls).toHaveLength(1);
     expect(mockState.couponConsumeCalls).toHaveLength(1);
     errSpy.mockRestore();
+  });
+});
+
+describe('confirmPayment — 결제 confirm 백스톱 (이중 승인 수렴·끊긴 락 인수)', () => {
+  const PAID_TARGET = {
+    id: 'order-uuid-1',
+    orderNo: '20260512-0001',
+    totalPrice: 12000,
+    status: 'CREATED' as const,
+    paymentId: null,
+    couponCode: 'WELCOME5',
+    userId: 'user-1',
+  };
+
+  function confirmReq(paymentKey = 'pk-race'): Request {
+    return new Request('http://localhost/api/payment/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentKey, orderId: '20260512-0001', amount: 12000 }),
+    });
+  }
+
+  it('ALREADY_PROCESSED_PAYMENT 면 승인된 결제를 조회해 같은 검증으로 PAID 에 수렴한다', async () => {
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = { ...PAID_TARGET };
+    // 서버측 확정(성공 페이지)이 먼저 Toss 승인을 끝냈고, 재시도 버튼이 늦게 들어온 경우.
+    mockState.tossConfirmErrorCode = 'ALREADY_PROCESSED_PAYMENT';
+    mockState.tossGetPaymentResponse = {
+      paymentKey: 'pk-race',
+      orderId: '20260512-0001',
+      status: 'DONE',
+      totalAmount: 12000,
+    };
+    const res = await POST(confirmReq());
+    const body = (await res.json()) as { ok: boolean };
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(mockState.transitionCalls).toEqual([
+      { orderId: 'order-uuid-1', target: 'PAID', paymentKey: 'pk-race' },
+    ]);
+    expect(mockState.couponConsumeCalls).toHaveLength(1);
+    expect(mockState.tossCancelCalls).toHaveLength(0);
+  });
+
+  it('ALREADY_PROCESSED 결제가 다른 주문 것이면 거부하되 절대 취소(환불)하지 않는다', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = { ...PAID_TARGET };
+    // 다른(정상 결제된) 주문의 paymentKey 를 이 주문에 재사용하는 시도.
+    mockState.tossConfirmErrorCode = 'ALREADY_PROCESSED_PAYMENT';
+    mockState.tossGetPaymentResponse = {
+      paymentKey: 'pk-other-order',
+      orderId: '20260512-0002',
+      status: 'DONE',
+      totalAmount: 12000,
+    };
+    const res = await POST(confirmReq('pk-other-order'));
+    const body = (await res.json()) as { ok: boolean; code: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe('TOSS_REJECTED');
+    expect(mockState.transitionCalls).toHaveLength(0);
+    expect(mockState.couponConsumeCalls).toHaveLength(0);
+    // 남의 PAID 주문 결제를 환불시키면 안 된다.
+    expect(mockState.tossCancelCalls).toHaveLength(0);
+    errSpy.mockRestore();
+  });
+
+  it('신규 승인 응답이 불일치하면 기존대로 best-effort 취소한다 (대조군)', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { confirmPayment } = await import('@/lib/payment/confirm');
+    mockState.order = { ...PAID_TARGET, totalPrice: 12000 };
+    // 클라이언트 금액 == DB 금액이지만 Toss 가 다른 orderId 로 승인했다고 응답.
+    const toss = await import('@/lib/payment/toss');
+    const spy = vi.spyOn(toss.tossClient, 'confirm').mockResolvedValueOnce({
+      paymentKey: 'pk-x',
+      orderId: '20260512-0009',
+      status: 'DONE',
+      totalAmount: 12000,
+    });
+    const result = await confirmPayment({
+      paymentKey: asBrand<PaymentKey>('pk-x'),
+      orderId: asBrand<OrderNo>('20260512-0001'),
+      amount: 12000,
+    });
+    expect(result.ok).toBe(false);
+    expect(mockState.tossCancelCalls).toEqual(['pk-x']);
+    spy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  it('takeOverStaleLock: 락은 있는데 주문이 CREATED 면 CAS 로 PAID 정산 + 쿠폰 소비', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { confirmPayment } = await import('@/lib/payment/confirm');
+    mockState.order = { ...PAID_TARGET };
+    mockState.paymentEventsInsertError = { message: 'duplicate', code: '23505' };
+    const result = await confirmPayment(
+      { paymentKey: asBrand<PaymentKey>('pk-stale'), orderId: asBrand<OrderNo>('20260512-0001'), amount: 12000 },
+      { takeOverStaleLock: true },
+    );
+    expect(result.ok).toBe(true);
+    expect(mockState.casCalls).toEqual([
+      { orderId: 'order-uuid-1', from: 'CREATED', to: 'PAID', paymentKey: 'pk-stale' },
+    ]);
+    expect(mockState.couponConsumeCalls).toHaveLength(1);
+    // 일반 전이 경로는 타지 않는다.
+    expect(mockState.transitionCalls).toHaveLength(0);
+    warnSpy.mockRestore();
+  });
+
+  it('takeOverStaleLock 이어도 CAS 에서 지면(다른 스윕이 선점) 쿠폰을 소비하지 않는다', async () => {
+    const { confirmPayment } = await import('@/lib/payment/confirm');
+    mockState.order = { ...PAID_TARGET };
+    mockState.paymentEventsInsertError = { message: 'duplicate', code: '23505' };
+    mockState.casResult = false;
+    const result = await confirmPayment(
+      { paymentKey: asBrand<PaymentKey>('pk-stale'), orderId: asBrand<OrderNo>('20260512-0001'), amount: 12000 },
+      { takeOverStaleLock: true },
+    );
+    expect(result.ok).toBe(true);
+    expect(mockState.casCalls).toHaveLength(1);
+    expect(mockState.couponConsumeCalls).toHaveLength(0);
+  });
+
+  it('라이브 경로(옵션 없음)는 락 충돌 시 CAS 인수를 시도하지 않는다', async () => {
+    const { confirmPayment } = await import('@/lib/payment/confirm');
+    mockState.order = { ...PAID_TARGET };
+    mockState.paymentEventsInsertError = { message: 'duplicate', code: '23505' };
+    const result = await confirmPayment({
+      paymentKey: asBrand<PaymentKey>('pk-live'),
+      orderId: asBrand<OrderNo>('20260512-0001'),
+      amount: 12000,
+    });
+    expect(result.ok).toBe(true);
+    expect(mockState.casCalls).toHaveLength(0);
+    expect(mockState.couponConsumeCalls).toHaveLength(0);
   });
 });
