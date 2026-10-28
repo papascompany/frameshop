@@ -2,11 +2,20 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
+// Node ≥25 turns on its built-in Web Storage by default: `globalThis.localStorage`
+// becomes a getter that returns undefined unless `--localstorage-file` is given,
+// and it shadows jsdom's Storage in the test environment (every localStorage
+// test fails). Turn it off in the workers so jsdom's implementation is used.
+// Probed instead of version-checked: Node 20 has no such flag, Node 22 doesn't
+// expose the global unless asked to.
+const nodeShipsWebStorage = 'localStorage' in globalThis;
+
 export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
     globals: false,
+    execArgv: nodeShipsWebStorage ? ['--no-experimental-webstorage'] : [],
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/unit/**/*.test.{ts,tsx}', 'tests/integration/**/*.test.{ts,tsx}'],
     exclude: ['tests/e2e/**', 'node_modules/**'],
