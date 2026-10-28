@@ -35,10 +35,10 @@ const PAYMENT_SETTINGS: SettingMeta[] = [
   },
   {
     key: 'toss_webhook_secret',
-    label: 'Toss 웹훅 시크릿',
+    label: 'Toss 웹훅 보안 키 (선택)',
     type: 'password',
-    placeholder: '웹훅 검증 시크릿',
-    hint: '서버 전용. 실값 환경변수 TOSS_WEBHOOK_SECRET가 있으면 env 우선, placeholder/미설정이면 이 값이 사용됩니다.',
+    placeholder: '개발자센터 웹훅 보안 키',
+    hint: '선택. 웹훅 상태는 항상 Toss 결제 조회로 확인하므로 비워 둬도 됩니다. 넣으면 서명이 온 웹훅을 이 키로 추가 검증하며, 키가 틀리면 웹훅이 거부됩니다. 실값 환경변수 TOSS_WEBHOOK_SECRET가 있으면 env 우선.',
   },
 ];
 

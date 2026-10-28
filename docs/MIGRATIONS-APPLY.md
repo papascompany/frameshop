@@ -4,13 +4,40 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-08-01 (2차 036/037/040/041/042 적용 완료 — 001~042 전부 적용됨).
+> 최종 갱신: 2026-10-28 (043 작성·적용 대기 — 001~042 는 전부 적용됨).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
 > (체크아웃 probe `points/receipt/surcharge` 전부 true). 상세: `shared/BLOCKERS.md` BL-010(Resolved).
 > **✅ 2차 적용 완료 (2026-08-01):** 036/037/040/041/042 — 아래 절 참조. 이 문서는 이후 신규
 > 마이그레이션 적용 시의 절차 참고용으로 유지한다.
+
+---
+
+## ★ 3차 적용 대기 — 043 (결제 웹훅 정합성, 2026-10-28 작성)
+
+> **비파괴 + 멱등**(신규 테이블만). **미적용이어도 웹훅 상태 반영은 정상** — 감사 기록만 생략된다
+> (probe `isWebhookAuditAvailable`). 적용하면 최대 60초 안에 재배포 없이 기록이 켜진다.
+
+| # | 파일 | 활성화되는 것 | 적용 |
+|---|---|---|---|
+| 043 | `043_payment_webhook_events.sql` | Toss 웹훅 수신 감사 로그 — 같은 결제의 후속 상태(CANCELED·PARTIAL_CANCELED 등)까지 전부 기록(결제 조회로 확인한 `toss_status` + 처리 `outcome`). RLS on, 정책 없음(service-role 전용) | ⏳ 대기 |
+
+### 검증 쿼리 (043)
+
+```sql
+SELECT
+  (SELECT count(*) FROM information_schema.tables
+     WHERE table_name = 'payment_webhook_events')                         AS table_exists,   -- 1
+  (SELECT relrowsecurity FROM pg_class
+     WHERE relname = 'payment_webhook_events')                            AS rls_enabled,    -- true
+  (SELECT count(*) FROM pg_policies
+     WHERE tablename = 'payment_webhook_events')                          AS policy_count;   -- 0
+```
+
+### 롤백 메모 (043)
+
+`DROP TABLE IF EXISTS payment_webhook_events;` — 감사 기록만 사라지고 앱 동작은 그대로(probe false).
 
 ---
 

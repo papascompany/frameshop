@@ -1,7 +1,7 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-10-28 (결제 confirm 백스톱 완료 — §0 [코드]).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-10-28 (결제 confirm 백스톱 + 결제 웹훅 정합성 완료 — §0).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
@@ -30,10 +30,14 @@
   **시드로 만든 전 상품이 담기·주문 불가**였다. → `uuidLike = z.guid()` 로 통일.
 - **#70** `addToCart` 가 동기화 실패를 삼켜 로그인 카트가 조용히 비었다. → 실패 노출.
 
-### [즉시] Toss 키 3개 입력 — `/admin/settings` → 결제 설정
-`toss_client_key` · `toss_secret_key` · `toss_webhook_secret`. **반드시 같은 상점·같은 접두사**
-(test_ 또는 live_)로 3개를 한 번에 넣는다(짝이 어긋나면 승인 후 `NOT_FOUND_PAYMENT_SESSION`).
+### [즉시] Toss 키 입력 — `/admin/settings` → 결제 설정
+필수 2개 `toss_client_key` · `toss_secret_key` 는 **반드시 같은 상점·같은 접두사**(test_ 또는 live_)로
+한 번에 넣는다(짝이 어긋나면 승인 후 `NOT_FOUND_PAYMENT_SESSION`). `toss_webhook_secret` 은 **선택**
+(2026-10-28 변경) — 웹훅 상태는 항상 Toss 결제 조회로 확인하므로 비워 둬도 된다. 넣는다면 개발자센터의
+**웹훅 보안 키**여야 한다(틀리면 서명 온 웹훅이 401 로 거부됨).
 실값 env 가 없고 프로덕션 env 는 placeholder 라 DB 값이 즉시 반영된다(재배포 불필요).
+**웹훅 등록**(개발자센터 → 웹훅): URL `https://frameshop-snowy.vercel.app/api/webhook/payment`,
+이벤트 `PAYMENT_STATUS_CHANGED`. 등록하지 않아도 결제는 되지만 Toss 대시보드 취소가 주문에 반영되지 않는다.
 **미입력 시**: 체크아웃이 "결제 수단이 아직 설정되지 않았습니다"로 graceful 차단 + `/api/orders`
 가 503 PAYMENT_UNAVAILABLE → 주문 자체가 생성되지 않는다(고아 주문 없음). 즉 **매출 0**.
 
@@ -68,11 +72,20 @@
   사용 적립금 복원**(고객 알림 없음), 조회 실패·가상계좌 대기·부분취소는 무변경. **Toss 키 미설정이면
   아무것도 하지 않는다.** ⚠️ 키 입력 후 첫 실행에서 24시간 지난 과거 CREATED 주문(개발·데모 잔여)이
   1회 20건씩 만료된다(의도된 정리).
-- **웹훅 후속 2건(백스톱 작업 중 발견, 미수정)**: ① `payment_events.payment_key` UNIQUE 라 같은
-  결제의 **두 번째 이후 상태 웹훅(예: Toss 대시보드 취소 CANCELED)은 버려진다** — 이벤트 키를
-  (payment_key, status) 로 넓히는 마이그 + handleWebhook 정리 필요. ② 웹훅 DONE 이 confirm 보다 먼저
-  락을 잡으면 `handleWebhook` PAID 경로는 **쿠폰을 소비하지 않는다**(confirm 은 소비) — 카드 결제는
-  보통 confirm 이 먼저라 드물지만 경로 비대칭.
+- ✅ **결제 웹훅 정합성 — 완료(2026-10-28).** 작업 중 근본 원인 발견: 서명 검증이 Toss 문서
+  방식(`tosspayments-webhook-signature` 헤더, `v1:`+base64, `payload:전송시각` HMAC)과 달라
+  (`tosspayments-signature`, 본문만 hex) **실제 Toss 웹훅은 전부 401 로 거부되는 구조**였다. CTO 결정으로
+  **결제 조회 기반 검증**으로 전환(`src/lib/payment/webhook.ts`): 본문은 신호로만 쓰고 상태는
+  `GET /v1/payments/{paymentKey}` 결과로만 반영. 서명은 문서 방식으로 오면 추가 검증(보안 키 설정 시),
+  없으면 조회로 대신. 10분 경과 거부 규칙 제거(Toss 재전송 7회·최장 ~3일을 버리던 문제).
+  ① **후속 상태 소실 해소** — DONE 락(`payment_events`)과 무관하게 CANCELED 반영: 주문 CANCELLED
+  (배송 완료면 REFUNDED) CAS 전이 + 적립금·쿠폰 복원(고객 알림 없음, SHIPPED 는 수동). 우리 관리자
+  취소·환불과의 경합은 **마지막 취소 30초 이내면 503 → Toss 1분 뒤 재전송**으로 관리자 흐름이 먼저
+  끝나게 한다. PARTIAL_CANCELED 는 Toss 누적 취소액 > `refunded_amount` 면 수동 보정 로그만.
+  ② **쿠폰 대칭** — DONE 은 confirm 과 같은 `settleApprovedPayment`(락+전이+쿠폰·렌더·알림)로 정산.
+  감사 로그 `payment_webhook_events`(마이그 043, 적용 대기 — 미적용이어도 반영은 정상).
+- 결제 웹훅 잔여: 취소된 주문(CANCELLED)에 승인(DONE)이 도착하면 `webhook_paid_for_inactive_order`
+  로그만 남긴다(자동 환불 안 함 — 운영자 판단). PARTIAL_CANCELED 의 `refunded_amount` 자동 동기화는 미구현.
 - `app_settings` 조회 캐시(Toss 호출마다 DB 왕복) · 어드민 설정값 삭제(unset) 경로 부재.
 
 ---

@@ -17,11 +17,9 @@
  */
 
 import 'server-only';
-import { asBrand } from '@/types/common';
-import type { OrderNo, PaymentKey } from '@/types/common';
-import type { ConfirmPaymentInput, ConfirmResult, WebhookEvent } from '@/types/payment';
+import type { PaymentKey } from '@/types/common';
+import type { ConfirmPaymentInput, ConfirmResult } from '@/types/payment';
 import type { OrderWithItems } from '@/types/order';
-import { TOSS_STATUS_TO_ORDER_STATUS } from '@/types/payment';
 import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionIfStatus, transitionTo } from '../db/order';
 import { consumeCouponByCode } from '../db/coupons';
@@ -152,24 +150,40 @@ export async function confirmPayment(
     };
   }
 
+  return settleApprovedPayment(order, input.paymentKey, tossResp, opts);
+}
+
+/**
+ * Takes the payment_events DONE lock for a payment Toss reports as approved
+ * and moves the order to PAID exactly once. The caller must already have
+ * validated `tossResp` against the order (orderId, totalAmount, status DONE).
+ * Shared by confirmPayment and the webhook so the PAID side effects — coupon
+ * consume included — are identical whichever path wins the lock.
+ */
+export async function settleApprovedPayment(
+  order: OrderWithItems,
+  paymentKey: PaymentKey,
+  tossResp: TossConfirmResponse,
+  opts: ConfirmOptions = {},
+): Promise<ConfirmResult> {
   // P1-03: Insert payment_events BEFORE transitioning order status.
-  // Both confirmPayment and handleWebhook use payment_events.payment_key UNIQUE
-  // as an atomic lock — whichever path inserts first proceeds with the transition;
-  // the other path gets a UNIQUE conflict and short-circuits. Eliminates the
-  // confirm↔webhook race and double-render.
+  // confirmPayment and the webhook both come through here and use
+  // payment_events.payment_key UNIQUE as an atomic lock — whichever inserts
+  // first proceeds with the transition; the other gets a UNIQUE conflict and
+  // short-circuits. Eliminates the confirm↔webhook race and double-render.
   const supabaseSvc = getServiceRoleSupabase();
   const { error: peErr } = await supabaseSvc.from('payment_events').insert({
-    payment_key: input.paymentKey as string,
+    payment_key: paymentKey as string,
     order_id: order.id as string,
-    order_no: input.orderId as string,
+    order_no: order.orderNo as string,
     status: 'DONE',
     raw_payload: tossResp as unknown as Record<string, unknown>,
   });
 
   if (peErr) {
-    // UNIQUE conflict: handleWebhook already processed this paymentKey.
+    // UNIQUE conflict: the other path already owns this paymentKey.
     // Re-fetch current order state and return idempotent success.
-    const current = await getOrder(input.orderId as string);
+    const current = await getOrder(order.orderNo as string);
 
     // Sweep backstop: the lock exists but the order never left CREATED, so the
     // lock owner died between its insert and the PAID transition while Toss
@@ -177,28 +191,24 @@ export async function confirmPayment(
     // sweeps settle the order exactly once.
     if (opts.takeOverStaleLock && current?.status === 'CREATED') {
       const won = await transitionIfStatus(current.id, 'CREATED', 'PAID', {
-        paymentKey: input.paymentKey,
+        paymentKey,
       });
       if (won) {
         console.warn(
           JSON.stringify({
             event: 'payment_stale_lock_takeover',
             orderNo: current.orderNo,
-            paymentKey: input.paymentKey,
+            paymentKey,
           }),
         );
         await settlePaidOrder(current, tossResp);
       }
-      return {
-        ok: true,
-        orderNo: current.orderNo,
-        paymentKey: input.paymentKey,
-      };
+      return { ok: true, orderNo: current.orderNo, paymentKey };
     }
 
-    // Fallback render enqueue: the webhook owns rendering in this race, but its
-    // transition/enqueue is best-effort (its errors are swallowed). If the order
-    // is PAID, ensure renders are queued here too. createRenderJob is idempotent
+    // Fallback render enqueue: the lock owner enqueues renders after its PAID
+    // transition, but its fire-and-forget enqueue can be lost. If the order is
+    // PAID, ensure renders are queued here too. createRenderJob is idempotent
     // (UNIQUE order_item_id + ignoreDuplicates), so this never double-renders.
     if (current?.status === 'PAID') {
       for (const item of current.items) {
@@ -208,21 +218,13 @@ export async function confirmPayment(
       // 거른다). fire-and-forget — 결제 플로우에 절대 영향 없음.
       void issueCashReceiptIfEligible(current, tossResp.method);
     }
-    return {
-      ok: true,
-      orderNo: current?.orderNo ?? order.orderNo,
-      paymentKey: input.paymentKey,
-    };
+    return { ok: true, orderNo: current?.orderNo ?? order.orderNo, paymentKey };
   }
 
-  await transitionTo(order.id, 'PAID', { paymentKey: input.paymentKey });
+  await transitionTo(order.id, 'PAID', { paymentKey });
   await settlePaidOrder(order, tossResp);
 
-  return {
-    ok: true,
-    orderNo: asBrand<OrderNo>(input.orderId as string),
-    paymentKey: input.paymentKey,
-  };
+  return { ok: true, orderNo: order.orderNo, paymentKey };
 }
 
 /**
@@ -383,97 +385,6 @@ export async function issueCashReceiptIfEligible(
           method,
           message: err instanceof Error ? err.message : String(err),
         },
-      }),
-    );
-  }
-}
-
-// ---------- Webhook handler ----------
-
-export async function handleWebhook(event: WebhookEvent): Promise<void> {
-  const supabase = getServiceRoleSupabase();
-
-  // P1-02: Reject replayed webhook events older than 10 minutes.
-  const ageMs = Date.now() - new Date(event.createdAt).getTime();
-  if (ageMs > 10 * 60_000) {
-    console.warn(JSON.stringify({ event: 'webhook_too_old', ageMs, paymentKey: event.data.paymentKey }));
-    return; // accept HTTP 200 to Toss but do nothing
-  }
-
-  const order = await getOrder(event.data.orderId as string);
-
-  // Defense-in-depth: even with a valid signature, refuse to transition if
-  // webhook-reported amount disagrees with the order's stored totalPrice.
-  // Protects against WEBHOOK_SECRET leak or replay with mutated amount.
-  const amountMatches =
-    order != null && event.data.totalAmount === order.totalPrice;
-
-  // P1-03: Insert payment_events atomically — UNIQUE(payment_key) is the lock.
-  // If confirmPayment already inserted this paymentKey, this insert returns an
-  // error → we short-circuit without transitioning order status or enqueuing renders.
-  const { error: peErr } = await supabase.from('payment_events').insert({
-    payment_key: event.data.paymentKey,
-    order_id: order?.id ?? null,
-    order_no: event.data.orderId,
-    status: event.data.status,
-    raw_payload: order && !amountMatches
-      ? { ...event, _frameshop: { amountMismatch: true, expected: order.totalPrice } }
-      : event,
-  });
-
-  if (peErr) {
-    // UNIQUE conflict: confirmPayment already processed this payment. No-op.
-    return;
-  }
-
-  if (!order) return;
-
-  // P1-01 fix: skip state transition on amount mismatch and alert.
-  if (!amountMatches) {
-    console.error(
-      JSON.stringify({
-        event: 'webhook_amount_mismatch',
-        orderNo: event.data.orderId,
-        paymentKey: event.data.paymentKey,
-        expected: order.totalPrice,
-        received: event.data.totalAmount,
-      }),
-    );
-    return;
-  }
-
-  const target = TOSS_STATUS_TO_ORDER_STATUS[event.data.status];
-  if (!target) return;
-  if (order.status === target) return;
-
-  try {
-    await transitionTo(order.id, target, {
-      paymentKey: event.data.paymentKey as PaymentKey,
-    });
-    // Mirror confirmPayment's fire-and-forget render enqueue on PAID. The
-    // webhook arrives independently from the confirm route, so we re-enqueue
-    // here too; renderOrderItemPrint is idempotent (no-op if already
-    // rendered).
-    if (target === 'PAID') {
-      for (const item of order.items) {
-        enqueuePrintRender(item.id);
-      }
-      // 관리자 알림 — fire-and-forget.
-      notifyNewOrder(order).catch((e: unknown) => {
-        console.warn('[notify] webhook notifyNewOrder 예외:', e);
-      });
-    }
-  } catch (err) {
-    // An invalid transition (e.g. CANCELLED→PAID) is expected and benign — the
-    // raw payload is already persisted. But a real failure (DB error/timeout)
-    // here means the order may be stuck unrendered, so log it for ops/drains
-    // instead of swallowing silently.
-    console.error(
-      JSON.stringify({
-        event: 'webhook_transition_failed',
-        orderNo: event.data.orderId,
-        target,
-        message: err instanceof Error ? err.message : String(err),
       }),
     );
   }

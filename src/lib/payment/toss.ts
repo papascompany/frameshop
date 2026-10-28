@@ -31,6 +31,10 @@ export type TossConfirmResponse = {
   totalAmount: number;
   method?: string;
   approvedAt?: string;
+  /** 취소 가능 잔액 — 부분취소 누적 = totalAmount − balanceAmount. */
+  balanceAmount?: number;
+  /** 취소 이력(취소된 결제만). 웹훅 외부 취소 유예 판단에 canceledAt 을 쓴다. */
+  cancels?: Array<{ cancelAmount: number; canceledAt: string }> | null;
   failure?: {
     code: string;
     message: string;

@@ -1,55 +1,59 @@
 /**
- * Toss webhook signature verification.
+ * Toss webhook signature verification (documented scheme).
  *
- * Algorithm (per Toss docs):
- *   HMAC-SHA256(secret = TOSS_WEBHOOK_SECRET, message = rawBody) -> hex
- *   compare with the `tosspayments-signature` header (case-insensitive).
+ * Per https://docs.tosspayments.com/reference/using-api/webhook-events :
+ *   1. HMAC-SHA256( key = 보안 키,
+ *                   message = `{WEBHOOK_PAYLOAD}:{tosspayments-webhook-transmission-time}` )
+ *   2. The `tosspayments-webhook-signature` header carries one or more
+ *      comma-separated `v1:<base64>` values; base64-decode each.
+ *   3. Authentic if the digest equals ANY decoded value.
  *
- * Timing-safe equality is used to prevent character-by-character timing
- * attacks. UT 1순위 (PLAN.md §8.1 추가).
+ * The signature is an optional extra check: the webhook route establishes
+ * truth by re-fetching the payment from the Toss API with our secret key, so
+ * an unsigned (or unverifiable) delivery is still safe to process. Toss's docs
+ * do not say which events carry the header.
+ *
+ * Timing-safe equality is used to prevent byte-by-byte timing attacks.
  */
 
 import 'server-only';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { webhookEventSchema, type WebhookEvent, type WebhookVerifyResult } from '@/types/payment';
 
-export function computeSignature(rawBody: string, secret: string): string {
-  return createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
-}
-
-function constantTimeEquals(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
-}
-
-export function verifyWebhook(
+/** Raw HMAC digest of `${rawBody}:${transmissionTime}` (exported for tests). */
+export function computeSignature(
   rawBody: string,
-  signature: string,
+  transmissionTime: string,
   secret: string,
-): WebhookVerifyResult {
-  // SECURITY: never verify against an empty/whitespace secret. A misconfigured
-  // (unset/blank) secret would otherwise compute an attacker-reproducible HMAC,
-  // letting anyone forge a valid signature for an arbitrary payload. Likewise
-  // an empty incoming signature is always invalid.
-  if (secret.trim().length === 0 || signature.trim().length === 0) {
-    return { valid: false };
+): Buffer {
+  return createHmac('sha256', secret)
+    .update(`${rawBody}:${transmissionTime}`, 'utf8')
+    .digest();
+}
+
+export function verifyWebhookSignature(
+  rawBody: string,
+  transmissionTime: string,
+  signatureHeader: string,
+  secret: string,
+): boolean {
+  // SECURITY: never verify against an empty/whitespace secret — a blank key
+  // would compute an attacker-reproducible HMAC. Empty inputs are invalid.
+  if (
+    secret.trim().length === 0 ||
+    signatureHeader.trim().length === 0 ||
+    transmissionTime.trim().length === 0
+  ) {
+    return false;
   }
 
-  const expected = computeSignature(rawBody, secret);
-  if (!constantTimeEquals(expected, signature)) {
-    return { valid: false };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawBody);
-  } catch {
-    return { valid: false };
-  }
-
-  const result = webhookEventSchema.safeParse(parsed);
-  if (!result.success) {
-    return { valid: false };
-  }
-  return { valid: true, event: result.data as WebhookEvent };
+  const expected = computeSignature(rawBody, transmissionTime, secret);
+  return signatureHeader.split(',').some((part) => {
+    const value = part.trim();
+    if (!value.startsWith('v1:')) return false;
+    const candidate = Buffer.from(value.slice(3), 'base64');
+    return (
+      candidate.length === expected.length &&
+      timingSafeEqual(candidate, expected)
+    );
+  });
 }

@@ -1,70 +1,75 @@
 /**
- * Toss webhook signature verification (UT, TDD 1st priority).
- *
- * Spec: docs/specs/payment.md AC-7, "verifyWebhook" interface.
+ * Toss webhook signature verification — documented scheme
+ * (https://docs.tosspayments.com/reference/using-api/webhook-events):
+ * HMAC-SHA256(보안 키, `${payload}:${transmission-time}`) compared against the
+ * base64 values after `v1:` in `tosspayments-webhook-signature`.
  */
 
 import { describe, expect, it } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { computeSignature, verifyWebhook } from '@/lib/payment/signature';
+import { computeSignature, verifyWebhookSignature } from '@/lib/payment/signature';
 
-const SECRET = 'whsec-test-1234';
+const SECRET = 'security-key-test-1234';
+const TIME = '2026-10-28T10:00:00.000000';
 
-function sign(body: string, secret: string = SECRET): string {
-  return createHmac('sha256', secret).update(body, 'utf8').digest('hex');
+/** Independent re-implementation of the documented scheme (the oracle). */
+function header(body: string, time: string = TIME, secret: string = SECRET): string {
+  const digest = createHmac('sha256', secret).update(`${body}:${time}`, 'utf8').digest('base64');
+  return `v1:${digest}`;
 }
 
-const validEvent = {
+const BODY = JSON.stringify({
   eventType: 'PAYMENT_STATUS_CHANGED',
-  createdAt: '2026-05-12T03:00:00.000Z',
-  data: {
-    paymentKey: 'pk-abcd1234',
-    orderId: '20260512-0001',
-    status: 'DONE',
-    totalAmount: 12000,
-  },
-};
+  createdAt: '2026-10-28T10:00:00.000000',
+  data: { paymentKey: 'pk-abcd1234', orderId: '20261028-0001', status: 'DONE', totalAmount: 12000 },
+});
 
 describe('computeSignature', () => {
-  it('produces the expected HMAC-SHA256 hex digest', () => {
-    const body = JSON.stringify(validEvent);
-    expect(computeSignature(body, SECRET)).toBe(sign(body));
+  it('hashes `${payload}:${transmissionTime}` with HMAC-SHA256', () => {
+    expect(computeSignature(BODY, TIME, SECRET).toString('base64')).toBe(
+      header(BODY).slice(3),
+    );
   });
 });
 
-describe('verifyWebhook', () => {
-  it('returns valid=true for a correct signature + valid payload', () => {
-    const body = JSON.stringify(validEvent);
-    const result = verifyWebhook(body, sign(body), SECRET);
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.event.data.paymentKey).toBe('pk-abcd1234');
-      expect(result.event.data.status).toBe('DONE');
-    }
+describe('verifyWebhookSignature', () => {
+  it('accepts a correct v1 signature', () => {
+    expect(verifyWebhookSignature(BODY, TIME, header(BODY), SECRET)).toBe(true);
+  });
+
+  it('accepts when ANY of several comma-separated signatures matches', () => {
+    const multi = `v1:${Buffer.from('rotated-old-key').toString('base64')}, ${header(BODY)}`;
+    expect(verifyWebhookSignature(BODY, TIME, multi, SECRET)).toBe(true);
   });
 
   it('rejects a tampered body', () => {
-    const original = JSON.stringify(validEvent);
-    const tampered = original.replace('12000', '1');
-    const result = verifyWebhook(tampered, sign(original), SECRET);
-    expect(result.valid).toBe(false);
+    const tampered = BODY.replace('12000', '1');
+    expect(verifyWebhookSignature(tampered, TIME, header(BODY), SECRET)).toBe(false);
   });
 
-  it('rejects a wrong signature', () => {
-    const body = JSON.stringify(validEvent);
-    const result = verifyWebhook(body, 'deadbeef', SECRET);
-    expect(result.valid).toBe(false);
+  it('rejects a different transmission time (time is part of the signed message)', () => {
+    expect(
+      verifyWebhookSignature(BODY, '2026-10-28T10:00:01.000000', header(BODY), SECRET),
+    ).toBe(false);
   });
 
-  it('rejects payloads that fail schema validation', () => {
-    const bad = JSON.stringify({ ...validEvent, data: { ...validEvent.data, status: 'NOT_A_STATUS' } });
-    const result = verifyWebhook(bad, sign(bad), SECRET);
-    expect(result.valid).toBe(false);
+  it('rejects a signature made with another key', () => {
+    expect(
+      verifyWebhookSignature(BODY, TIME, header(BODY, TIME, 'other-key'), SECRET),
+    ).toBe(false);
   });
 
-  it('rejects non-JSON bodies', () => {
-    const body = 'not-json';
-    const result = verifyWebhook(body, sign(body), SECRET);
-    expect(result.valid).toBe(false);
+  it('rejects values without the v1: prefix (e.g. the old bare-hex scheme)', () => {
+    const bareHex = createHmac('sha256', SECRET).update(BODY, 'utf8').digest('hex');
+    expect(verifyWebhookSignature(BODY, TIME, bareHex, SECRET)).toBe(false);
+    expect(verifyWebhookSignature(BODY, TIME, header(BODY).slice(3), SECRET)).toBe(false);
+  });
+
+  it.each([
+    ['blank secret', BODY, TIME, header(BODY), '   '],
+    ['blank header', BODY, TIME, '', SECRET],
+    ['blank transmission time', BODY, '', header(BODY), SECRET],
+  ])('rejects %s', (_label, body, time, sig, secret) => {
+    expect(verifyWebhookSignature(body, time, sig, secret)).toBe(false);
   });
 });
