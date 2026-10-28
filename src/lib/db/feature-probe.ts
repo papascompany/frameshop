@@ -129,3 +129,11 @@ export function isWishlistAvailable(): Promise<boolean> {
 export function isCouponsAvailable(): Promise<boolean> {
   return probeFeature('coupons', 'coupons', 'code');
 }
+
+/**
+ * 웹훅 수신 감사 로그(043): payment_webhook_events.id. false → 감사 기록만 생략하고
+ * 웹훅 상태 반영(결제 조회 기반)은 그대로 동작한다.
+ */
+export function isWebhookAuditAvailable(): Promise<boolean> {
+  return probeFeature('webhookAudit', 'payment_webhook_events', 'id');
+}

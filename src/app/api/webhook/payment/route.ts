@@ -1,61 +1,94 @@
 /**
- * POST /api/webhook/payment
+ * POST /api/webhook/payment — Toss PAYMENT_STATUS_CHANGED receiver.
  *
- * Toss-Signature header MUST be present and valid.
- * Returns 200 on idempotent success, 401 on bad signature, 422 on schema fail.
+ * Truth comes from re-fetching the payment with our secret key
+ * (`src/lib/payment/webhook.ts`), so the body is only a hint. When Toss sends
+ * a `tosspayments-webhook-signature` header and a 보안 키 is configured, the
+ * documented signature is verified too (401 on mismatch); otherwise the
+ * delivery proceeds on the re-fetch alone.
+ *
+ * Responses: 200 handled (Toss stops retrying) · 503 retry wanted (key not
+ * configured, Toss/DB transient error, own-cancel grace) · 400 malformed ·
+ * 401 bad signature · 429 rate-limited. Toss must get an answer within 10s.
  */
 
 import 'server-only';
 import { NextResponse } from 'next/server';
-import { verifyWebhook } from '@/lib/payment/signature';
-import { handleWebhook } from '@/lib/payment/confirm';
+import { z } from 'zod';
+import { verifyWebhookSignature } from '@/lib/payment/signature';
+import { handlePaymentWebhook } from '@/lib/payment/webhook';
 import { getEffectiveTossWebhookSecret } from '@/lib/env';
+import { checkRate } from '@/lib/ratelimit';
+import { getClientIp } from '@/lib/security/client-ip';
+
+const deliverySchema = z.object({
+  eventType: z.string().min(1),
+  data: z.object({
+    paymentKey: z.string().min(1).max(200),
+  }),
+});
 
 export async function POST(request: Request): Promise<Response> {
-  const signature =
-    request.headers.get('tosspayments-signature') ??
-    request.headers.get('toss-signature') ??
-    '';
+  // Every accepted delivery costs one Toss API call — bound unsigned floods.
+  const rate = await checkRate('payment_webhook_ip', getClientIp(request), {
+    max: 60,
+    windowMs: 60_000,
+  });
+  if (!rate.ok) {
+    return NextResponse.json(
+      { ok: false, code: 'RATE_LIMITED' },
+      { status: 429, headers: { 'Retry-After': String(rate.retryAfterSec) } },
+    );
+  }
+
   const rawBody = await request.text();
 
-  // MEDIUM-004 FIX: use getEffectiveTossWebhookSecret (env-var → DB fallback)
-  // instead of env.tossWebhookSecret() which throws if the env var is unset,
-  // causing a 500 → Toss retries forever → orders never reach PAID status.
-  let webhookSecret: string;
+  const signature = request.headers.get('tosspayments-webhook-signature');
+  if (signature) {
+    const secret = await getEffectiveTossWebhookSecret().catch(() => null);
+    if (secret) {
+      const transmissionTime =
+        request.headers.get('tosspayments-webhook-transmission-time') ?? '';
+      if (!verifyWebhookSignature(rawBody, transmissionTime, signature, secret)) {
+        // Wrong 보안 키 in settings also lands here — Toss keeps retrying
+        // (up to 7 times over ~3 days), so fixing the key recovers the events.
+        console.error(JSON.stringify({ event: 'webhook_signature_invalid' }));
+        return NextResponse.json(
+          { ok: false, code: 'INVALID_SIGNATURE' },
+          { status: 401 },
+        );
+      }
+    }
+  }
+
+  let body: unknown;
   try {
-    webhookSecret = await getEffectiveTossWebhookSecret();
+    body = JSON.parse(rawBody);
   } catch {
-    console.error(JSON.stringify({ event: 'webhook_secret_missing' }));
-    // 시크릿이 없으면 서명을 검증할 수 없다 = 페이로드를 신뢰할 수 없다.
-    // 200(성공)을 돌려주면 Toss 가 재시도를 멈춰 **이벤트가 영구 소실**된다
-    // (가상계좌 입금·PG측 취소 통지 유실). 5xx 로 재시도를 유도해 설정 복구
-    // 후 이벤트가 살아 돌아오게 한다. 결제 확정 주경로는 /payment/success
-    // → confirm 이므로 이 재시도가 결제 완료를 막지는 않는다.
-    return NextResponse.json(
-      { ok: false, code: 'CONFIG_ERROR' },
-      { status: 503 },
-    );
+    return NextResponse.json({ ok: false, code: 'BAD_JSON' }, { status: 400 });
+  }
+  const parsed = deliverySchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ ok: false, code: 'BAD_INPUT' }, { status: 400 });
+  }
+  if (parsed.data.eventType !== 'PAYMENT_STATUS_CHANGED') {
+    // Other event types are not subscribed to; acknowledge so Toss stops.
+    return NextResponse.json({ ok: true }, { status: 200 });
   }
 
-  const verified = verifyWebhook(rawBody, signature, webhookSecret);
-  if (!verified.valid) {
-    return NextResponse.json(
-      { ok: false, code: 'INVALID_SIGNATURE' },
-      { status: 401 },
-    );
-  }
+  const retriedHeader = request.headers.get(
+    'tosspayments-webhook-transmission-retried-count',
+  );
+  const retried = retriedHeader === null ? Number.NaN : Number(retriedHeader);
+  const result = await handlePaymentWebhook({
+    eventType: parsed.data.eventType,
+    paymentKey: parsed.data.data.paymentKey,
+    rawPayload: body,
+    transmissionId: request.headers.get('tosspayments-webhook-transmission-id'),
+    retriedCount: Number.isInteger(retried) ? retried : null,
+  });
 
-  try {
-    await handleWebhook(verified.event);
-  } catch (err) {
-    // Don't 500 — Toss will retry. Log raw and accept.
-    console.error(
-      JSON.stringify({
-        event: 'webhook_handler_error',
-        message: err instanceof Error ? err.message : 'unknown',
-      }),
-    );
-  }
-
-  return NextResponse.json({ ok: true }, { status: 200 });
+  return result.httpStatus === 200
+    ? NextResponse.json({ ok: true }, { status: 200 })
+    : NextResponse.json({ ok: false, code: 'RETRY' }, { status: 503 });
 }
