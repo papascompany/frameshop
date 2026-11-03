@@ -261,6 +261,7 @@
 
 ## §6. 인프라/운영 메모 (작업 시 주의)
 
+- **베어메탈 이전(검토 중, 2026-11-03)**: 절차서 = `docs/setup/BAREMETAL_MIGRATION_RUNBOOK.md`(1단계 앱 서버 → 2단계 Supabase 셀프호스팅, PostgreSQL 유지). ⚠️ Vercel Hobby 는 상업 이용 불가(결제 처리 = 상업) — 런칭 전 Vercel Pro 전환 또는 런북 1단계 중 결정 필요(런북 §8).
 - **배포 검증 도메인**: `https://frameshop-snowy.vercel.app` (실 운영). `frameshop.vercel.app`은 stale 별칭(404 오인 주의).
 - **리전**: Vercel 함수 = `icn1`(서울), Supabase = 서울. `vercel.json regions:["icn1"]`로 동일 리전(지연 최소).
 - **Vercel 배포 권한(Hobby)**: 비공개 레포에서 `storigehub` 작성 커밋의 배포는 **Blocked**.
