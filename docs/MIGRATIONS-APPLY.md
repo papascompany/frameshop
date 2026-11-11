@@ -35,11 +35,49 @@
     GROUP BY order_id, transaction_type
    HAVING count(*) > 1;
    ```
-2. `044_security_hardening.sql` 전체 실행.
-3. 파일 하단 주석의 검증 쿼리 (a)~(e) 실행 — 기대값: orders 에 INSERT 정책 없음 · anon/authenticated 의
+2. **위조 주문 감사(셋 다 0행이어야 함)** — 044 는 *앞으로의* 직접 INSERT 만 막는다. 044 이전에 PostgREST 로
+   들어간 위조 행이 있으면 취소·스윕 만료·구매확정으로 여전히 적립금이 나간다(최종 리뷰 지적). 행이 나오면
+   적용을 멈추고 보고 — 임의 삭제 금지(해당 주문 CANCELLED 정리 + 적립금 ADJUSTMENT 보정은 검토 후):
+   ```sql
+   -- 2-a. 적립금 사용 스냅샷은 있는데 대응하는 REDEMPTION 원장이 없는 주문
+   --      (createOrder 는 description '주문 {order_no} 적립금 사용' 으로 원장을 남긴다)
+   SELECT o.order_no, o.user_id, o.status, o.points_redeemed, o.created_at
+     FROM public.orders o
+    WHERE COALESCE(o.points_redeemed, 0) > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM public.user_points_ledger l
+         WHERE l.user_id = o.user_id
+           AND l.transaction_type = 'REDEMPTION'
+           AND l.points_delta = -o.points_redeemed
+           AND l.description LIKE '%' || o.order_no || '%'
+      );
+
+   -- 2-b. 결제 이후 상태인데 결제 이벤트가 없는 주문 (결제 없이 PAID·DELIVERED 로 위조)
+   SELECT o.order_no, o.status, o.total_price, o.payment_id, o.created_at
+     FROM public.orders o
+    WHERE o.status IN ('PAID', 'IN_PRODUCTION', 'SHIPPED', 'DELIVERED', 'REFUNDED')
+      AND NOT EXISTS (
+        SELECT 1 FROM public.payment_events pe
+         WHERE pe.order_id = o.id OR pe.order_no = o.order_no
+      );
+
+   -- 2-c. 잔액과 원장 합계가 어긋나는 회원 + 2-d. 미래 날짜 주문번호(번호 선점)
+   SELECT p.user_id, p.points_balance, COALESCE(SUM(l.points_delta), 0) AS ledger_sum
+     FROM public.user_profiles p
+     LEFT JOIN public.user_points_ledger l ON l.user_id = p.user_id
+    GROUP BY p.user_id, p.points_balance
+   HAVING p.points_balance <> COALESCE(SUM(l.points_delta), 0);
+
+   SELECT order_no, status, created_at FROM public.orders
+    WHERE left(order_no, 8) > to_char(now() AT TIME ZONE 'Asia/Seoul', 'YYYYMMDD');
+   ```
+3. `044_security_hardening.sql` 전체를 **`BEGIN;` … `COMMIT;` 으로 감싸 한 번에** 실행(파일에 명시적
+   트랜잭션이 없다 — 중간 실패 시 일부만 적용되는 것을 막는다).
+4. 파일 하단 주석의 검증 쿼리 (a)~(e) 실행 — 기대값: orders 에 INSERT 정책 없음 · anon/authenticated 의
    orders/order_items INSERT·UPDATE·DELETE 모두 false(SELECT true) · `next_order_no` 실행권 service_role 만 ·
    두 함수 `search_path=public` · 인덱스 `user_points_ledger_order_type_uniq` 존재.
-4. 앱 스모크: 로그인 → 마이페이지 주문 목록 표시(SELECT 유지 확인) · 배송완료 주문 리뷰 작성 성공.
+5. 앱 스모크: 로그인 → 마이페이지 주문 목록 표시(SELECT 유지 확인) · 배송완료 주문 리뷰 작성 성공.
+6. `/admin/launch` 는 044 적용 여부를 표시하지 않는다 — 위 4번 검증 결과로 확인한다.
 
 롤백 메모는 파일 하단 주석 참고(보안 회귀이므로 사유 기록 후에만).
 
