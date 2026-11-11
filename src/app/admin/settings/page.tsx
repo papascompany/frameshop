@@ -1,6 +1,8 @@
+import Link from 'next/link';
 import { requireAdmin } from '@/lib/db/admin';
 import { getSettings } from '@/lib/db/settings';
 import { SettingsClient } from './SettingsClient';
+import { parseSettingsTab } from './setting-keys';
 
 // 어드민 설정 페이지
 export const metadata = { title: '시스템 설정 · FrameShop Admin' };
@@ -25,8 +27,13 @@ const ALL_KEYS = [
   'legal_draft_notice_hidden',
 ];
 
-export default async function AdminSettingsPage() {
+export default async function AdminSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   await requireAdmin();
+  const { tab } = await searchParams;
 
   // 값이 존재하는지 여부만 사용 (마스킹 표시용)
   const rawSettings = await getSettings(ALL_KEYS);
@@ -44,8 +51,14 @@ export default async function AdminSettingsPage() {
           결제·알림·소셜 연동 키와 사업자/법적 고지 확정값을 관리합니다.
           실값 환경변수가 있으면 그쪽이 우선하고, placeholder·미설정이면 여기 값이 쓰입니다.
         </p>
+        <p className="text-sm mt-1">
+          <Link href="/admin/launch" className="text-ink underline underline-offset-2">
+            런칭 준비 점검
+          </Link>
+          <span className="text-muted-fg"> — 아직 비어 있는 런칭 설정을 한 화면에서 확인합니다.</span>
+        </p>
       </div>
-      <SettingsClient existing={existing} />
+      <SettingsClient existing={existing} initialTab={parseSettingsTab(tab)} />
     </div>
   );
 }

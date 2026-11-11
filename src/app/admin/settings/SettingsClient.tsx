@@ -4,10 +4,13 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
-import { saveSettingsAction } from './actions';
-
-// 탭 타입
-type Tab = 'payment' | 'notify' | 'legal' | 'social' | 'misc';
+import { Dialog } from '@/components/ui/Dialog';
+import { deleteSettingAction, saveSettingsAction } from './actions';
+import {
+  DELETABLE_SETTING_ENV_FALLBACK,
+  isDeletableSettingKey,
+  type SettingsTab as Tab,
+} from './setting-keys';
 
 type SettingMeta = {
   key: string;
@@ -151,22 +154,52 @@ const MISC_SETTINGS: SettingMeta[] = [
 
 type Props = {
   existing: Record<string, string>;
+  /** `/admin/settings?tab=notify` 처럼 특정 탭으로 바로 진입(런칭 점검 링크). */
+  initialTab?: Tab;
 };
 
 function SettingsSection({
   fields,
   existing,
   onSave,
+  onDelete,
 }: {
   fields: SettingMeta[];
   existing: Record<string, string>;
   onSave: (values: Record<string, string>) => Promise<void>;
+  onDelete: (key: string) => Promise<void>;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(fields.map((f) => [f.key, ''])),
   );
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SettingMeta | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setMessage(null);
+    try {
+      await onDelete(deleteTarget.key);
+      const envName = isDeletableSettingKey(deleteTarget.key)
+        ? DELETABLE_SETTING_ENV_FALLBACK[deleteTarget.key]
+        : null;
+      setMessage({
+        ok: true,
+        text: envName
+          ? `${deleteTarget.label} 저장값을 삭제했습니다. 이제 환경변수 ${envName} 값이 있으면 그 값이, 없으면 미설정 상태로 동작합니다.`
+          : `${deleteTarget.label} 저장값을 삭제했습니다.`,
+      });
+      setDeleteTarget(null);
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof Error ? err.message : '삭제 실패' });
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -191,9 +224,22 @@ function SettingsSection({
             {f.label}
           </label>
           {existing[f.key] ? (
-            <p className="text-xs text-muted-fg mb-1">
-              현재 저장된 값: <span className="font-mono">****</span> (입력 시 덮어씁니다)
-            </p>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-xs text-muted-fg">
+                현재 저장된 값: <span className="font-mono">****</span> (입력 시 덮어씁니다)
+              </p>
+              {isDeletableSettingKey(f.key) ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDeleteTarget(f)}
+                  disabled={saving || deleting}
+                >
+                  삭제
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           <Input
             id={f.key}
@@ -220,17 +266,64 @@ function SettingsSection({
       <Button type="submit" variant="primary" loading={saving} disabled={saving}>
         저장
       </Button>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+        title="저장값 삭제"
+        description={
+          deleteTarget && isDeletableSettingKey(deleteTarget.key)
+            ? `${deleteTarget.label} 저장값을 삭제합니다. 삭제 후에는 환경변수 ${DELETABLE_SETTING_ENV_FALLBACK[deleteTarget.key]} 값이 있으면 그 값이, 없으면 미설정 상태로 동작합니다.`
+            : undefined
+        }
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => void handleConfirmDelete()}
+              loading={deleting}
+              disabled={deleting}
+            >
+              삭제
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted-fg">
+          {deleteTarget?.key === 'toss_client_key' || deleteTarget?.key === 'toss_secret_key'
+            ? '대체할 환경변수가 없으면 Toss 결제가 즉시 비활성화됩니다.'
+            : '삭제한 값은 되돌릴 수 없습니다. 필요하면 다시 입력해 저장하세요.'}
+        </p>
+      </Dialog>
     </form>
   );
 }
 
-export function SettingsClient({ existing }: Props) {
-  const [tab, setTab] = useState<Tab>('payment');
+export function SettingsClient({ existing, initialTab = 'payment' }: Props) {
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   async function handleSave(values: Record<string, string>) {
     const result = await saveSettingsAction(values);
     if (!result.ok) {
       throw new Error(result.error ?? '저장 실패');
+    }
+  }
+
+  async function handleDelete(key: string) {
+    const result = await deleteSettingAction(key);
+    if (!result.ok) {
+      throw new Error(result.error ?? '삭제 실패');
     }
   }
 
@@ -276,6 +369,7 @@ export function SettingsClient({ existing }: Props) {
           fields={sectionFields[tab]}
           existing={existing}
           onSave={handleSave}
+          onDelete={handleDelete}
         />
       </Card>
     </div>
