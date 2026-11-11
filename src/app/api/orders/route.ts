@@ -32,6 +32,9 @@ import { z } from 'zod';
 
 const GUEST_COOKIE_NAME = 'fs-guest-sid';
 
+const ORDER_REJECTED_MESSAGE = '주문 정보를 확인할 수 없습니다. 장바구니와 입력 내용을 확인해 주세요.';
+const ORDER_INTERNAL_MESSAGE = '주문 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+
 const bodySchema = z.object({
   cartItems: z.array(cartItemSchema).min(1),
 }).and(createOrderInputSchema);
@@ -106,11 +109,12 @@ export async function POST(request: Request): Promise<Response> {
     shipping: parsed.data.shipping,
     shippingMethod: parsed.data.shippingMethod,
     clientShippingFee: parsed.data.clientShippingFee,
-    userId: userId
-      ? asBrand<UserId>(userId)
-      : parsed.data.userId
-        ? asBrand<UserId>(parsed.data.userId)
-        : null,
+    // SECURITY (P1-4): owner identity comes ONLY from the verified session.
+    // The body `userId` (still accepted by the FROZEN createOrderInputSchema,
+    // so it is ignored here rather than removed) let an anonymous caller bill
+    // a victim's points, burn their one-per-user coupon and attach the order
+    // to their account.
+    userId: userId ? asBrand<UserId>(userId) : null,
     // P0-03: Forward sessionId for anonymous photo-ownership verification.
     // Prefer the HttpOnly cookie value (tamper-proof) over the body value.
     sessionId,
@@ -147,17 +151,29 @@ export async function POST(request: Request): Promise<Response> {
         : err.code === 'COUPON_EXHAUSTED' ? 422
         : err.code === 'COUPON_ALREADY_USED' ? 422
         : 500;
+      // err.message can carry raw DB errors, server prices or (PHOTO_OWNERSHIP)
+      // other users' photo URLs — log it, answer with the code + fixed copy.
+      // The checkout UI maps `code` to its own copy and never shows `message`.
+      console.warn(
+        JSON.stringify({ event: 'order_create_rejected', code: err.code, message: err.message }),
+      );
       return NextResponse.json(
-        { ok: false, code: err.code, message: err.message },
+        {
+          ok: false,
+          code: err.code,
+          message: status === 500 ? ORDER_INTERNAL_MESSAGE : ORDER_REJECTED_MESSAGE,
+        },
         { status },
       );
     }
+    console.error(
+      JSON.stringify({
+        event: 'order_create_failed',
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
     return NextResponse.json(
-      {
-        ok: false,
-        code: 'INTERNAL',
-        message: err instanceof Error ? err.message : 'unknown',
-      },
+      { ok: false, code: 'INTERNAL', message: ORDER_INTERNAL_MESSAGE },
       { status: 500 },
     );
   }

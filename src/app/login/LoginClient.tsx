@@ -4,10 +4,11 @@ import { useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/cn';
 import { syncCartOnLogin } from '@/lib/cart/client';
+import { safeRedirectPath } from '@/lib/auth/safe-redirect';
 
 type Props = {
-  /** Where to navigate after a successful sign-in. Already validated as
-   *  same-origin by the calling Server Component / middleware. */
+  /** Where to navigate after a successful sign-in. Raw `?redirect=` value —
+   *  sanitized here by safeRedirectPath before navigation. */
   redirectTo: string;
 };
 
@@ -24,7 +25,8 @@ type Props = {
  *
  *  Defense-in-depth:
  *   - `redirectTo` is sanitized client-side to a same-origin pathname
- *     (no `http://evil.com/...` open-redirect).
+ *     (no `http://evil.com/...` or `/\t/evil.com` open-redirect — see
+ *     `src/lib/auth/safe-redirect.ts`).
  *   - Hard-navigate via `window.location.assign` so the middleware
  *     re-reads the freshly-set session cookies on the very next request.
  */
@@ -59,8 +61,9 @@ export function LoginClient({ redirectTo }: Props) {
       } catch {
         /* non-fatal — server cart will simply lack the guest items */
       }
-      const safeTarget = isSameOriginPath(redirectTo) ? redirectTo : '/admin';
-      window.location.assign(safeTarget);
+      window.location.assign(
+        safeRedirectPath(redirectTo, window.location.origin, '/admin'),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : '로그인에 실패했습니다.');
       setSubmitting(false);
@@ -138,20 +141,4 @@ export function LoginClient({ redirectTo }: Props) {
       </p>
     </form>
   );
-}
-
-/**
- * Accepts only same-origin, absolute path-style targets. Rejects:
- *   - Empty string
- *   - Absolute URLs (http://..., //evil.com/..., javascript:..., etc)
- *   - Anything not starting with a single forward slash
- */
-function isSameOriginPath(p: string): boolean {
-  if (!p) return false;
-  if (!p.startsWith('/')) return false;
-  // Reject protocol-relative URLs ("//evil.com/path") which start with '/'.
-  if (p.startsWith('//')) return false;
-  // Reject backslashes that some browsers normalize to '/'.
-  if (p.includes('\\')) return false;
-  return true;
 }

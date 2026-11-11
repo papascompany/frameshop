@@ -81,14 +81,35 @@ export async function POST(request: Request): Promise<Response> {
   await resetLoginRate(email);
   console.info(JSON.stringify({ event: 'login_success', domain: email.split('@')[1] }));
 
-  // Link any guest orders placed with this (now-verified) email to the account
-  // so they show up in /account/orders. Best-effort — must not block login.
-  if (data.user?.id) {
-    const claimed = await claimGuestOrdersByEmail(asBrand<UserId>(data.user.id), email);
+  // Link any guest orders placed with this email to the account so they show
+  // up in /account/orders. Best-effort — must not block login.
+  // SECURITY (P1-7): only when Supabase says the account's OWN email is
+  // confirmed, and only with that email — never the typed one. A password
+  // login alone does not prove mailbox ownership if "Confirm email" is off,
+  // which would let anyone register a victim's address and pull in their
+  // guest orders (addresses, phone numbers).
+  const verifiedEmail = confirmedAccountEmail(data.user);
+  if (data.user?.id && verifiedEmail) {
+    const claimed = await claimGuestOrdersByEmail(
+      asBrand<UserId>(data.user.id),
+      verifiedEmail,
+    );
     if (claimed > 0) {
       console.info(JSON.stringify({ event: 'guest_orders_claimed', count: claimed }));
     }
   }
 
   return NextResponse.json({ ok: true }, { status: 200 });
+}
+
+type AuthUserEmailFields = {
+  email?: string | null;
+  email_confirmed_at?: string | null;
+  confirmed_at?: string | null;
+};
+
+/** The account's own email when Supabase has confirmed it; otherwise null. */
+function confirmedAccountEmail(user: AuthUserEmailFields | null | undefined): string | null {
+  if (!user?.email) return null;
+  return user.email_confirmed_at || user.confirmed_at ? user.email : null;
 }

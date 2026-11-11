@@ -84,6 +84,21 @@ describe('confirmFromSuccessRedirect', () => {
     },
   );
 
+  it('취소·환불 주문 거부(ORDER_NOT_PAYABLE)는 그대로 전달되고 성공 페이지 문구로 매핑된다 (P1-2)', async () => {
+    const { tossErrorCopy, ORDER_NOT_PAYABLE_MESSAGE } = await import('@/lib/payment/error-copy');
+    state.confirmImpl = async () => ({
+      ok: false,
+      code: 'ORDER_NOT_PAYABLE',
+      message: ORDER_NOT_PAYABLE_MESSAGE,
+    });
+    const result = await run();
+    expect(result).toMatchObject({ ok: false, code: 'ORDER_NOT_PAYABLE' });
+    if (result.ok) throw new Error('unreachable');
+    // page.tsx 가 initialMessage 로 쓰는 변환 — 영어 코드·원문이 아니라 한국어 안내.
+    expect(tossErrorCopy(result.code, result.message)).toBe(ORDER_NOT_PAYABLE_MESSAGE);
+    expect(tossErrorCopy(result.code, null)).toBe(ORDER_NOT_PAYABLE_MESSAGE);
+  });
+
   it('confirmPayment 가 throw 해도(DB 오류) 페이지를 깨지 않고 INTERNAL 로 돌려준다', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     state.confirmImpl = async () => {

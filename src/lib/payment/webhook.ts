@@ -87,7 +87,9 @@ export async function handlePaymentWebhook(
     };
   }
 
-  console.log(
+  // console.info, not console.log: production builds strip console.log
+  // (next.config.ts compiler.removeConsole) and this is the payment audit trail.
+  console.info(
     JSON.stringify({
       event: 'payment_webhook',
       paymentKey: delivery.paymentKey,
@@ -274,6 +276,41 @@ function flagPartialCancel(
   return { httpStatus: 200, outcome: 'recorded' };
 }
 
+/** 감사 기록에 남길 원본 본문의 직렬화 상한. 정상 Toss 웹훅은 수 KB 이내다. */
+export const WEBHOOK_AUDIT_MAX_PAYLOAD_BYTES = 16 * 1024;
+
+/** Toss 재조회로 실재가 확인되지 않은 수신 — 본문은 위조일 수 있어 저장하지 않는다. */
+const UNVERIFIED_OUTCOMES: ReadonlySet<WebhookOutcome> = new Set<WebhookOutcome>([
+  'payment_not_found',
+  'order_not_found',
+]);
+
+/**
+ * raw_payload(043: NOT NULL jsonb)에 넣을 값. 서명 없는 웹훅도 받으므로 누구나 임의 본문을
+ * 보낼 수 있다 — 미확인 수신은 본문을 버리고, 확인된 수신도 상한을 넘으면 크기만 남긴다
+ * (감사 테이블을 통한 저장공간 고갈 차단).
+ */
+export function auditPayload(
+  rawPayload: unknown,
+  outcome: WebhookOutcome,
+): unknown {
+  if (UNVERIFIED_OUTCOMES.has(outcome)) {
+    return { omitted: 'unverified_delivery' };
+  }
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(rawPayload);
+  } catch {
+    return { omitted: 'unserializable' };
+  }
+  if (serialized === undefined) return { omitted: 'empty' };
+  const bytes = Buffer.byteLength(serialized, 'utf8');
+  if (bytes > WEBHOOK_AUDIT_MAX_PAYLOAD_BYTES) {
+    return { omitted: 'too_large', bytes };
+  }
+  return rawPayload;
+}
+
 /** 감사 기록(043). 미적용·실패는 처리 결과에 영향을 주지 않는다. */
 async function recordDelivery(
   delivery: WebhookDelivery,
@@ -291,7 +328,7 @@ async function recordDelivery(
         order_no: result.orderNo,
         toss_status: result.tossStatus,
         outcome: result.outcome,
-        raw_payload: delivery.rawPayload,
+        raw_payload: auditPayload(delivery.rawPayload, result.outcome),
       });
     if (error) {
       console.warn(

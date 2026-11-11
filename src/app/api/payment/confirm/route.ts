@@ -87,7 +87,10 @@ export async function POST(request: Request): Promise<Response> {
       ? 400
       : result.code === 'ORDER_NOT_FOUND'
         ? 404
-        : 500;
+        : // CANCELLED/REFUNDED order — refused before Toss, nothing charged.
+          result.code === 'ORDER_NOT_PAYABLE'
+          ? 409
+          : 500;
 
   return NextResponse.json(result, { status });
 }

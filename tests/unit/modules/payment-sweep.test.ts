@@ -112,6 +112,7 @@ beforeEach(() => {
   state.orderPoints = { userId: null, pointsRedeemed: 0, pointsAccrued: 0 };
   state.reverseCalls = [];
   vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'info').mockImplementation(() => {});
 });
 
 async function sweep() {
@@ -236,5 +237,15 @@ describe('sweepUnconfirmedOrders', () => {
     const summary = await sweep();
     expect(summary.scanned).toBe(2);
     expect(summary.outcomes.map((o) => o.action)).toEqual(['error', 'expired']);
+  });
+});
+
+describe('sweepUnconfirmedOrders — 감사 로그 (보안 검토 P2-5)', () => {
+  it('주문별 결과는 프로덕션 빌드에서 제거되지 않는 console.info 로 남긴다', async () => {
+    state.candidates = [{ id: 'o1', orderNo: '20261027-0001', totalPrice: 16800, createdAt: ago(2 * HOURS) }];
+    state.toss = { '20261027-0001': { paymentKey: 'pk-1', orderId: '20261027-0001', status: 'DONE', totalAmount: 16800 } };
+    await sweep();
+    expect(console.info).toHaveBeenCalledWith(expect.stringContaining('"event":"payment_sweep_order"'));
+    expect(console.log).not.toHaveBeenCalled();
   });
 });

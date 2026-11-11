@@ -46,7 +46,12 @@ export type ConfirmErrorCode =
   | 'ORDER_NOT_FOUND'
   | 'TOSS_REJECTED'
   | 'ALREADY_PAID'
-  | 'INTERNAL';
+  | 'INTERNAL'
+  /**
+   * Additive (2026-11-11, security review P1-2): the order is CANCELLED or
+   * REFUNDED, so confirm refuses BEFORE calling Toss — no charge is made.
+   */
+  | 'ORDER_NOT_PAYABLE';
 
 export type ConfirmResult =
   | { ok: true; orderNo: OrderNo; paymentKey: PaymentKey; alreadyPaid?: boolean }

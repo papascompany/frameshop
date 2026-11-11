@@ -5,6 +5,8 @@
  * confirm endpoint may also return a Toss code. Raw codes like
  * `PAY_PROCESS_CANCELED` mean nothing to a shopper, so map the common ones to
  * plain Korean. Unknown codes fall back to a generic, non-alarming message.
+ * Our own confirm result codes (ORDER_NOT_PAYABLE, AMOUNT_MISMATCH) are mapped
+ * here too, so the success page and the retry button show the same copy.
  */
 
 const TOSS_CODE_COPY: Record<string, string> = {
@@ -20,9 +22,22 @@ const TOSS_CODE_COPY: Record<string, string> = {
   TIMEOUT: '시간이 초과되었습니다. 다시 시도해 주세요.',
 };
 
+/** confirmPayment 가 Toss 호출 전에 거부한 경우의 문구 — 청구가 없었음을 분명히 한다. */
+export const ORDER_NOT_PAYABLE_MESSAGE =
+  '취소 또는 환불된 주문이라 결제할 수 없습니다. 이번 결제는 승인되지 않았습니다.';
+export const AMOUNT_MISMATCH_MESSAGE =
+  '결제 금액이 주문 금액과 일치하지 않습니다. 이번 결제는 승인되지 않았습니다.';
+
+/** 우리 confirm 결과 코드(ConfirmErrorCode) 중 고객에게 따로 설명할 것. */
+const CONFIRM_CODE_COPY: Record<string, string> = {
+  ORDER_NOT_PAYABLE: ORDER_NOT_PAYABLE_MESSAGE,
+  AMOUNT_MISMATCH: AMOUNT_MISMATCH_MESSAGE,
+};
+
 /** Map a Toss code/message to friendly Korean copy. */
 export function tossErrorCopy(code?: string | null, fallbackMessage?: string | null): string {
   if (code && TOSS_CODE_COPY[code]) return TOSS_CODE_COPY[code];
+  if (code && CONFIRM_CODE_COPY[code]) return CONFIRM_CODE_COPY[code];
   // A human Korean message from Toss is better than a raw code, but never echo
   // an English code as the primary message.
   if (fallbackMessage && !/^[A-Z0-9_]+$/.test(fallbackMessage)) return fallbackMessage;

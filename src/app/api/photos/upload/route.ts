@@ -203,10 +203,7 @@ export async function POST(request: Request): Promise<Response> {
     .from(BUCKET)
     .upload(path, bytes, { contentType: mime, upsert: false });
   if (up.error) {
-    return NextResponse.json(
-      { ok: false, code: 'UPLOAD_FAILED', message: up.error.message },
-      { status: 500 },
-    );
+    return storageFailure('UPLOAD_FAILED', 'original', up.error.message);
   }
 
   const thumbUp = await supabaseSvc.storage
@@ -216,10 +213,7 @@ export async function POST(request: Request): Promise<Response> {
       upsert: false,
     });
   if (thumbUp.error) {
-    return NextResponse.json(
-      { ok: false, code: 'UPLOAD_FAILED', message: thumbUp.error.message },
-      { status: 500 },
-    );
+    return storageFailure('UPLOAD_FAILED', 'thumb', thumbUp.error.message);
   }
 
   // SECURITY FIX (CRITICAL-001): photos bucket is now private.
@@ -237,15 +231,17 @@ export async function POST(request: Request): Promise<Response> {
   ]);
 
   if (origSigned.error || !origSigned.data?.signedUrl) {
-    return NextResponse.json(
-      { ok: false, code: 'SIGN_FAILED', message: origSigned.error?.message ?? 'signed url failed' },
-      { status: 500 },
+    return storageFailure(
+      'SIGN_FAILED',
+      'original',
+      origSigned.error?.message ?? 'signed url failed',
     );
   }
   if (thumbSigned.error || !thumbSigned.data?.signedUrl) {
-    return NextResponse.json(
-      { ok: false, code: 'SIGN_FAILED', message: thumbSigned.error?.message ?? 'thumb signed url failed' },
-      { status: 500 },
+    return storageFailure(
+      'SIGN_FAILED',
+      'thumb',
+      thumbSigned.error?.message ?? 'thumb signed url failed',
     );
   }
 
@@ -267,13 +263,27 @@ export async function POST(request: Request): Promise<Response> {
     });
     return NextResponse.json({ ok: true, photo }, { status: 200 });
   } catch (err) {
-    return NextResponse.json(
-      {
-        ok: false,
-        code: 'PHOTO_INSERT_FAILED',
-        message: err instanceof Error ? err.message : 'unknown',
-      },
-      { status: 500 },
+    return storageFailure(
+      'PHOTO_INSERT_FAILED',
+      'db',
+      err instanceof Error ? err.message : String(err),
     );
   }
+}
+
+/**
+ * Storage/DB failure response (P2-7). The raw provider message can reveal
+ * bucket paths, policy names or schema details — it goes to the server log
+ * only; the client gets the code plus fixed copy (callers never show `message`).
+ */
+function storageFailure(
+  code: 'UPLOAD_FAILED' | 'SIGN_FAILED' | 'PHOTO_INSERT_FAILED',
+  stage: 'original' | 'thumb' | 'db',
+  detail: string,
+): Response {
+  console.error(JSON.stringify({ event: 'photo_upload_failed', code, stage, message: detail }));
+  return NextResponse.json(
+    { ok: false, code, message: '사진을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.' },
+    { status: 500 },
+  );
 }

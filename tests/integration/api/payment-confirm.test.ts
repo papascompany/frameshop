@@ -19,7 +19,14 @@ type MockOrder = {
   id: string;
   orderNo: string;
   totalPrice: number;
-  status: 'CREATED' | 'PAID' | 'CANCELLED';
+  status:
+    | 'CREATED'
+    | 'PAID'
+    | 'IN_PRODUCTION'
+    | 'SHIPPED'
+    | 'DELIVERED'
+    | 'CANCELLED'
+    | 'REFUNDED';
   paymentId: string | null;
   /** FS-X-FIX-A P1-2: coupon snapshot frozen at order creation (or null). */
   couponCode?: string | null;
@@ -289,6 +296,7 @@ describe('POST /api/payment/confirm', () => {
   });
 
   it('returns 400 AMOUNT_MISMATCH when DB total_price != amount (never calls Toss)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { POST } = await import('@/app/api/payment/confirm/route');
     mockState.order = {
       id: 'order-uuid-1',
@@ -309,13 +317,20 @@ describe('POST /api/payment/confirm', () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { ok: boolean; code: string };
+    const body = (await res.json()) as { ok: boolean; code: string; message: string };
     expect(body.ok).toBe(false);
     expect(body.code).toBe('AMOUNT_MISMATCH');
+    // P2-1: the response never echoes the order's real total (or the client's
+    // claim) — that would let anyone read an order's amount by its orderNo.
+    expect(body.message).not.toMatch(/12000|12,000/);
+    expect(body.message).not.toMatch(/expected|got/);
     // Critical: Toss confirm MUST NOT be called when the client lied about amount.
     expect(mockState.tossConfirmCalls).toHaveLength(0);
     // And no state transition occurred either.
     expect(mockState.transitionCalls).toHaveLength(0);
+    // The amounts are kept for operators in the server log only.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('payment_amount_mismatch'));
+    warnSpy.mockRestore();
   });
 
   it('returns 404 ORDER_NOT_FOUND when orderNo is missing', async () => {
@@ -367,8 +382,13 @@ describe('POST /api/payment/confirm', () => {
     };
     expect(body.ok).toBe(true);
     expect(body.orderNo).toBe('20260512-0001');
-    // The DB paymentKey wins — protects against retry with a different key.
-    expect(body.paymentKey).toBe('pk-test-original');
+    // P2-1: echo the caller's key, never the stored one. This branch runs
+    // before any amount/key check, so returning the DB paymentKey leaked a paid
+    // order's real paymentKey to anyone who knew its orderNo. (Previously
+    // asserted "DB paymentKey wins"; no client reads paymentKey from this
+    // response — the success page and retry button only use ok/orderNo/code.)
+    expect(body.paymentKey).toBe('pk-test-retry');
+    expect(JSON.stringify(body)).not.toContain('pk-test-original');
     // Critical: re-confirm MUST NOT call Toss or transition again.
     expect(mockState.tossConfirmCalls).toHaveLength(0);
     expect(mockState.transitionCalls).toHaveLength(0);
@@ -664,5 +684,111 @@ describe('confirmPayment — 결제 confirm 백스톱 (이중 승인 수렴·끊
     expect(result.ok).toBe(true);
     expect(mockState.casCalls).toHaveLength(0);
     expect(mockState.couponConsumeCalls).toHaveLength(0);
+  });
+});
+
+describe('confirmPayment — 결제 불가 상태 가드 (보안 검토 P1-2)', () => {
+  beforeEach(async () => {
+    // 같은 orderNo 로 여러 번 호출하므로 주문 단위 레이트리밋(10회/10분)을 비운다.
+    const { _resetRateLimit } = await import('@/lib/ratelimit');
+    _resetRateLimit();
+  });
+
+  function confirmReq(paymentKey = 'pk-guard', amount = 12000): Request {
+    return new Request('http://localhost/api/payment/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentKey, orderId: '20260512-0001', amount }),
+    });
+  }
+
+  it.each(['CANCELLED', 'REFUNDED'] as const)(
+    '%s 주문은 금액이 맞아도 Toss 승인 전에 409 ORDER_NOT_PAYABLE 로 거부한다(청구 없음)',
+    async (status) => {
+      const { POST } = await import('@/app/api/payment/confirm/route');
+      const { tossErrorCopy } = await import('@/lib/payment/error-copy');
+      mockState.order = {
+        id: 'order-uuid-1',
+        orderNo: '20260512-0001',
+        totalPrice: 12000,
+        status,
+        paymentId: null,
+        couponCode: 'WELCOME5',
+        userId: 'user-1',
+      };
+      const res = await POST(confirmReq());
+      const body = (await res.json()) as { ok: boolean; code: string; message: string };
+      expect(res.status).toBe(409);
+      expect(body).toMatchObject({ ok: false, code: 'ORDER_NOT_PAYABLE' });
+      // 고객 화면 문구: 결제가 승인되지 않았음을 분명히 한다.
+      expect(tossErrorCopy(body.code, body.message)).toContain('결제는 승인되지 않았습니다');
+      // 핵심: Toss 승인·조회·취소 어느 것도 호출하지 않고, 락·전이·쿠폰도 없다.
+      expect(mockState.tossConfirmCalls).toHaveLength(0);
+      expect(mockState.tossCancelCalls).toHaveLength(0);
+      expect(mockState.transitionCalls).toHaveLength(0);
+      expect(mockState.casCalls).toHaveLength(0);
+      expect(mockState.couponConsumeCalls).toHaveLength(0);
+    },
+  );
+
+  it('금액이 틀린 CANCELLED 주문도 같은 코드로 거부한다(상태 가드가 먼저)', async () => {
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = {
+      id: 'order-uuid-1',
+      orderNo: '20260512-0001',
+      totalPrice: 12000,
+      status: 'CANCELLED',
+      paymentId: null,
+    };
+    const res = await POST(confirmReq('pk-guard', 1));
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('ORDER_NOT_PAYABLE');
+    expect(mockState.tossConfirmCalls).toHaveLength(0);
+  });
+
+  it.each(['IN_PRODUCTION', 'SHIPPED', 'DELIVERED'] as const)(
+    'PAID 이후 상태(%s) 재확정은 PAID 와 같은 멱등 성공 — Toss 재호출(이중 청구) 없음',
+    async (status) => {
+      const { POST } = await import('@/app/api/payment/confirm/route');
+      mockState.order = {
+        id: 'order-uuid-1',
+        orderNo: '20260512-0001',
+        totalPrice: 12000,
+        status,
+        paymentId: 'pk-original',
+      };
+      const res = await POST(confirmReq('pk-retry'));
+      const body = (await res.json()) as {
+        ok: boolean;
+        alreadyPaid?: boolean;
+        paymentKey: string;
+      };
+      expect(res.status).toBe(200);
+      expect(body).toMatchObject({ ok: true, alreadyPaid: true, paymentKey: 'pk-retry' });
+      expect(mockState.tossConfirmCalls).toHaveLength(0);
+      expect(mockState.transitionCalls).toHaveLength(0);
+    },
+  );
+
+  it('스윕(takeOverStaleLock)도 CANCELLED 로 바뀐 주문에는 Toss 승인을 시도하지 않는다', async () => {
+    const { confirmPayment } = await import('@/lib/payment/confirm');
+    mockState.order = {
+      id: 'order-uuid-1',
+      orderNo: '20260512-0001',
+      totalPrice: 12000,
+      status: 'CANCELLED',
+      paymentId: null,
+    };
+    const result = await confirmPayment(
+      {
+        paymentKey: asBrand<PaymentKey>('pk-sweep'),
+        orderId: asBrand<OrderNo>('20260512-0001'),
+        amount: 12000,
+      },
+      { takeOverStaleLock: true },
+    );
+    expect(result).toMatchObject({ ok: false, code: 'ORDER_NOT_PAYABLE' });
+    expect(mockState.tossConfirmCalls).toHaveLength(0);
+    expect(mockState.casCalls).toHaveLength(0);
   });
 });

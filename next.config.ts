@@ -69,6 +69,9 @@ const nextConfig: NextConfig = {
     root: import.meta.dirname,
   },
 
+  // Don't advertise the framework/version via `X-Powered-By: Next.js`.
+  poweredByHeader: false,
+
   // MEDIUM-002 FIX: apply security headers to all routes.
   async headers() {
     return [
@@ -127,12 +130,16 @@ const nextConfig: NextConfig = {
     },
   },
 
-  // Strip console.* in production except warn/error so we keep observability
-  // without paying for verbose logs.
+  // Strip console.* in production except info/warn/error so we keep
+  // observability without paying for verbose logs. removeConsole drops every
+  // console.* call in application code (server code included) that is not
+  // excluded, so structured audit events — payment_webhook, payment_sweep_order,
+  // cron_payment_sweep, login_success — must use console.info; console.log
+  // stays debug-only noise and is still removed.
   compiler: {
     removeConsole:
       process.env.NODE_ENV === 'production'
-        ? { exclude: ['warn', 'error'] }
+        ? { exclude: ['info', 'warn', 'error'] }
         : false,
   },
 };
