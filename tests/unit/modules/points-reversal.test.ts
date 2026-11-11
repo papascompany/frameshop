@@ -29,6 +29,10 @@ type FakeState = {
   ledgerReadFails: boolean;
   refundRpcFails: boolean;
   pointsTxCalls: PointsTxCall[];
+  /** 원장 사전 조회가 경쟁으로 아직 아무것도 못 보는 상황(check-then-insert 창). */
+  ledgerCheckBlind: boolean;
+  /** migration 044 user_points_ledger_order_type_uniq 를 RPC 에서 흉내(23505). */
+  enforceLedgerUnique: boolean;
 };
 
 const state: FakeState = {
@@ -37,6 +41,8 @@ const state: FakeState = {
   ledgerReadFails: false,
   refundRpcFails: false,
   pointsTxCalls: [],
+  ledgerCheckBlind: false,
+  enforceLedgerUnique: false,
 };
 
 const probes = { points: true };
@@ -62,6 +68,9 @@ function makeLedgerBuilder(): LedgerBuilder {
           data: null,
           error: { message: 'ledger read failed (simulated)' },
         });
+      }
+      if (state.ledgerCheckBlind) {
+        return Promise.resolve({ data: [], error: null });
       }
       const rows = state.ledger
         .filter(
@@ -94,6 +103,25 @@ vi.mock('@/lib/supabase/service', () => ({
           return {
             data: null,
             error: { message: 'user_profiles_points_balance_check violated' },
+          };
+        }
+        if (
+          state.enforceLedgerUnique &&
+          call.p_order_id != null &&
+          state.ledger.some(
+            (r) =>
+              r.order_id === call.p_order_id &&
+              r.transaction_type === call.p_type,
+          )
+        ) {
+          // Ledger INSERT violates the partial UNIQUE → whole RPC tx rolls back.
+          return {
+            data: null,
+            error: {
+              code: '23505',
+              message:
+                'duplicate key value violates unique constraint "user_points_ledger_order_type_uniq"',
+            },
           };
         }
         state.pointsBalance += call.p_delta;
@@ -130,6 +158,8 @@ beforeEach(() => {
   state.ledgerReadFails = false;
   state.refundRpcFails = false;
   state.pointsTxCalls = [];
+  state.ledgerCheckBlind = false;
+  state.enforceLedgerUnique = false;
   probes.points = true;
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -268,5 +298,61 @@ describe('reversePointsForOrder — graceful / 은폐 금지', () => {
     expect(state.pointsBalance).toBe(1000 + 5000);
     const logged = errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
     expect(logged).toContain('points_reversal_failed');
+  });
+});
+
+describe('reversePointsForOrder — 044 UNIQUE 23505 멱등 (보안 검토 P1-1)', () => {
+  it('사전 조회를 통과한 경쟁 호출의 23505 는 멱등 skip — 이중 복원 없음, 오류 아님', async () => {
+    const { reversePointsForOrder } = await import('@/lib/db/points');
+    state.enforceLedgerUnique = true;
+
+    const first = await reversePointsForOrder(ORDER_ID, USER_ID, {
+      redeemed: 5000,
+      accrued: 280,
+    });
+    // 경쟁: 두 번째 호출의 사전 조회가 첫 호출의 원장 행을 아직 못 봤다.
+    state.ledgerCheckBlind = true;
+    const second = await reversePointsForOrder(ORDER_ID, USER_ID, {
+      redeemed: 5000,
+      accrued: 280,
+    });
+
+    expect(first).toEqual({ ok: true, restored: 5000, reclaimed: 280 });
+    expect(second).toEqual({ ok: true, restored: 0, reclaimed: 0 });
+    // 두 번째 호출은 RPC 까지 갔지만(4회) 원장·잔액은 한 번만 반영됐다.
+    expect(state.pointsTxCalls).toHaveLength(4);
+    expect(state.ledger).toHaveLength(2);
+    expect(state.pointsBalance).toBe(1000 + 5000 - 280);
+    const logged = errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+    expect(logged).not.toContain('points_reversal_failed');
+  });
+
+  it('동시 호출 2회(Promise.all) → 복원·회수 각 1회', async () => {
+    const { reversePointsForOrder } = await import('@/lib/db/points');
+    state.enforceLedgerUnique = true;
+
+    const results = await Promise.all([
+      reversePointsForOrder(ORDER_ID, USER_ID, { redeemed: 5000, accrued: 280 }),
+      reversePointsForOrder(ORDER_ID, USER_ID, { redeemed: 5000, accrued: 280 }),
+    ]);
+
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(results.reduce((sum, r) => sum + r.restored, 0)).toBe(5000);
+    expect(results.reduce((sum, r) => sum + r.reclaimed, 0)).toBe(280);
+    expect(state.pointsBalance).toBe(1000 + 5000 - 280);
+  });
+
+  it('23505 가 아닌 RPC 오류는 여전히 실패로 보고한다(은폐 금지)', async () => {
+    const { reversePointsForOrder } = await import('@/lib/db/points');
+    state.refundRpcFails = true;
+    state.enforceLedgerUnique = true;
+
+    const result = await reversePointsForOrder(ORDER_ID, USER_ID, {
+      redeemed: 0,
+      accrued: 280,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('points_balance_check');
   });
 });

@@ -29,7 +29,23 @@ import { getServiceRoleSupabase } from '../supabase/service';
 
 export type PointsTxResult =
   | { ok: true; balance: number }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /** PostgreSQL SQLSTATE (예: '23505' UNIQUE 위반). 알 수 없으면 undefined. */
+      code?: string;
+    };
+
+/**
+ * migration 044 `user_points_ledger_order_type_uniq` 위반 SQLSTATE. RPC 의 원장
+ * INSERT 가 이걸로 실패하면 같은 트랜잭션의 잔액 UPDATE 도 롤백되므로(원자),
+ * 호출자는 "다른 요청이 이미 기록함" = 멱등 성공으로 취급한다.
+ */
+const UNIQUE_VIOLATION = '23505';
+
+function isDuplicateLedger(tx: PointsTxResult): boolean {
+  return !tx.ok && tx.code === UNIQUE_VIOLATION;
+}
 
 export type PointsAccrualResult = {
   ok: boolean;
@@ -92,7 +108,12 @@ async function applyPointsTransaction(
     p_description: description,
   });
   if (error) {
-    return { ok: false, error: error.message };
+    const code = (error as { code?: unknown }).code;
+    return {
+      ok: false,
+      error: error.message,
+      ...(typeof code === 'string' ? { code } : {}),
+    };
   }
   if (typeof data !== 'number') {
     return {
@@ -203,7 +224,8 @@ export async function refundRedeemedPoints(
  * 구매확정 시 1% 적립 (ACCRUAL). **멱등** — 원장에 이 주문의 ACCRUAL 이 이미
  * 있으면 재적립하지 않는다(031 주석의 idempotency 계약). 멱등 체크 자체가
  * 실패하면 적립하지 않고 실패를 돌려준다(늦은 적립은 보정 가능, 이중 적립은
- * 회수가 어렵다 — fail closed).
+ * 회수가 어렵다 — fail closed). 사전 조회와 RPC 사이의 동시 호출 경쟁은 044 의
+ * (order_id, transaction_type) UNIQUE 가 막고, 그 23505 는 멱등 skip 으로 처리한다.
  */
 export async function accruePointsForOrder(
   orderId: OrderId,
@@ -238,6 +260,10 @@ export async function accruePointsForOrder(
     earn,
     '구매확정 적립 (결제액의 1%)',
   );
+  if (isDuplicateLedger(tx)) {
+    // 동시 호출이 먼저 적립(스냅샷 갱신 포함)했다 — 이 호출은 아무것도 하지 않는다.
+    return { ok: true, accrued: 0 };
+  }
   if (!tx.ok) {
     return { ok: false, accrued: 0, error: tx.error };
   }
@@ -289,8 +315,10 @@ async function hasLedgerEntry(
  *  (b) accrued  > 0 → 적립분 회수: REFUND −accrued
  *
  * 두 다리 모두 (order_id, transaction_type) 원장 존재 여부로 **멱등** — 재시도/
- * 중복 호출이 이중 복원·이중 회수로 이어지지 않는다. 멱등 체크 자체가 실패하면
- * 해당 다리는 적용하지 않는다(fail closed — 늦은 보정이 이중 지급보다 낫다).
+ * 중복 호출이 이중 복원·이중 회수로 이어지지 않는다. 사전 조회와 RPC 사이의 동시
+ * 호출 경쟁은 044 UNIQUE 인덱스가 막고, 그 23505 는 멱등 skip(0)으로 처리한다.
+ * 멱등 체크 자체가 실패하면 해당 다리는 적용하지 않는다(fail closed — 늦은 보정이
+ * 이중 지급보다 낫다).
  * 회수는 고객이 이미 포인트를 써버려 잔액이 부족하면 RPC 의 CHECK 로 실패할 수
  * 있다 — 이때 주문 흐름을 되돌리지 않고 구조화 로그(points_reversal_failed)로
  * 남긴다(은폐 금지, 운영 수동 보정 대상). 031 미적용이면 전부 skip.
@@ -337,9 +365,10 @@ export async function reversePointsForOrder(
         );
         if (tx.ok) {
           restored = redeemed;
-        } else {
+        } else if (!isDuplicateLedger(tx)) {
           errors.push(`restore: ${tx.error}`);
         }
+        // 23505 = 동시 호출이 먼저 복원함 — 멱등 skip(restored 0), 오류 아님.
       }
     }
 
@@ -357,10 +386,11 @@ export async function reversePointsForOrder(
         );
         if (tx.ok) {
           reclaimed = accrued;
-        } else {
+        } else if (!isDuplicateLedger(tx)) {
           // 잔액 부족(CHECK) 포함 — 로그 후 계속. 주 흐름(환불)은 이미 완료.
           errors.push(`reclaim: ${tx.error}`);
         }
+        // 23505 = 동시 호출이 먼저 회수함 — 멱등 skip(reclaimed 0), 오류 아님.
       }
     }
 

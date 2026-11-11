@@ -1007,6 +1007,28 @@ export async function attachPaymentKey(
 /** Result shape for customer-initiated order mutations — errors are values. */
 type CustomerActionResult = { ok: boolean; error?: string };
 
+const ALREADY_CANCELLED_MESSAGE = '이미 취소 처리된 주문입니다.';
+
+/** 현재 상태만 다시 읽는다(명시 컬럼). 조회 실패/부재면 null — 호출자는 보수적으로 처리. */
+async function readOrderStatus(orderId: OrderId): Promise<OrderStatus | null> {
+  try {
+    const supabase = getServiceRoleSupabase();
+    const { data, error } = await supabase
+      .from('orders')
+      .select('status')
+      .eq('id', orderId as string)
+      .maybeSingle();
+    if (error || !data) return null;
+    return (data as { status: OrderStatus }).status;
+  } catch {
+    return null;
+  }
+}
+
+function isTerminalCancelled(status: OrderStatus | null): boolean {
+  return status === 'CANCELLED' || status === 'REFUNDED';
+}
+
 /**
  * 고객 본인 주문취소 (배송 전: CREATED / PAID 만 허용).
  *
@@ -1014,6 +1036,15 @@ type CustomerActionResult = { ok: boolean; error?: string };
  * 호출 user 의 소유권(order.userId === userId)으로 게이트한다. 결제가 있는
  * 주문이면 Toss 환불을 먼저 수행하고, 환불 실패 시 상태를 바꾸지 않는다
  * (돈이 돌아가지 않았는데 CANCELLED 로 마킹하는 것을 방지).
+ *
+ * 동시성(보안 검토 P1-1): 상태 전이는 CAS(`transitionIfStatus`, 읽은 상태 → CANCELLED)
+ * 이고 **이긴 요청만** 적립금 복원·쿠폰 복원·알림을 실행한다. 진 요청(더블클릭·
+ * 웹훅·스윕이 먼저 처리)은 부수효과 없이 "이미 처리됨"을 돌려준다.
+ * PAID 주문에서 동시 요청 둘이 모두 Toss 취소를 부를 수는 있다 — ORDER_STATUSES 가
+ * FROZEN 이라 환불 전에 잡을 중간 상태(예: CANCELLING)가 없고, 전이를 먼저 하면
+ * "환불 전 CANCELLED" 불변식이 깨진다. Toss 전액 취소는 같은 paymentKey 에 대해
+ * 한 번만 성공하므로(두 번째는 이미 취소됨 오류) 이중 환불은 PG 가 막고, 여기서는
+ * 두 번째 Toss 실패를 상태 재조회로 "이미 처리됨"으로 수렴시킨다.
  */
 export async function customerCancelOrder(
   orderId: OrderId,
@@ -1059,6 +1090,12 @@ export async function customerCancelOrder(
         cancelReason: trimmedReason,
       });
     } catch (err) {
+      // A concurrent cancel (double click / webhook) may have refunded first —
+      // Toss rejects the second full cancel. If the order already reached a
+      // cancelled terminal state, the winner owns every side effect.
+      if (isTerminalCancelled(await readOrderStatus(order.id))) {
+        return { ok: false, error: ALREADY_CANCELLED_MESSAGE };
+      }
       return {
         ok: false,
         error: `결제 취소(환불) 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
@@ -1066,11 +1103,12 @@ export async function customerCancelOrder(
     }
   }
 
+  let won: boolean;
   try {
     // Use the RESOLVED order.id — `orderId` may be an orderNo (the client sends
-    // the human order number), but transitionTo matches on the UUID id. Passing
-    // an orderNo here would update 0 rows AFTER the refund already ran.
-    await transitionTo(order.id, 'CANCELLED', { reason: trimmedReason });
+    // the human order number), but the CAS matches on the UUID id. Passing an
+    // orderNo here would update 0 rows AFTER the refund already ran.
+    won = await transitionIfStatus(order.id, order.status, 'CANCELLED');
   } catch (err) {
     return {
       ok: false,
@@ -1078,8 +1116,35 @@ export async function customerCancelOrder(
     };
   }
 
+  if (!won) {
+    // Lost the CAS: another path changed the status between our read and write.
+    // No side effects here — whoever won the transition runs them.
+    const latest = await readOrderStatus(order.id);
+    if (isTerminalCancelled(latest)) {
+      return { ok: false, error: ALREADY_CANCELLED_MESSAGE };
+    }
+    // e.g. CREATED → PAID by a concurrent payment confirm, or PAID → IN_PRODUCTION
+    // by an admin. If we already refunded, money and order state now disagree —
+    // never silent: structured log for ops follow-up.
+    console.error(
+      JSON.stringify({
+        event: 'customer_cancel_cas_lost',
+        orderId: order.id,
+        orderNo: order.orderNo,
+        from: order.status,
+        latest,
+        refunded: Boolean(order.paymentId),
+      }),
+    );
+    return {
+      ok: false,
+      error: '주문 상태가 변경되어 취소하지 못했습니다. 고객센터로 문의해 주세요.',
+    };
+  }
+
   // FS-EC P1-1: settle the points ledger AFTER the successful CANCELLED
-  // transition — restore redeemed points, reclaim accrued ones. Fire-and-forget:
+  // transition (this request won the CAS) — restore redeemed points, reclaim
+  // accrued ones. Fire-and-forget:
   // a reversal failure must never undo a cancellation whose PG refund already
   // executed. reversePointsForOrder is idempotent and never throws (logs its
   // own failures). `userId` === order.userId (ownership guard above).
@@ -1112,6 +1177,10 @@ export async function customerCancelOrder(
  * confirmed_at 컬럼(migration 033)이 아직 미적용이면 UPDATE 가 실패할 수 있으므로
  * try/catch 로 감싸 그 경우에만 graceful error 를 돌려준다. ORDER_STATUSES 는
  * FROZEN 이라 상태 전환 없이 timestamptz 만 갱신한다.
+ *
+ * 동시성(보안 검토 P1-1): 갱신은 `confirmed_at IS NULL` 조건부(CAS)이고, 0행이면
+ * 동시 호출이 먼저 확정한 것이므로 적립을 건너뛴다 — 1% 이중 적립 방지의 1차 가드.
+ * 원장 (order_id, ACCRUAL) 멱등 조회 + 044 UNIQUE 가 2차 가드다.
  */
 export async function confirmPurchase(
   orderId: OrderId,
@@ -1149,24 +1218,33 @@ export async function confirmPurchase(
   // Isolated single-column update. Wrapped so an unapplied migration 033
   // (missing confirmed_at column) degrades to a graceful error instead of
   // throwing through the customer action boundary.
+  let won: boolean;
   try {
     const supabase = getServiceRoleSupabase();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('orders')
       .update({ confirmed_at: new Date().toISOString() })
-      .eq('id', order.id as string);
+      .eq('id', order.id as string)
+      .is('confirmed_at', null)
+      .select('id');
     if (error) {
       return { ok: false, error: '구매확정 처리에 실패했습니다.' };
     }
+    won = (data?.length ?? 0) > 0;
   } catch {
     return { ok: false, error: '구매확정 처리에 실패했습니다.' };
+  }
+
+  // A concurrent confirm set confirmed_at first — it owns the accrual.
+  if (!won) {
+    return { ok: true };
   }
 
   // FS-EC-02: earn 1% on purchase confirmation, AFTER confirmed_at is set.
   // Accrual failure never rolls the confirmation back — the ledger idempotency
   // check inside accruePointsForOrder makes an ops retry/backfill safe, whereas
   // un-confirming a delivered order would be customer-visible damage.
-  // The idempotent early-return above (already confirmed) also prevents a
+  // The idempotent early-return and the confirmed_at CAS above also prevent a
   // second accrual through this path. `userId` === order.userId (ownership
   // guard) — the accrual is credited to the order owner.
   try {
