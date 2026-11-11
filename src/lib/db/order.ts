@@ -595,21 +595,39 @@ export type StaleCreatedOrder = {
   createdAt: string;
 };
 
+/** 스윕 키셋 커서 — 직전 페이지 마지막 행의 (created_at, id). */
+export type StaleCreatedCursor = Pick<StaleCreatedOrder, 'createdAt' | 'id'>;
+
 /**
- * 결제 확정이 끝나지 않은 채 `createdBefore` 이전에 생성된 CREATED 주문(오래된 순).
+ * 결제 확정이 끝나지 않은 채 `createdBefore` 이전에 생성된 CREATED 주문 한 페이지.
  * 결제 백스톱 스윕 전용 — 명시 컬럼만 읽는다(미적용 마이그 컬럼 무관, ADR-023).
+ *
+ * 최신 순(created_at DESC, id DESC) 키셋 페이지네이션(보안 검토 P1-8): `after` 를
+ * 주면 그 행보다 뒤(더 오래된) 행만 돌려준다. 같은 실행 안에서 이미 판정한 주문은
+ * 다시 나오지 않고, 끝내 CREATED 로 남는 오래된 행(수동 확인·조회 실패)이 최근
+ * 주문(정산 대상 DONE 이 몰리는 구간)보다 앞 슬롯을 차지하지 못한다.
  */
 export async function listStaleCreatedOrders(
   createdBefore: Date,
   limit: number,
+  after?: StaleCreatedCursor,
 ): Promise<StaleCreatedOrder[]> {
   const supabase = getServiceRoleSupabase();
-  const { data, error } = await supabase
+  let query = supabase
     .from('orders')
     .select('id, order_no, total_price, created_at')
     .eq('status', 'CREATED')
-    .lt('created_at', createdBefore.toISOString())
-    .order('created_at', { ascending: true })
+    .lt('created_at', createdBefore.toISOString());
+  if (after) {
+    // 값은 큰따옴표로 감싸 리터럴로 넘긴다 — 논리식 구분자(`,` `(` `)`)가 섞여도
+    // 파싱이 깨지지 않게(postgrest-js 의 in() 이 예약 문자 값에 쓰는 방식과 같다).
+    const at = `"${after.createdAt}"`;
+    const id = `"${after.id as string}"`;
+    query = query.or(`created_at.lt.${at},and(created_at.eq.${at},id.lt.${id})`);
+  }
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(limit);
 
   if (error) {
@@ -1010,7 +1028,7 @@ type CustomerActionResult = { ok: boolean; error?: string };
 const ALREADY_CANCELLED_MESSAGE = '이미 취소 처리된 주문입니다.';
 
 /** 현재 상태만 다시 읽는다(명시 컬럼). 조회 실패/부재면 null — 호출자는 보수적으로 처리. */
-async function readOrderStatus(orderId: OrderId): Promise<OrderStatus | null> {
+export async function readOrderStatus(orderId: OrderId): Promise<OrderStatus | null> {
   try {
     const supabase = getServiceRoleSupabase();
     const { data, error } = await supabase
@@ -1025,7 +1043,7 @@ async function readOrderStatus(orderId: OrderId): Promise<OrderStatus | null> {
   }
 }
 
-function isTerminalCancelled(status: OrderStatus | null): boolean {
+export function isTerminalCancelled(status: OrderStatus | null): boolean {
   return status === 'CANCELLED' || status === 'REFUNDED';
 }
 
