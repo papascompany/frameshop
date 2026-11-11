@@ -232,9 +232,10 @@ async function applyExternalCancel(
       accrued: order.pointsAccrued ?? 0,
     });
   }
-  // 쿠폰은 PAID 전이 때 소비되므로 CREATED 였던 주문은 되돌릴 것이 없다.
+  // 쿠폰은 PAID 전이 때 소비되므로 CREATED 였던 주문은 되돌릴 것이 없다. 복원은 이 주문이
+  // 실제로 소비한 기록이 있을 때만 일어난다(보안 검토 P1-3).
   if (order.status !== 'CREATED' && order.couponCode) {
-    await releaseCouponByOrder(order.couponCode, order.userId);
+    await releaseCouponByOrder(order.couponCode, order.userId, order.id);
   }
 
   console.warn(

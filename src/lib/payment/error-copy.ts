@@ -27,11 +27,14 @@ export const ORDER_NOT_PAYABLE_MESSAGE =
   '취소 또는 환불된 주문이라 결제할 수 없습니다. 이번 결제는 승인되지 않았습니다.';
 export const AMOUNT_MISMATCH_MESSAGE =
   '결제 금액이 주문 금액과 일치하지 않습니다. 이번 결제는 승인되지 않았습니다.';
+export const COUPON_UNAVAILABLE_MESSAGE =
+  '이미 사용했거나 사용 한도가 끝난 쿠폰이 적용된 주문이라 결제하지 않았습니다. 이번 결제는 승인되지 않았습니다. 쿠폰을 빼고 다시 주문해 주세요.';
 
 /** 우리 confirm 결과 코드(ConfirmErrorCode) 중 고객에게 따로 설명할 것. */
 const CONFIRM_CODE_COPY: Record<string, string> = {
   ORDER_NOT_PAYABLE: ORDER_NOT_PAYABLE_MESSAGE,
   AMOUNT_MISMATCH: AMOUNT_MISMATCH_MESSAGE,
+  COUPON_UNAVAILABLE: COUPON_UNAVAILABLE_MESSAGE,
 };
 
 /** Map a Toss code/message to friendly Korean copy. */

@@ -137,3 +137,13 @@ export function isCouponsAvailable(): Promise<boolean> {
 export function isWebhookAuditAvailable(): Promise<boolean> {
   return probeFeature('webhookAudit', 'payment_webhook_events', 'id');
 }
+
+/**
+ * 쿠폰 사용의 주문 연결 원장(045): coupon_redemptions.order_no. 045 는 order_no 컬럼과
+ * user_id NULL 허용(비회원 원장)·부분 UNIQUE 인덱스를 한 파일에서 함께 만든다.
+ * false → 원장 INSERT 에서 order_no 를 생략하고(conditional-spread) 비회원 원장 기록을
+ * 건너뛴다. 회원 원장의 order_id(042 컬럼)는 이 probe 와 무관하게 기록한다.
+ */
+export function isCouponOrderLedgerAvailable(): Promise<boolean> {
+  return probeFeature('couponOrderLedger', 'coupon_redemptions', 'order_no');
+}

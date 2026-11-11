@@ -8,6 +8,9 @@
  *      Toss confirm API is NOT called.
  *   3. Compare `order.total_price === amount`. Mismatch → AMOUNT_MISMATCH,
  *      Toss confirm API is NOT called.
+ *   3a. Coupon still honorable (security review P1-3)? A member coupon already
+ *      used by another order, or a usage-limited coupon already exhausted →
+ *      COUPON_UNAVAILABLE, Toss confirm API is NOT called.
  *   4. Toss confirm API call (server secret key).
  *   5. On Toss success → transition the order to PAID + attach paymentKey.
  *
@@ -24,11 +27,15 @@ import type { ConfirmPaymentInput, ConfirmResult } from '@/types/payment';
 import type { OrderStatus, OrderWithItems } from '@/types/order';
 import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionIfStatus, transitionTo } from '../db/order';
-import { consumeCouponByCode } from '../db/coupons';
+import { checkCouponPayable, consumeCouponByCode } from '../db/coupons';
 import { enqueuePrintRender } from '../render/enqueue';
 import { getServiceRoleSupabase } from '../supabase/service';
 import { notifyNewOrder } from '../notify';
-import { AMOUNT_MISMATCH_MESSAGE, ORDER_NOT_PAYABLE_MESSAGE } from './error-copy';
+import {
+  AMOUNT_MISMATCH_MESSAGE,
+  COUPON_UNAVAILABLE_MESSAGE,
+  ORDER_NOT_PAYABLE_MESSAGE,
+} from './error-copy';
 
 export type ConfirmOptions = {
   /**
@@ -103,6 +110,34 @@ export async function confirmPayment(
       code: 'AMOUNT_MISMATCH',
       message: AMOUNT_MISMATCH_MESSAGE,
     };
+  }
+
+  // Security review P1-3: the coupon is consumed only after PAID and a failed
+  // consume cannot undo the charge (fail-open), so this is the last point where
+  // an already-used member coupon (e.g. N CREATED orders paid one by one) or an
+  // exhausted usage-limited coupon can be refused WITHOUT charging the buyer.
+  // Skipped for the sweep takeover: it reaches here for payments Toss may have
+  // approved already (DONE), and refusing would strand a charged order.
+  if (order.couponCode && !opts.takeOverStaleLock) {
+    const couponCheck = await checkCouponPayable(
+      order.couponCode,
+      order.userId,
+      order.id,
+    );
+    if (!couponCheck.ok) {
+      console.warn(
+        JSON.stringify({
+          event: 'payment_coupon_refused',
+          orderNo: order.orderNo,
+          errorCode: couponCheck.errorCode,
+        }),
+      );
+      return {
+        ok: false,
+        code: 'COUPON_UNAVAILABLE',
+        message: COUPON_UNAVAILABLE_MESSAGE,
+      };
+    }
   }
 
   // Call Toss confirm.
@@ -284,14 +319,19 @@ async function settlePaidOrder(
   // used_count cannot double-increment because a second confirm never reaches here.
   // Fail-open: a consume failure after a successful charge keeps the paid order (the
   // customer already paid the discounted total) and only logs — under-counting
-  // used_count is the safe direction per ADR-026. NOTE: Toss keys are placeholders,
-  // so this path is logic/test-verified only; a real-payment smoke test is still
-  // required (ADR-026 Postscript).
+  // used_count is the safe direction per ADR-026. Abuse (an already-used or
+  // exhausted coupon) is refused BEFORE the charge instead — see the
+  // checkCouponPayable guard in confirmPayment and migration 045 (security review
+  // P1-3). The consume records this order on the redemption ledger so a later
+  // cancel/refund releases only what THIS order consumed. NOTE: Toss keys are
+  // placeholders, so this path is logic/test-verified only; a real-payment smoke
+  // test is still required (ADR-026 Postscript).
   if (order.couponCode) {
     const consumed = await consumeCouponByCode(
       order.couponCode,
       order.userId,
       order.orderNo,
+      order.id,
     );
     if (!consumed.ok) {
       console.error(

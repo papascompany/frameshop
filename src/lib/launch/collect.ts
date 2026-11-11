@@ -15,6 +15,7 @@ import { listShippingMethods } from '@/lib/db/shipping';
 import {
   isBundleRulesAvailable,
   isConfirmAvailable,
+  isCouponOrderLedgerAvailable,
   isCouponsAvailable,
   isInquiriesAvailable,
   isPartialRefundAvailable,
@@ -53,6 +54,7 @@ const MIGRATION_PROBES: ReadonlyArray<{
   { migration: '041', label: '위시리스트', probe: isWishlistAvailable },
   { migration: '042', label: '쿠폰', probe: isCouponsAvailable },
   { migration: '043', label: '웹훅 수신 감사 로그', probe: isWebhookAuditAvailable },
+  { migration: '045', label: '쿠폰 주문 연결(병렬 주문 차단)', probe: isCouponOrderLedgerAvailable },
 ];
 
 const SETTING_KEYS = [

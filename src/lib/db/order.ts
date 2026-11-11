@@ -25,7 +25,11 @@ import { mapOrder, mapOrderItem } from './mappers';
 import { canTransition, formatOrderNo } from '../order/state';
 import { calculateShippingFee } from '../shipping/calc';
 import { calcSurcharge, classifyZip } from '../shipping/surcharge';
-import { releaseCouponByOrder, validateCoupon } from './coupons';
+import {
+  listActiveCouponOrders,
+  releaseCouponByOrder,
+  validateCoupon,
+} from './coupons';
 import {
   isCouponsAvailable,
   isProjectCartAvailable,
@@ -68,6 +72,83 @@ export async function generateOrderNo(today: Date): Promise<OrderNo> {
     );
   }
   return asBrand<OrderNo>(formatOrderNo(today, nextSeq));
+}
+
+// ---------- coupon: one active order per member (security review P1-3) ----------
+
+/**
+ * migration 045 partial UNIQUE index — at most one active (not CANCELLED/REFUNDED)
+ * order per (user_id, coupon_code). Its name is how an INSERT 23505 is told apart
+ * from other unique violations on orders (e.g. order_no).
+ */
+const ACTIVE_COUPON_ORDER_INDEX = 'uniq_orders_active_coupon_per_user';
+
+function isActiveCouponConflict(
+  err: { code?: string; message?: string; details?: string } | null,
+): boolean {
+  if (!err || err.code !== '23505') return false;
+  return `${err.message ?? ''} ${err.details ?? ''}`.includes(
+    ACTIVE_COUPON_ORDER_INDEX,
+  );
+}
+
+/**
+ * Cancels this member's earlier UNPAID (CREATED) orders that carry the same coupon,
+ * so the order being created becomes the only active one (security review P1-3).
+ * Mirrors the sweep's abandoned-order expiry: CAS CREATED→CANCELLED, then restore
+ * the points that order redeemed. No customer notification (the order was never
+ * paid) and no coupon release (unpaid orders never consumed it).
+ *
+ * Never throws — a failure here leaves the earlier order in place; the 045 index
+ * then refuses the new INSERT (COUPON_ALREADY_USED), and without 045 the
+ * checkCouponPayable guard in confirmPayment refuses the second payment.
+ *
+ * Residual race (same class as a customer cancelling a CREATED order mid-payment):
+ * if the earlier order's confirm already passed its status check when this cancel
+ * lands, Toss may approve a payment for a now-CANCELLED order. The webhook then
+ * logs `webhook_paid_for_inactive_order` for a manual refund.
+ */
+async function supersedeUnpaidCouponOrders(
+  userId: UserId,
+  couponCode: string,
+): Promise<void> {
+  const listed = await listActiveCouponOrders(userId, couponCode);
+  if (listed.data === null) {
+    console.error(
+      JSON.stringify({ event: 'coupon_supersede_list_failed', error: listed.error }),
+    );
+    return;
+  }
+  for (const prev of listed.data) {
+    if (prev.status !== 'CREATED') continue;
+    try {
+      const won = await transitionIfStatus(prev.id, 'CREATED', 'CANCELLED');
+      // Lost: paid or cancelled in between — a paid one makes the 045 index refuse
+      // the new INSERT; a cancelled one owns its own side effects.
+      if (!won) continue;
+      console.warn(
+        JSON.stringify({ event: 'coupon_order_superseded', orderNo: prev.orderNo }),
+      );
+      const full = await getOrder(prev.orderNo as string);
+      if (
+        full?.userId &&
+        ((full.pointsRedeemed ?? 0) > 0 || (full.pointsAccrued ?? 0) > 0)
+      ) {
+        await reversePointsForOrder(full.id, full.userId, {
+          redeemed: full.pointsRedeemed ?? 0,
+          accrued: full.pointsAccrued ?? 0,
+        });
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: 'coupon_supersede_failed',
+          orderNo: prev.orderNo,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
+  }
 }
 
 // ---------- createOrder ----------
@@ -275,6 +356,17 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     }
   }
 
+  // Security review P1-3: one active order per member per coupon. Every payment
+  // retry (/payment/fail → /checkout, or a closed Toss window) creates a NEW order,
+  // so rejecting while an unpaid order holds the coupon would lock it until the
+  // sweep expires that order (24h). Instead the new order takes over: earlier
+  // unpaid orders carrying the same coupon are cancelled here, AFTER every
+  // validation passed. Two concurrent createOrders are settled atomically by the
+  // migration 045 partial UNIQUE index (INSERT 23505 → COUPON_ALREADY_USED below).
+  if (coupon && input.userId != null) {
+    await supersedeUnpaidCouponOrders(input.userId, coupon.code);
+  }
+
   const orderNo = await generateOrderNo(new Date());
 
   // FS-X-FIX-A P1-2: the coupon is NOT consumed here. createOrder only reserves
@@ -371,6 +463,13 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     // Only points moved in this path (the coupon is consumed later, at PAID) —
     // refund the deducted points. No coupon slot to release here.
     await compensateRedeem();
+    if (isActiveCouponConflict(insErr)) {
+      // Lost the race to a concurrent order carrying the same coupon (045 index).
+      throw new CreateOrderError(
+        'COUPON_ALREADY_USED',
+        'another active order already carries this coupon',
+      );
+    }
     throw new CreateOrderError(
       'SEQUENCE_FAILED',
       insErr?.message ?? 'orders insert failed',
@@ -1179,7 +1278,7 @@ export async function customerCancelOrder(
   // orders.coupon_code snapshot remains and there is nothing to release. Fire-and-
   // forget mirror of the points reversal above (releaseCouponByOrder never throws).
   if (order.status === 'PAID' && order.couponCode) {
-    void releaseCouponByOrder(order.couponCode, order.userId);
+    void releaseCouponByOrder(order.couponCode, order.userId, order.id);
   }
 
   // Fire-and-forget customer notification (same pattern as admin cancel).
