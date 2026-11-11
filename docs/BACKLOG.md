@@ -1,7 +1,7 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-10-28 (결제 confirm 백스톱 + 결제 웹훅 정합성 완료 — §0).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-11-11 (정식 오픈 준비 오케스트레이션 — 보안 검토 P0 수정·런칭 점검 화면·스모크 도구, §0 순서 갱신).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
@@ -9,6 +9,27 @@
 ---
 
 ## §0. 런칭 게이트 — 지금 남은 것 (2026-08-08 전수 감사)
+
+### ★ 런칭 게이트 순서 (2026-11-11 갱신 — 위에서부터 차례로)
+
+> 코드는 전부 main·프로덕션 반영(#71~#78). 아래는 **CTO 액션**이다. 진행 상황은 `/admin/launch`(런칭 점검
+> 화면)에서 확인하되, 044 적용 여부는 그 화면에 나오지 않으므로 4번 검증으로 따로 확인한다.
+
+| # | 할 일 | 왜/근거 |
+|---|---|---|
+| 1 | **호스팅 결정**: Vercel Pro 전환 또는 독립 서버(`docs/setup/BAREMETAL_MIGRATION_RUNBOOK.md`) | Vercel Hobby 는 상업 이용 불가 — 결제 처리 = 상업(Fair Use Guidelines) |
+| 2 | **Supabase Auth**: "Confirm email" 켜기 또는 공개 가입 끄기 | 꺼져 있으면 피해자 이메일로 가입해 비회원 주문을 가져가는 공격(P1-7)이 코드 수정(#78)에도 남는다 |
+| 3 | **044 사전 점검 2종** — 원장 중복 · 위조 주문 감사(2-a~2-d) | `docs/MIGRATIONS-APPLY.md` "런칭 전 필수 — 044" 1·2단계. 044 는 과거 위조 행을 정리하지 않는다 |
+| 4 | **044 적용**(`BEGIN…COMMIT` 로 감싸서) → 검증 쿼리 (a)~(e) → 리뷰 작성·마이페이지 스모크 | P0(주문 직접 INSERT → 적립금 무한 발행)는 **코드 배포만으로 막히지 않는다** |
+| 5 | (선택) 043 적용 | 웹훅 수신 감사 로그. 미적용이어도 웹훅 반영은 정상 |
+| 6 | **Toss 키 입력**(4번 이후) + 개발자센터 웹훅 등록(`/api/webhook/payment`, PAYMENT_STATUS_CHANGED) | 아래 "[즉시] Toss 키 입력" 절 |
+| 7 | 운영값·외부 리드타임 항목 | 아래 "[운영값]"·"[외부]" 절 — `/admin/launch` warn 0 목표 |
+| 8 | **실결제 스모크**: 소액 결제 확정 → 고객 취소·환불 → 적립금 복원, 쿠폰 적용 결제 | 확정·취소·원장 경로를 실키로 1회 확인 |
+| 9 | `pnpm smoke:launch https://<운영 도메인>` + `E2E_BASE_URL=<운영> npx playwright test tests/e2e/launch.spec.ts` | 2026-11-11 실측: 스모크 PASS 14/FAIL 0, 읽기 전용 E2E 모바일·데스크톱 통과 |
+
+**운영 완화책(후속 코드 전까지)**: 고액·한정 쿠폰 발행 금지(P1-3) · 결제 스윕 로그(`payment_sweep_order`) 모니터링(P1-8) ·
+관리자 화면에서 같은 주문 동시 취소·환불 금지 · `webhook_paid_for_inactive_order`·`customer_cancel_cas_lost`·
+`points_reversal_failed` 로그가 보이면 수동 확인(Vercel 로그 검색).
 
 > 코드는 전부 라이브. **CTO 액션만 남았다.** 순서대로 처리하면 실판매 가능.
 
@@ -59,6 +80,18 @@
 약관/방침 법률 자문 · Sentry DSN(빌드타임 env `NEXT_PUBLIC_SENTRY_DSN` — DB 설정 아님).
 
 ### [코드] 잔여 권장 (런칭 차단은 아님)
+- ✅ **정식 오픈 전 보안 검토 + 수정 — 완료(2026-11-11, #77·#78).** 읽기 전용 적대적 검토가 P0 1·P1 8·P2 7 보고.
+  수정: **044**(orders/order_items 클라이언트 쓰기 회수 — P0, next_order_no 권한·상한, reviews/photos 정책,
+  원장 부분 UNIQUE, search_path) · customerCancelOrder CAS·confirmPurchase 가드·23505 멱등 · 결제 확정 상태 가드
+  (`ORDER_NOT_PAYABLE`) · `/api/orders` body userId 무시 · 비회원 주문 귀속은 인증된 계정 이메일만 · 로그인
+  open redirect · 웹훅 감사 본문 제한 · 결제 감사 로그 프로덕션 유지(removeConsole info) · `x-powered-by` 제거.
+  최종 리뷰 GO_WITH_RISKS(차단 결함 없음). **044 적용은 위 게이트 3·4번.**
+- ✅ **런칭 점검 화면 `/admin/launch` + app_settings 캐시(비밀 키 제외)·삭제 경로 — 완료(#76).**
+- ✅ **런칭 스모크 `scripts/launch-smoke.sh`·읽기 전용 E2E + 비로그인 위시 401 수정 — 완료(#75).**
+- **보안 후속(미수정)**: P1-3 쿠폰 1인1회·한도 병렬 우회(검증 시 진행 중 주문 확인 + redemption 에 order_no) ·
+  P1-8 결제 스윕 기아(오래된 순 20건 고정 → 커서·시간 예산) · 관리자 취소·환불 경로 CAS · 리뷰 주문당 1개 DB 제약 ·
+  `/admin/launch` 에 044 수동 확인 항목 · `saveSettingsAction` 허용 키 검증 · `legal_draft_notice_hidden` 되돌리기 ·
+  로그인 `INVALID_CREDENTIALS` 영어 원문 · FROZEN `ConfirmErrorCode` 값 추가(ORDER_NOT_PAYABLE) ADR 기록.
 - ✅ **confirm 백스톱 — 완료(2026-10-28).** 사실관계(Toss 문서): 인증 후 10분 안에 승인 API 를
   호출하지 않으면 결제는 EXPIRED(청구 없음). 즉 기존 위험은 "돈만 빠짐"이 아니라 **고객은 결제했다고
   믿는데 주문은 CREATED 로 남고, 체크아웃에서 차감한 적립금이 묶이는 것**이었다. 3단 방어로 해소:
