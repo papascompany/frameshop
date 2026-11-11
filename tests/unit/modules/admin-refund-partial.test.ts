@@ -37,6 +37,10 @@ vi.mock('@/lib/db/admin', () => ({
 vi.mock('@/lib/db/order', () => ({
   getOrder: vi.fn(),
   transitionTo: vi.fn(async () => ({})),
+  // 취소·환불 전이는 CAS — 이 파일은 단일 요청 경로만 다룬다(동시성은 admin-order-cas).
+  transitionIfStatus: vi.fn(async () => true),
+  readOrderStatus: vi.fn(async () => 'PAID'),
+  isTerminalCancelled: (s: string | null) => s === 'CANCELLED' || s === 'REFUNDED',
   setOrderMemo: vi.fn(),
 }));
 
@@ -93,14 +97,14 @@ vi.mock('@/lib/supabase/service', () => ({
 }));
 
 import { cancelOrderAction, refundOrderAction } from '@/app/admin/orders/actions';
-import { getOrder, transitionTo } from '@/lib/db/order';
+import { getOrder, transitionIfStatus } from '@/lib/db/order';
 import { reversePointsForOrder } from '@/lib/db/points';
 import { notifyRefunded } from '@/lib/notify';
 import { tossClient } from '@/lib/payment/toss';
 import { isPartialRefundAvailable } from '@/lib/db/feature-probe';
 
 const getOrderMock = vi.mocked(getOrder);
-const transitionToMock = vi.mocked(transitionTo);
+const casMock = vi.mocked(transitionIfStatus);
 const reverseMock = vi.mocked(reversePointsForOrder);
 const notifyRefundedMock = vi.mocked(notifyRefunded);
 const cancelMock = vi.mocked(tossClient.cancel);
@@ -181,11 +185,11 @@ describe('부분환불 — 038 미적용(graceful degradation)', () => {
     // Toss 전액 취소: cancelAmount 없이 호출.
     expect(cancelMock).toHaveBeenCalledTimes(1);
     expect(cancelMock.mock.calls[0][0]).not.toHaveProperty('cancelAmount');
-    // 기존 REFUNDED 전이 + 고객 알림 유지.
-    expect(transitionToMock).toHaveBeenCalledWith(
+    // REFUNDED 전이(CAS: 읽은 상태 → REFUNDED) + 고객 알림 유지.
+    expect(casMock).toHaveBeenCalledWith(
       asBrand<OrderId>('order-id-1'),
+      'PAID',
       'REFUNDED',
-      { reason: '단순 변심' },
     );
     expect(notifyRefundedMock).toHaveBeenCalledTimes(1);
     // refunded_amount 는 건드리지 않는다(무변경).
@@ -254,7 +258,7 @@ describe('부분환불 — 정상 경로', () => {
       ['refunded_amount', 10000],
     ]);
     // 부분 상태 — 상태기계 전이 없음, 알림 없음.
-    expect(transitionToMock).not.toHaveBeenCalled();
+    expect(casMock).not.toHaveBeenCalled();
     expect(notifyRefundedMock).not.toHaveBeenCalled();
     expect(result).toEqual({ ok: true, refundedAmount: 15000, status: 'PAID' });
   });
@@ -268,10 +272,10 @@ describe('부분환불 — 정상 경로', () => {
     });
 
     expect(h.updateCalls[0].patch).toEqual({ refunded_amount: 30000 });
-    expect(transitionToMock).toHaveBeenCalledWith(
+    expect(casMock).toHaveBeenCalledWith(
       asBrand<OrderId>('order-id-1'),
+      'PAID',
       'REFUNDED',
-      { reason: '전량 파손' },
     );
     expect(notifyRefundedMock).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ ok: true, refundedAmount: 30000, status: 'REFUNDED' });
@@ -289,7 +293,7 @@ describe('부분환불 — 정상 경로', () => {
 
     expect(result.ok).toBe(true);
     expect(result.status).toBe('IN_PRODUCTION');
-    expect(transitionToMock).not.toHaveBeenCalled();
+    expect(casMock).not.toHaveBeenCalled();
     const warned = warnSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
     expect(warned).toContain('partial_refund_full_no_transition');
   });
@@ -313,7 +317,7 @@ describe('부분환불 — 실패 은폐 금지', () => {
     const logged = errorSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
     expect(logged).toContain('partial_refund_update_failed');
     // 기록이 안 됐으므로 상태 전이도 하지 않는다.
-    expect(transitionToMock).not.toHaveBeenCalled();
+    expect(casMock).not.toHaveBeenCalled();
   });
 
   it('환불 사유가 비어 있으면 거부한다', async () => {
@@ -355,7 +359,7 @@ describe('환불 — 적립금 원장 정합 위임(FS-EC P1-1)', () => {
     });
 
     expect(result.status).toBe('REFUNDED');
-    expect(transitionToMock).toHaveBeenCalledTimes(1);
+    expect(casMock).toHaveBeenCalledTimes(1);
     expect(reverseMock).toHaveBeenCalledTimes(1);
     expect(reverseMock).toHaveBeenCalledWith(
       asBrand<OrderId>('order-id-1'),
@@ -376,7 +380,7 @@ describe('환불 — 적립금 원장 정합 위임(FS-EC P1-1)', () => {
 
     expect(result.ok).toBe(true);
     // 정책: 전이 "성공 후"에만 원장 정합.
-    expect(transitionToMock).not.toHaveBeenCalled();
+    expect(casMock).not.toHaveBeenCalled();
     expect(reverseMock).not.toHaveBeenCalled();
   });
 
@@ -420,11 +424,11 @@ describe('관리자 취소(cancelOrderAction) — 적립금 원장 정합 위임
     const result = await cancelOrderAction('order-id-1', '재고 문제');
 
     expect(result.ok).toBe(true);
-    // Toss 환불 → CANCELLED 전이 → 그 후에만 원장 정합.
-    expect(transitionToMock).toHaveBeenCalledWith(
+    // Toss 환불 → CANCELLED 전이(CAS 승리) → 그 후에만 원장 정합.
+    expect(casMock).toHaveBeenCalledWith(
       asBrand<OrderId>('order-id-1'),
+      'PAID',
       'CANCELLED',
-      { reason: '재고 문제' },
     );
     expect(reverseMock).toHaveBeenCalledTimes(1);
     expect(reverseMock).toHaveBeenCalledWith(
@@ -436,8 +440,8 @@ describe('관리자 취소(cancelOrderAction) — 적립금 원장 정합 위임
 
   it('전이 실패 시 회수를 호출하지 않는다(전이 성공 후에만 정합)', async () => {
     getOrderMock.mockResolvedValue(pointsOrder());
-    transitionToMock.mockRejectedValueOnce(
-      new Error('Invalid transition: SHIPPED → CANCELLED'),
+    casMock.mockRejectedValueOnce(
+      new Error('transitionIfStatus update failed: connection reset'),
     );
 
     const result = await cancelOrderAction('order-id-1', '재고 문제');
@@ -453,7 +457,7 @@ describe('관리자 취소(cancelOrderAction) — 적립금 원장 정합 위임
     const result = await cancelOrderAction('order-id-1', '재고 문제');
 
     expect(result.ok).toBe(false);
-    expect(transitionToMock).not.toHaveBeenCalled();
+    expect(casMock).not.toHaveBeenCalled();
     expect(reverseMock).not.toHaveBeenCalled();
   });
 

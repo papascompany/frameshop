@@ -1,7 +1,7 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-11-11 (정식 오픈 준비 오케스트레이션 — 보안 검토 P0 수정·런칭 점검 화면·스모크 도구, §0 순서 갱신).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-11-12 (결제 스윕 기아 P1-8 + 관리자 취소·환불 CAS 완료 · 2026-11-11 정식 오픈 준비 — §0 런칭 게이트 순서).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
@@ -27,9 +27,9 @@
 | 8 | **실결제 스모크**: 소액 결제 확정 → 고객 취소·환불 → 적립금 복원, 쿠폰 적용 결제 | 확정·취소·원장 경로를 실키로 1회 확인 |
 | 9 | `pnpm smoke:launch https://<운영 도메인>` + `E2E_BASE_URL=<운영> npx playwright test tests/e2e/launch.spec.ts` | 2026-11-11 실측: 스모크 PASS 14/FAIL 0, 읽기 전용 E2E 모바일·데스크톱 통과 |
 
-**운영 완화책(후속 코드 전까지)**: 고액·한정 쿠폰 발행 금지(P1-3) · 결제 스윕 로그(`payment_sweep_order`) 모니터링(P1-8) ·
-관리자 화면에서 같은 주문 동시 취소·환불 금지 · `webhook_paid_for_inactive_order`·`customer_cancel_cas_lost`·
-`points_reversal_failed` 로그가 보이면 수동 확인(Vercel 로그 검색).
+**운영 완화책**: 쿠폰 병렬 우회 수정(P1-3, PR #81 + 마이그 045) 머지·적용 전까지 고액·한정 쿠폰 발행 금지 ·
+`webhook_paid_for_inactive_order`·`customer_cancel_cas_lost`·`points_reversal_failed` 로그가 보이면 수동 확인(Vercel 로그 검색).
+(P1-8 스윕 기아·관리자 취소·환불 CAS 는 #80 으로 해소 — 아래 [코드] 절.)
 
 > 코드는 전부 라이브. **CTO 액션만 남았다.** 순서대로 처리하면 실판매 가능.
 
@@ -88,8 +88,7 @@
   최종 리뷰 GO_WITH_RISKS(차단 결함 없음). **044 적용은 위 게이트 3·4번.**
 - ✅ **런칭 점검 화면 `/admin/launch` + app_settings 캐시(비밀 키 제외)·삭제 경로 — 완료(#76).**
 - ✅ **런칭 스모크 `scripts/launch-smoke.sh`·읽기 전용 E2E + 비로그인 위시 401 수정 — 완료(#75).**
-- **보안 후속(미수정)**: P1-3 쿠폰 1인1회·한도 병렬 우회(검증 시 진행 중 주문 확인 + redemption 에 order_no) ·
-  P1-8 결제 스윕 기아(오래된 순 20건 고정 → 커서·시간 예산) · 관리자 취소·환불 경로 CAS · 리뷰 주문당 1개 DB 제약 ·
+- **보안 후속(미수정)**: P1-3 쿠폰 1인1회·한도 병렬 우회(PR #81 진행 중 — 마이그 045 포함) · 리뷰 주문당 1개 DB 제약 ·
   `/admin/launch` 에 044 수동 확인 항목 · `saveSettingsAction` 허용 키 검증 · `legal_draft_notice_hidden` 되돌리기 ·
   로그인 `INVALID_CREDENTIALS` 영어 원문 · FROZEN `ConfirmErrorCode` 값 추가(ORDER_NOT_PAYABLE) ADR 기록.
 - ✅ **confirm 백스톱 — 완료(2026-10-28).** 사실관계(Toss 문서): 인증 후 10분 안에 승인 API 를
@@ -104,7 +103,7 @@
   CAS 인수), 결제 없음/READY/EXPIRED/ABORTED/CANCELED 이고 24시간 지났으면 **CANCELLED 로 만료 +
   사용 적립금 복원**(고객 알림 없음), 조회 실패·가상계좌 대기·부분취소는 무변경. **Toss 키 미설정이면
   아무것도 하지 않는다.** ⚠️ 키 입력 후 첫 실행에서 24시간 지난 과거 CREATED 주문(개발·데모 잔여)이
-  1회 20건씩 만료된다(의도된 정리).
+  시간 예산(25초)만큼씩 최신 순으로 만료된다(의도된 정리 — 2026-11-12 P1-8 이후, 아래 항목).
 - ✅ **결제 웹훅 정합성 — 완료(2026-10-28).** 작업 중 근본 원인 발견: 서명 검증이 Toss 문서
   방식(`tosspayments-webhook-signature` 헤더, `v1:`+base64, `payload:전송시각` HMAC)과 달라
   (`tosspayments-signature`, 본문만 hex) **실제 Toss 웹훅은 전부 401 로 거부되는 구조**였다. CTO 결정으로
@@ -120,6 +119,28 @@
 - 결제 웹훅 잔여: 취소된 주문(CANCELLED)에 승인(DONE)이 도착하면 `webhook_paid_for_inactive_order`
   로그만 남긴다(자동 환불 안 함 — 운영자 판단). PARTIAL_CANCELED 의 `refunded_amount` 자동 동기화는 미구현.
 - `app_settings` 조회 캐시(Toss 호출마다 DB 왕복) · 어드민 설정값 삭제(unset) 경로 부재.
+- ✅ **보안 검토 후속 — 스윕 기아(P1-8) · 관리자 취소·환불 CAS — 완료(2026-11-12).**
+  ① **스윕 기아**: 예전엔 오래된 순 20건만 봐서, 끝내 CREATED 로 남는 waiting·manual(가상계좌 대기·
+  부분취소)·조회 실패 주문이 상위 슬롯을 매일 다시 차지하고 정작 "Toss 승인됐는데 DB 는 CREATED"
+  주문이 밀렸다. 이제 `sweepUnconfirmedOrders` 가 **시간 예산 25초(`SWEEP_TIME_BUDGET_MS`) 안에서
+  20건 페이지를 계속 넘기고**, `listStaleCreatedOrders` 는 **(created_at, id) 키셋 커서**로 이미 판정한
+  주문을 건너뛴다. 순서는 **최신 순** — 정산 대상 DONE 은 최근 주문에 몰리고, 매일 같은 결과인
+  오래된 manual·조회 실패 행은 맨 뒤로 밀려 남는 예산만 쓴다(행별 조회 이력 컬럼 없이 반복 조회
+  비용을 줄이는 방식). 예산이 바닥나면 크론 로그 `cron_payment_sweep` 에 `hasMore: true` —
+  **반복되면 적체 신호**(모니터링: 이 값 + `payment_sweep_order`).
+  ② **관리자 취소·환불 CAS**: `cancelOrderAction`·전액환불·부분환불(누적=전액 시 REFUNDED)이
+  `transitionTo`(같은 상태 전이 = 성공) 대신 `transitionIfStatus`(읽은 상태 → 목표) CAS 를 쓰고 **이긴
+  요청만** 적립금·쿠폰 복원과 알림을 실행한다(고객 취소 #77 과 같은 방식, 환불 먼저 → 성공해야 전이
+  순서 유지). 이미 CANCELLED/REFUNDED 거나 전이 불가 상태(SHIPPED 취소, IN_PRODUCTION/SHIPPED
+  전액환불)는 **Toss 호출 전에 거부** — 예전엔 Toss 환불 후 전이가 실패해 "돈만 환불되고 주문은
+  그대로"가 될 수 있었다(UI 버튼 노출 조건과 동일해 정상 흐름 변화 없음). 진 요청이 비종결 상태를
+  만나면 `admin_cancel_cas_lost`/`admin_refund_cas_lost`·`partial_refund_full_cas_lost` 구조화 로그.
+  → 운영 완화책("같은 주문 동시 조작 금지")은 더 이상 필수 아님.
+  잔여(미수정): 스윕 manual 행의 실행 간 반복 조회 자체를 없애려면 조회 이력 컬럼(예:
+  `orders.sweep_checked_at`, 마이그 필요) · 부분환불이 전액에 도달해 REFUNDED 가 될 때 쿠폰을 복원하지
+  않음(전액환불은 복원 — 비대칭) · PAID 주문 동시 관리자 취소 시 Toss 취소가 두 번 호출될 수 있음
+  (두 번째는 Toss 가 거부 → "이미 처리됨"으로 수렴, 중간 상태 없음은 FROZEN 상태 집합 때문) · 동시
+  부분환불은 둘 다 Toss 부분취소가 집행되고 한쪽만 누적 기록(기존 동작 — "수동 보정" 에러로 노출).
 
 ---
 

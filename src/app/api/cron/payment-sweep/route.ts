@@ -8,7 +8,9 @@
  *
  * Invocation: Vercel Cron (vercel.json `crons`) fires a GET once daily
  * (Hobby plan limit). Vercel adds `Authorization: Bearer <CRON_SECRET>` when
- * `CRON_SECRET` is configured on the project.
+ * `CRON_SECRET` is configured on the project. The sweep pages through
+ * candidates until its time budget (SWEEP_TIME_BUDGET_MS) — keep that budget
+ * plus one worst-case order under `maxDuration`.
  *
  * Reference: https://vercel.com/docs/cron-jobs/quickstart
  */
@@ -55,6 +57,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       event: 'cron_payment_sweep',
       skipped: summary.skipped ?? null,
       scanned: summary.scanned,
+      pages: summary.pages,
+      // true 면 시간 예산 안에 후보를 다 보지 못했다 — 반복되면 적체 신호(P1-8).
+      hasMore: summary.hasMore,
       ...counts,
     }),
   );

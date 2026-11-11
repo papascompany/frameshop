@@ -3,7 +3,14 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requireAdmin } from '@/lib/db/admin';
-import { transitionTo, getOrder, setOrderMemo } from '@/lib/db/order';
+import {
+  transitionTo,
+  transitionIfStatus,
+  getOrder,
+  setOrderMemo,
+  readOrderStatus,
+  isTerminalCancelled,
+} from '@/lib/db/order';
 import { reversePointsForOrder } from '@/lib/db/points';
 import { releaseCouponByOrder } from '@/lib/db/coupons';
 import { isPartialRefundAvailable } from '@/lib/db/feature-probe';
@@ -18,7 +25,7 @@ import {
 import { tossClient } from '@/lib/payment/toss';
 import { asBrand } from '@/types/common';
 import type { OrderId } from '@/types/common';
-import type { OrderStatus } from '@/types/order';
+import type { OrderStatus, OrderWithItems } from '@/types/order';
 
 /** Orderer-level memo cap (app-enforced; mirrors setOrderMemo's slice). */
 const ORDER_MEMO_MAX = 200;
@@ -34,6 +41,57 @@ type RefundActionResult = ActionResult & {
 
 /** 부분환불 금액: 1원 이상 정수(KRW). 상한(잔여액)은 주문 조회 후 검증. */
 const partialRefundAmountSchema = z.number().int().positive();
+
+/** 동시 조작에서 다른 요청이 먼저 취소·환불을 끝낸 경우(이긴 쪽이 부수효과를 실행함). */
+const ALREADY_CLOSED_MESSAGE = '이미 취소·환불 처리된 주문입니다.';
+
+/**
+ * CAS 에서 진 요청의 결과. 다른 요청이 먼저 취소·환불로 종결했으면 "이미 처리됨",
+ * 그 밖의 상태 변화(예: 동시에 제작 시작)면 — 앞서 Toss 환불을 이미 했을 수 있으므로
+ * 돈과 주문 상태가 어긋났을 수 있다 — 구조화 로그를 남기고 확인을 요청한다.
+ * 진 요청은 어떤 경우에도 적립금·쿠폰 복원과 알림을 실행하지 않는다.
+ */
+async function casLostResult(
+  event: 'admin_cancel_cas_lost' | 'admin_refund_cas_lost',
+  order: OrderWithItems,
+  target: OrderStatus,
+): Promise<ActionResult> {
+  const latest = await readOrderStatus(order.id);
+  if (isTerminalCancelled(latest)) {
+    return { ok: false, error: ALREADY_CLOSED_MESSAGE };
+  }
+  console.error(
+    JSON.stringify({
+      event,
+      orderId: order.id,
+      orderNo: order.orderNo,
+      from: order.status,
+      to: target,
+      latest,
+      refunded: Boolean(order.paymentId),
+    }),
+  );
+  return {
+    ok: false,
+    error:
+      '주문 상태가 바뀌어 처리하지 못했습니다. 결제(환불) 상태를 확인한 뒤 다시 시도해주세요.',
+  };
+}
+
+/** Toss 취소 실패 — 동시 요청이 먼저 환불·종결했으면 "이미 처리됨"으로 수렴. */
+async function tossCancelFailedResult(
+  order: OrderWithItems,
+  err: unknown,
+  label: string,
+): Promise<ActionResult> {
+  if (isTerminalCancelled(await readOrderStatus(order.id))) {
+    return { ok: false, error: ALREADY_CLOSED_MESSAGE };
+  }
+  return {
+    ok: false,
+    error: `${label} 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+  };
+}
 
 /** 결제가 존재하고 아직 종결되지 않아 부분환불이 가능한 상태. */
 const PARTIAL_REFUNDABLE_STATUSES: ReadonlySet<OrderStatus> = new Set([
@@ -152,6 +210,11 @@ export async function markDeliveredAction(
  * 이미 결제된 주문(payment_id 존재)이면 Toss 결제 취소(환불)를 먼저 수행한 뒤
  * 상태를 전환한다. 환불에 실패하면 상태를 바꾸지 않는다(돈이 안 돌아갔는데
  * CANCELLED 로 마킹하는 것을 방지).
+ *
+ * 동시성: 전이는 CAS(`transitionIfStatus`, 읽은 상태 → CANCELLED)이고 **이긴 요청만**
+ * 적립금·쿠폰 복원과 알림을 실행한다(customerCancelOrder 와 같은 방식). 같은 주문을
+ * 동시에 조작한 다른 요청은 부수효과 없이 "이미 처리됨"을 돌려받는다. 이미 종결됐거나
+ * 취소할 수 없는 상태면 Toss 를 부르기 전에 거부한다(환불만 되고 전이는 실패하는 경로 차단).
  */
 export async function cancelOrderAction(
   orderId: string,
@@ -171,6 +234,15 @@ export async function cancelOrderAction(
   try {
     const order = await getOrder(orderId);
     if (!order) return { ok: false, error: '주문을 찾을 수 없습니다.' };
+    if (isTerminalCancelled(order.status)) {
+      return { ok: false, error: ALREADY_CLOSED_MESSAGE };
+    }
+    if (!canTransition(order.status, 'CANCELLED')) {
+      return {
+        ok: false,
+        error: `현재 상태(${order.status})에서는 취소할 수 없습니다.`,
+      };
+    }
 
     // Refund first if the order carries a payment. CREATED orders have none.
     if (order.paymentId) {
@@ -180,18 +252,18 @@ export async function cancelOrderAction(
           cancelReason: trimmedReason,
         });
       } catch (err) {
-        return {
-          ok: false,
-          error: `결제 취소(환불) 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
-        };
+        return await tossCancelFailedResult(order, err, '결제 취소(환불)');
       }
     }
 
-    await transitionTo(asBrand<OrderId>(orderId), 'CANCELLED', {
-      reason: trimmedReason,
-    });
+    // CAS on the RESOLVED id (getOrder also accepts an orderNo): only the request
+    // that moves `order.status` → CANCELLED runs the side effects below.
+    const won = await transitionIfStatus(order.id, order.status, 'CANCELLED');
+    if (!won) {
+      return await casLostResult('admin_cancel_cas_lost', order, 'CANCELLED');
+    }
 
-    // FS-EC P1-1(후속): CANCELLED 전이 성공 후 원장 정합 — 사용분 복원 +
+    // FS-EC P1-1(후속): CANCELLED 전이(CAS 승리) 후 원장 정합 — 사용분 복원 +
     // 적립분 회수. customerCancelOrder 와 동일 시맨틱: fire-and-forget(실패해도
     // 취소 주 흐름을 되돌리지 않음, 함수 내부 멱등 + 구조화 로그, never throws),
     // 게스트 주문(userId null)·031 미적용은 skip.
@@ -259,7 +331,10 @@ export async function refundOrderAction(
   return partialRefund(orderId, opts.cancelAmount, trimmedReason);
 }
 
-/** 전액 환불 — 기존 refundOrderAction 로직 그대로(무변경). */
+/**
+ * 전액 환불 — PAID / DELIVERED → REFUNDED. Toss 전액 취소 성공 후에만 전이한다.
+ * 동시성: cancelOrderAction 과 같은 CAS — 이긴 요청만 원장·쿠폰 복원과 알림을 실행.
+ */
 async function fullRefund(
   orderId: string,
   trimmedReason: string,
@@ -270,6 +345,15 @@ async function fullRefund(
     if (!order.paymentId) {
       return { ok: false, error: '결제 정보가 없어 환불할 수 없습니다.' };
     }
+    if (isTerminalCancelled(order.status)) {
+      return { ok: false, error: ALREADY_CLOSED_MESSAGE };
+    }
+    if (!canTransition(order.status, 'REFUNDED')) {
+      return {
+        ok: false,
+        error: `현재 상태(${order.status})에서는 전액 환불할 수 없습니다.`,
+      };
+    }
 
     try {
       await tossClient.cancel({
@@ -277,17 +361,15 @@ async function fullRefund(
         cancelReason: trimmedReason,
       });
     } catch (err) {
-      return {
-        ok: false,
-        error: `결제 취소(환불) 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
-      };
+      return await tossCancelFailedResult(order, err, '결제 취소(환불)');
     }
 
-    await transitionTo(asBrand<OrderId>(orderId), 'REFUNDED', {
-      reason: trimmedReason,
-    });
+    const won = await transitionIfStatus(order.id, order.status, 'REFUNDED');
+    if (!won) {
+      return await casLostResult('admin_refund_cas_lost', order, 'REFUNDED');
+    }
 
-    // FS-EC P1-1: 원장 정합 — REFUNDED 전이 성공 후 사용분 복원 + 적립분 회수.
+    // FS-EC P1-1: 원장 정합 — REFUNDED 전이(CAS 승리) 후 사용분 복원 + 적립분 회수.
     // fire-and-forget: 실패해도 환불 주 흐름을 되돌리지 않는다(함수 내부에서
     // 멱등 처리 + 구조화 로그, never throws). 게스트 주문(userId null)은 포인트
     // 개념이 없어 skip.
@@ -422,11 +504,15 @@ async function partialRefund(
 
     let status: OrderStatus = order.status;
     if (cumulative === order.totalPrice) {
-      if (canTransition(order.status, 'REFUNDED')) {
-        await transitionTo(order.id, 'REFUNDED', { reason: trimmedReason });
+      // CAS: 동시에 전액환불·취소가 먼저 종결했으면 그쪽이 부수효과를 실행했다.
+      // 이 요청의 부분환불(돈 + 누적 기록) 자체는 이미 끝났으므로 성공으로 돌려준다.
+      const won =
+        canTransition(order.status, 'REFUNDED') &&
+        (await transitionIfStatus(order.id, order.status, 'REFUNDED'));
+      if (won) {
         status = 'REFUNDED';
-        // FS-EC P1-1: 누적이 전액에 도달해 REFUNDED 전이가 성공한 경우에만 원장
-        // 정합(사용분 복원 + 적립분 회수). 부분 상태(누적 < 전액)는 무조정.
+        // FS-EC P1-1: 누적이 전액에 도달해 REFUNDED 전이(CAS 승리)가 성공한 경우에만
+        // 원장 정합(사용분 복원 + 적립분 회수). 부분 상태(누적 < 전액)는 무조정.
         if (
           order.userId &&
           ((order.pointsRedeemed ?? 0) > 0 || (order.pointsAccrued ?? 0) > 0)
@@ -438,6 +524,16 @@ async function partialRefund(
         }
         // Fire-and-forget — 기존 전액환불 플로우와 동일 훅.
         void notifyRefunded(order, trimmedReason);
+      } else if (canTransition(order.status, 'REFUNDED')) {
+        // CAS 패배 — 읽은 뒤 다른 요청이 상태를 바꿨다. 부수효과는 실행하지 않는다.
+        const latest = await readOrderStatus(order.id);
+        status = latest ?? order.status;
+        console.warn(
+          JSON.stringify({
+            event: 'partial_refund_full_cas_lost',
+            ctx: { orderNo: order.orderNo, from: order.status, latest, cumulative },
+          }),
+        );
       } else {
         // 전액에 도달했지만 상태기계상 REFUNDED 전이가 불가한 상태(IN_PRODUCTION,
         // SHIPPED). 돈은 전부 환불됐으므로 기록만 남기고 상태는 유지한다.
