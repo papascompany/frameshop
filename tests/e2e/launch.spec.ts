@@ -2,11 +2,9 @@
  * 런칭 스모크 E2E — 정식 오픈 당일·배포 후 반복 실행.
  *
  * 실행 조건: `E2E_BASE_URL` 이 있을 때만(없으면 전체 skip).
- *   E2E_BASE_URL=https://frameshop-snowy.vercel.app \
- *   PLAYWRIGHT_BASE_URL=https://frameshop-snowy.vercel.app \
- *   npx playwright test tests/e2e/launch.spec.ts
- * `PLAYWRIGHT_BASE_URL` 도 같은 값으로 주면 playwright.config.ts 가 외부 대상으로
- * 인식해 로컬 `npm run dev` webServer 를 띄우지 않는다.
+ *   E2E_BASE_URL=https://frameshop-snowy.vercel.app npx playwright test tests/e2e/launch.spec.ts
+ * playwright.config.ts 가 `E2E_BASE_URL` 을 외부 대상으로 인식하므로 로컬
+ * `npm run dev` webServer 를 띄우지 않는다.
  *
  * 기본 시나리오는 읽기 전용: 홈 → 카탈로그 → 상품 상세 → 빈 장바구니.
  * config 의 두 프로젝트를 그대로 쓴다 — mobile-chromium 은 375px 로 좁혀서,
