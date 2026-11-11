@@ -411,6 +411,9 @@ async function fullRefund(
  * 값 일치 조건의 낙관적 잠금 — 동시 환불 경합에서 누적 소실 방지). UPDATE 가
  * 실패하면 Toss 환불은 이미 집행된 상태이므로 절대 은폐하지 않고 구조화
  * 로그 + 수동 보정 안내를 반환한다.
+ *
+ * 누적이 전액에 도달해 REFUNDED 로 전이하면(CAS 승리) 전액환불과 같은 부수효과
+ * — 적립금 원장 정합·쿠폰 사용 복원·환불 알림 — 를 실행한다.
  */
 async function partialRefund(
   orderId: string,
@@ -521,6 +524,13 @@ async function partialRefund(
             redeemed: order.pointsRedeemed ?? 0,
             accrued: order.pointsAccrued ?? 0,
           });
+        }
+        // 쿠폰 대칭: 전액환불(fullRefund)과 똑같이 결제(PAID) 때 소비된 쿠폰 사용
+        // 슬롯을 복원한다. 부분환불은 결제가 있는 PAID 이후 상태에서만 가능하므로
+        // 쿠폰은 소비된 상태다. 적립금과 같은 정책 — 전이(CAS 승리) 후에만, 부분
+        // 상태·전이 불가 상태는 복원하지 않는다. releaseCouponByOrder never throws.
+        if (order.couponCode) {
+          void releaseCouponByOrder(order.couponCode, order.userId, order.id);
         }
         // Fire-and-forget — 기존 전액환불 플로우와 동일 훅.
         void notifyRefunded(order, trimmedReason);

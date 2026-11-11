@@ -7,6 +7,7 @@
  * - 누적 == totalPrice → REFUNDED 전이 + notifyRefunded. 부분 상태는 상태 무변경.
  * - 038 미적용(probe false): 부분환불 명시 에러 + 전액환불 기존 동작 무변경.
  * - UPDATE 실패는 은폐하지 않는다(구조화 로그 + 수동 보정 안내).
+ * - 누적 == totalPrice 로 REFUNDED 전이하면 전액환불과 같이 쿠폰 사용을 복원한다(대칭).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -77,6 +78,11 @@ vi.mock('@/lib/db/points', () => ({
   })),
 }));
 
+// 쿠폰 사용 복원 위임 seam — 실제 coupons 테이블은 건드리지 않는다.
+vi.mock('@/lib/db/coupons', () => ({
+  releaseCouponByOrder: vi.fn(async () => {}),
+}));
+
 vi.mock('@/lib/supabase/service', () => ({
   getServiceRoleSupabase: () => ({
     from: (table: string) => ({
@@ -99,6 +105,7 @@ vi.mock('@/lib/supabase/service', () => ({
 import { cancelOrderAction, refundOrderAction } from '@/app/admin/orders/actions';
 import { getOrder, transitionIfStatus } from '@/lib/db/order';
 import { reversePointsForOrder } from '@/lib/db/points';
+import { releaseCouponByOrder } from '@/lib/db/coupons';
 import { notifyRefunded } from '@/lib/notify';
 import { tossClient } from '@/lib/payment/toss';
 import { isPartialRefundAvailable } from '@/lib/db/feature-probe';
@@ -106,6 +113,7 @@ import { isPartialRefundAvailable } from '@/lib/db/feature-probe';
 const getOrderMock = vi.mocked(getOrder);
 const casMock = vi.mocked(transitionIfStatus);
 const reverseMock = vi.mocked(reversePointsForOrder);
+const couponMock = vi.mocked(releaseCouponByOrder);
 const notifyRefundedMock = vi.mocked(notifyRefunded);
 const cancelMock = vi.mocked(tossClient.cancel);
 const probeMock = vi.mocked(isPartialRefundAvailable);
@@ -470,5 +478,93 @@ describe('관리자 취소(cancelOrderAction) — 적립금 원장 정합 위임
 
     expect(result.ok).toBe(true);
     expect(reverseMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('부분환불 — 쿠폰 사용 복원 대칭(전액환불과 동일)', () => {
+  const couponOrder = (overrides: Partial<OrderWithItems> = {}): OrderWithItems =>
+    makeOrder({
+      userId: asBrand<UserId>('user-1'),
+      couponCode: 'WELCOME10',
+      ...overrides,
+    });
+
+  it('누적이 전액에 도달해 REFUNDED 로 전이하면 쿠폰 사용을 복원한다(코드·회원·주문 id)', async () => {
+    getOrderMock.mockResolvedValue(couponOrder({ refundedAmount: 10000 }));
+
+    const result = await refundOrderAction('order-id-1', {
+      cancelAmount: 20000, // 누적 30000 == totalPrice
+      reason: '전량 파손',
+    });
+
+    expect(result.status).toBe('REFUNDED');
+    expect(couponMock).toHaveBeenCalledTimes(1);
+    expect(couponMock).toHaveBeenCalledWith(
+      'WELCOME10',
+      asBrand<UserId>('user-1'),
+      asBrand<OrderId>('order-id-1'),
+    );
+  });
+
+  it('같은 주문을 전액환불(fullRefund)한 경우와 똑같은 인자로 복원한다', async () => {
+    getOrderMock.mockResolvedValue(couponOrder({ refundedAmount: 0 }));
+    await refundOrderAction('order-id-1', { cancelAmount: 30000, reason: '전량 파손' });
+    const viaPartial = couponMock.mock.calls.map((c) => [...c]);
+
+    couponMock.mockClear();
+    getOrderMock.mockResolvedValue(couponOrder({ refundedAmount: 0 }));
+    await refundOrderAction('order-id-1', { reason: '전량 파손' });
+    const viaFull = couponMock.mock.calls.map((c) => [...c]);
+
+    expect(viaPartial).toHaveLength(1);
+    expect(viaPartial).toEqual(viaFull);
+  });
+
+  it('부분 상태(누적 < 전액)는 쿠폰을 복원하지 않는다', async () => {
+    getOrderMock.mockResolvedValue(couponOrder({ refundedAmount: 0 }));
+
+    const result = await refundOrderAction('order-id-1', {
+      cancelAmount: 5000,
+      reason: '부분 파손',
+    });
+
+    expect(result).toEqual({ ok: true, refundedAmount: 5000, status: 'PAID' });
+    expect(couponMock).not.toHaveBeenCalled();
+  });
+
+  it('전액 도달이라도 REFUNDED 전이가 불가한 상태(IN_PRODUCTION)면 복원하지 않는다', async () => {
+    getOrderMock.mockResolvedValue(
+      couponOrder({ status: 'IN_PRODUCTION', refundedAmount: 0 }),
+    );
+
+    const result = await refundOrderAction('order-id-1', {
+      cancelAmount: 30000,
+      reason: '전량 파손',
+    });
+
+    expect(result.status).toBe('IN_PRODUCTION');
+    expect(couponMock).not.toHaveBeenCalled();
+  });
+
+  it('REFUNDED 전이 CAS 에서 지면(다른 요청이 먼저 종결) 복원하지 않는다 — 이긴 쪽 몫', async () => {
+    getOrderMock.mockResolvedValue(couponOrder({ refundedAmount: 10000 }));
+    casMock.mockResolvedValueOnce(false);
+
+    const result = await refundOrderAction('order-id-1', {
+      cancelAmount: 20000,
+      reason: '전량 파손',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(couponMock).not.toHaveBeenCalled();
+    expect(notifyRefundedMock).not.toHaveBeenCalled();
+  });
+
+  it('쿠폰을 쓰지 않은 주문은 전액 도달이어도 복원을 시도하지 않는다', async () => {
+    getOrderMock.mockResolvedValue(makeOrder({ refundedAmount: 10000 }));
+
+    await refundOrderAction('order-id-1', { cancelAmount: 20000, reason: '전량 파손' });
+
+    expect(couponMock).not.toHaveBeenCalled();
   });
 });
