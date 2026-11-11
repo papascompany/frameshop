@@ -119,6 +119,7 @@ const ICONS: Record<AdminNavKey, React.ReactNode> = {
   landing: <IconLayout />,
   shipping: <IconTruck />,
   settings: <IconGear />,
+  launch: <IconList />,
 };
 
 type Props = {

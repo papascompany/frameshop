@@ -2,8 +2,9 @@
 
 import { updateTag } from 'next/cache';
 import { requireAdmin } from '@/lib/db/admin';
-import { setSetting } from '@/lib/db/settings';
+import { deleteSetting, setSetting } from '@/lib/db/settings';
 import { LEGAL_SETTINGS_TAG } from '@/lib/legal/company-settings';
+import { isDeletableSettingKey } from './setting-keys';
 
 type SaveResult = { ok: boolean; error?: string };
 
@@ -35,6 +36,30 @@ export async function saveSettingsAction(
     if (touchedLegal) {
       updateTag(LEGAL_SETTINGS_TAG);
     }
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '알 수 없는 오류';
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * 설정값 삭제(unset) — 화이트리스트 키만. 행을 지우면 같은 역할의 실값
+ * 환경변수가 있으면 그 값으로 폴백한다. 조회 캐시는 deleteSetting 이 무효화.
+ */
+export async function deleteSettingAction(key: string): Promise<SaveResult> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: '관리자 권한이 필요합니다.' };
+  }
+
+  if (!isDeletableSettingKey(key)) {
+    return { ok: false, error: '삭제할 수 없는 설정입니다.' };
+  }
+
+  try {
+    await deleteSetting(key);
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : '알 수 없는 오류';
