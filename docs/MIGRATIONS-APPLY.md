@@ -4,7 +4,7 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-10-28 (043 작성·적용 대기 — 001~042 는 전부 적용됨).
+> 최종 갱신: 2026-11-11 (044 보안 하드닝 작성 — **런칭 전 필수**, 043·044 적용 대기 — 001~042 는 전부 적용됨).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
@@ -13,6 +13,35 @@
 > 마이그레이션 적용 시의 절차 참고용으로 유지한다.
 
 ---
+
+## ★★ 런칭 전 필수 — 044 (보안 하드닝, 2026-11-11 작성)
+
+> **정식 오픈·Toss 키 입력 전에 반드시 적용.** 정식 오픈 전 보안 검토의 P0(로그인 사용자가 PostgREST
+> 로 `orders` 를 직접 INSERT → 적립금 무한 발행)를 닫는다. 코드만 배포해서는 막히지 않는다.
+> **비파괴 + 멱등**: 데이터 행 변경·삭제 없음. 정책 DROP/CREATE·권한 REVOKE·함수 교체(시그니처 동일)·
+> 인덱스 추가만. 재실행 안전.
+
+| # | 파일 | 바뀌는 것 |
+|---|---|---|
+| 044 | `044_security_hardening.sql` | ① orders/order_items 클라이언트 쓰기 차단(정책 DROP + anon·authenticated INSERT/UPDATE/DELETE/TRUNCATE 회수) ② `next_order_no` 서비스롤 전용 + 일 9999 초과 시 예외 ③ reviews: 본인 숨김 해제 정책 DROP, 작성은 "본인·배송완료 주문"만 허용하는 정책으로 교체 ④ photos 클라이언트 INSERT/UPDATE 정책 DROP ⑤ 적립금 원장 `(order_id, transaction_type)` 부분 UNIQUE 인덱스 ⑥ `apply_points_transaction` search_path 고정 |
+
+### 적용 순서
+
+1. **사전 점검(결과 0행이어야 함)** — 0행이 아니면 이중 적립/복원이 이미 있었던 것. 적용을 멈추고 보고:
+   ```sql
+   SELECT order_id, transaction_type, count(*) AS n
+     FROM public.user_points_ledger
+    WHERE order_id IS NOT NULL
+    GROUP BY order_id, transaction_type
+   HAVING count(*) > 1;
+   ```
+2. `044_security_hardening.sql` 전체 실행.
+3. 파일 하단 주석의 검증 쿼리 (a)~(e) 실행 — 기대값: orders 에 INSERT 정책 없음 · anon/authenticated 의
+   orders/order_items INSERT·UPDATE·DELETE 모두 false(SELECT true) · `next_order_no` 실행권 service_role 만 ·
+   두 함수 `search_path=public` · 인덱스 `user_points_ledger_order_type_uniq` 존재.
+4. 앱 스모크: 로그인 → 마이페이지 주문 목록 표시(SELECT 유지 확인) · 배송완료 주문 리뷰 작성 성공.
+
+롤백 메모는 파일 하단 주석 참고(보안 회귀이므로 사유 기록 후에만).
 
 ## ★ 3차 적용 대기 — 043 (결제 웹훅 정합성, 2026-10-28 작성)
 

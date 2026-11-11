@@ -10,36 +10,87 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { asBrand } from '@/types/common';
 import type { OrderId, UserId } from '@/types/common';
 
+type Filters = Record<string, unknown>;
+
 const state: {
   orderRow: Record<string, unknown>;
   updates: Array<Record<string, unknown>>;
+  /**
+   * 경쟁 시뮬레이션: 설정되면 getOrder(select('*'))가 실제 행 대신 이 값을 덮어쓴
+   * 스냅샷을 본다(다른 경로가 읽기 직후 상태를 바꾼 상황). 상태 재조회
+   * (select('status'))와 CAS UPDATE 는 항상 실제 행 기준이다.
+   */
+  staleRead: Record<string, unknown> | null;
 } = {
   orderRow: {},
   updates: [],
+  staleRead: null,
 };
+
+function matches(filters: Filters): boolean {
+  return Object.entries(filters).every(([col, val]) => state.orderRow[col] === val);
+}
+
+function makeOrdersSelect(cols: string) {
+  const filters: Filters = {};
+  const read = async () => {
+    if (!matches(filters)) return { data: null, error: null };
+    const snapshot =
+      cols === '*' && state.staleRead
+        ? { ...state.orderRow, ...state.staleRead }
+        : { ...state.orderRow };
+    return { data: snapshot, error: null };
+  };
+  const builder = {
+    eq(col: string, val: unknown) {
+      filters[col] = val;
+      return builder;
+    },
+    maybeSingle: read,
+    single: read,
+  };
+  return builder;
+}
+
+// Filter-aware UPDATE: the patch applies only when every .eq() filter matches the
+// current row — the same semantics as PostgREST, so transitionIfStatus' CAS
+// (`.eq('status', from)`) really loses when the row moved on.
+function makeOrdersUpdate(patch: Record<string, unknown>) {
+  const filters: Filters = {};
+  const apply = () => {
+    if (!matches(filters)) return false;
+    state.updates.push(patch);
+    Object.assign(state.orderRow, patch);
+    return true;
+  };
+  const builder = {
+    eq(col: string, val: unknown) {
+      filters[col] = val;
+      return builder;
+    },
+    select: () => ({
+      then<T>(
+        resolve: (v: { data: Array<{ id: unknown }>; error: null }) => T,
+      ): T {
+        const won = apply();
+        return resolve({ data: won ? [{ id: state.orderRow.id }] : [], error: null });
+      },
+      single: async () => {
+        apply();
+        return { data: state.orderRow, error: null };
+      },
+    }),
+  };
+  return builder;
+}
 
 vi.mock('@/lib/supabase/service', () => ({
   getServiceRoleSupabase: () => ({
     from: (table: string) => {
       if (table === 'orders') {
         return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({ data: state.orderRow, error: null }),
-              single: async () => ({ data: state.orderRow, error: null }),
-            }),
-          }),
-          update: (patch: Record<string, unknown>) => ({
-            eq: () => ({
-              select: () => ({
-                single: async () => {
-                  state.updates.push(patch);
-                  Object.assign(state.orderRow, patch);
-                  return { data: state.orderRow, error: null };
-                },
-              }),
-            }),
-          }),
+          select: (cols: string) => makeOrdersSelect(cols),
+          update: (patch: Record<string, unknown>) => makeOrdersUpdate(patch),
         };
       }
       if (table === 'order_items') {
@@ -107,10 +158,12 @@ import { customerCancelOrder } from '@/lib/db/order';
 import { reversePointsForOrder } from '@/lib/db/points';
 import { releaseCouponByOrder } from '@/lib/db/coupons';
 import { tossClient } from '@/lib/payment/toss';
+import { notifyCancelled } from '@/lib/notify';
 
 const reverseMock = vi.mocked(reversePointsForOrder);
 const releaseCouponMock = vi.mocked(releaseCouponByOrder);
 const cancelMock = vi.mocked(tossClient.cancel);
+const notifyCancelledMock = vi.mocked(notifyCancelled);
 
 const ORDER_ID = asBrand<OrderId>('order-uuid-1');
 const USER_ID = asBrand<UserId>('user-1');
@@ -150,6 +203,7 @@ beforeEach(() => {
   cancelMock.mockResolvedValue({ status: 'CANCELED' } as never);
   state.orderRow = makeOrderRow();
   state.updates = [];
+  state.staleRead = null;
 });
 
 describe('customerCancelOrder — 원장 정합 위임(전이 성공 후)', () => {
@@ -243,5 +297,100 @@ describe('customerCancelOrder — 쿠폰 복원 위임 (FS-X-FIX-A P1-1)', () =>
 
     expect(result).toEqual({ ok: true });
     expect(releaseCouponMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('customerCancelOrder — 동시성 (보안 검토 P1-1, CAS)', () => {
+  it('동시 취소 2회(CREATED) → CANCELLED 전이·원장 복원·알림은 정확히 1회', async () => {
+    state.orderRow = makeOrderRow({ status: 'CREATED', payment_id: null });
+
+    const results = await Promise.all([
+      customerCancelOrder(ORDER_ID, USER_ID),
+      customerCancelOrder(ORDER_ID, USER_ID),
+    ]);
+
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok)).toHaveLength(1);
+    expect(state.orderRow.status).toBe('CANCELLED');
+    expect(state.updates).toHaveLength(1);
+    expect(reverseMock).toHaveBeenCalledTimes(1);
+    expect(notifyCancelledMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('CAS 패배(읽은 뒤 다른 경로가 CANCELLED 로 전이) → 부수효과 없이 "이미 처리됨"', async () => {
+    // 실제 행은 이미 CANCELLED, 이 요청은 직전에 CREATED 를 읽었다.
+    state.orderRow = makeOrderRow({
+      status: 'CANCELLED',
+      payment_id: null,
+      coupon_code: 'WELCOME5',
+    });
+    state.staleRead = { status: 'CREATED' };
+
+    const result = await customerCancelOrder(ORDER_ID, USER_ID);
+
+    expect(result).toEqual({ ok: false, error: '이미 취소 처리된 주문입니다.' });
+    expect(state.updates).toHaveLength(0);
+    expect(reverseMock).not.toHaveBeenCalled();
+    expect(releaseCouponMock).not.toHaveBeenCalled();
+    expect(notifyCancelledMock).not.toHaveBeenCalled();
+  });
+
+  it('PAID 이중 취소: 두 번째 Toss 취소 실패는 상태 재조회로 "이미 처리됨"에 수렴 — 부수효과 1회', async () => {
+    state.orderRow = makeOrderRow({
+      status: 'PAID',
+      payment_id: 'tk_pay_1',
+      coupon_code: 'WELCOME5',
+    });
+    cancelMock
+      .mockResolvedValueOnce({ status: 'CANCELED' } as never)
+      .mockRejectedValueOnce(new Error('ALREADY_CANCELED_PAYMENT'));
+
+    // 첫 요청이 환불·전이·부수효과를 끝낸다.
+    const first = await customerCancelOrder(ORDER_ID, USER_ID);
+    // 두 번째 요청은 첫 요청 전이 전에 PAID 를 읽었다(경쟁).
+    state.staleRead = { status: 'PAID' };
+    const second = await customerCancelOrder(ORDER_ID, USER_ID);
+
+    expect(first).toEqual({ ok: true });
+    expect(second).toEqual({ ok: false, error: '이미 취소 처리된 주문입니다.' });
+    expect(cancelMock).toHaveBeenCalledTimes(2);
+    expect(state.updates).toHaveLength(1);
+    expect(reverseMock).toHaveBeenCalledTimes(1);
+    expect(releaseCouponMock).toHaveBeenCalledTimes(1);
+    expect(notifyCancelledMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('Toss 환불 성공 후 CAS 패배가 취소 상태가 아니면(예: 동시 제작 전환) 구조화 로그 + 실패, 부수효과 없음', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    state.orderRow = makeOrderRow({ status: 'IN_PRODUCTION', payment_id: 'tk_pay_1' });
+    state.staleRead = { status: 'PAID' };
+
+    const result = await customerCancelOrder(ORDER_ID, USER_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('고객센터');
+    expect(state.orderRow.status).toBe('IN_PRODUCTION');
+    expect(state.updates).toHaveLength(0);
+    expect(reverseMock).not.toHaveBeenCalled();
+    expect(notifyCancelledMock).not.toHaveBeenCalled();
+    const logged = errSpy.mock.calls.map((c: unknown[]) => String(c[0])).join('\n');
+    expect(logged).toContain('customer_cancel_cas_lost');
+    errSpy.mockRestore();
+  });
+
+  it('미결제 취소와 결제 확정이 경쟁해 PAID 가 먼저 되면 환불 없이 CANCELLED 로 덮지 않는다', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 읽을 때는 CREATED(결제 전, payment_id 없음) → 그 사이 confirm 이 PAID 로 전이.
+    state.orderRow = makeOrderRow({ status: 'PAID', payment_id: 'tk_pay_1' });
+    state.staleRead = { status: 'CREATED', payment_id: null };
+
+    const result = await customerCancelOrder(ORDER_ID, USER_ID);
+
+    expect(result.ok).toBe(false);
+    expect(cancelMock).not.toHaveBeenCalled();
+    expect(state.orderRow.status).toBe('PAID');
+    expect(reverseMock).not.toHaveBeenCalled();
+    expect(notifyCancelledMock).not.toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });

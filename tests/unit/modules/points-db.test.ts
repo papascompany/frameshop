@@ -31,6 +31,13 @@ type FakeState = {
   redeemRpcFails: boolean;
   pointsTxCalls: PointsTxCall[];
   orderRow: Record<string, unknown>;
+  /** 원장 사전 조회가 경쟁으로 아직 아무것도 못 보는 상황(check-then-insert 창). */
+  ledgerCheckBlind: boolean;
+  /** migration 044 user_points_ledger_order_type_uniq 를 RPC 에서 흉내(23505). */
+  enforceLedgerUnique: boolean;
+  /** getOrder 가 confirmed_at 을 null 로 본다(동시 구매확정의 오래된 읽기). */
+  staleConfirmedAtRead: boolean;
+  snapshotUpdates: number;
 };
 
 const state: FakeState = {
@@ -42,6 +49,10 @@ const state: FakeState = {
   redeemRpcFails: false,
   pointsTxCalls: [],
   orderRow: {},
+  ledgerCheckBlind: false,
+  enforceLedgerUnique: false,
+  staleConfirmedAtRead: false,
+  snapshotUpdates: 0,
 };
 
 const probes = { points: true };
@@ -64,6 +75,9 @@ function makeLedgerBuilder(): LedgerBuilder {
           data: null,
           error: { message: 'ledger read failed (simulated)' },
         });
+      }
+      if (state.ledgerCheckBlind) {
+        return Promise.resolve({ data: [], error: null });
       }
       const rows = state.ledger
         .filter(
@@ -105,15 +119,45 @@ function makeChain(table: string) {
     return {
       select: () => ({
         eq: () => ({
-          maybeSingle: () => Promise.resolve({ data: state.orderRow, error: null }),
+          maybeSingle: () =>
+            Promise.resolve({
+              data: state.staleConfirmedAtRead
+                ? { ...state.orderRow, confirmed_at: null }
+                : { ...state.orderRow },
+              error: null,
+            }),
         }),
       }),
-      update: (patch: Record<string, unknown>) => ({
-        eq: () => {
-          Object.assign(state.orderRow, patch);
-          return Promise.resolve({ error: null });
-        },
-      }),
+      update: (patch: Record<string, unknown>) => {
+        if ('confirmed_at' in patch) {
+          // confirmPurchase CAS: .eq('id').is('confirmed_at', null).select('id') —
+          // applies only while the real row is still unconfirmed.
+          return {
+            eq: () => ({
+              is: (col: string, val: null) => ({
+                select: () => {
+                  if (state.orderRow[col] !== val) {
+                    return Promise.resolve({ data: [], error: null });
+                  }
+                  Object.assign(state.orderRow, patch);
+                  return Promise.resolve({
+                    data: [{ id: state.orderRow.id }],
+                    error: null,
+                  });
+                },
+              }),
+            }),
+          };
+        }
+        // accruePointsForOrder points_accrued snapshot: .update().eq('id').
+        return {
+          eq: () => {
+            state.snapshotUpdates += 1;
+            Object.assign(state.orderRow, patch);
+            return Promise.resolve({ error: null });
+          },
+        };
+      },
     };
   }
   if (table === 'order_items') {
@@ -140,6 +184,26 @@ vi.mock('@/lib/supabase/service', () => ({
           return {
             data: null,
             error: { message: 'user_profiles_points_balance_check violated' },
+          };
+        }
+        if (
+          state.enforceLedgerUnique &&
+          call.p_order_id != null &&
+          state.ledger.some(
+            (r) =>
+              r.order_id === call.p_order_id &&
+              r.transaction_type === call.p_type,
+          )
+        ) {
+          // Ledger INSERT violates the partial UNIQUE → whole RPC tx rolls back
+          // (balance untouched).
+          return {
+            data: null,
+            error: {
+              code: '23505',
+              message:
+                'duplicate key value violates unique constraint "user_points_ledger_order_type_uniq"',
+            },
           };
         }
         state.pointsBalance += call.p_delta;
@@ -205,6 +269,10 @@ beforeEach(() => {
   state.redeemRpcFails = false;
   state.pointsTxCalls = [];
   state.orderRow = makeDeliveredOrderRow();
+  state.ledgerCheckBlind = false;
+  state.enforceLedgerUnique = false;
+  state.staleConfirmedAtRead = false;
+  state.snapshotUpdates = 0;
   probes.points = true;
 });
 
@@ -323,6 +391,26 @@ describe('accruePointsForOrder — earn 멱등 (FS-EC-02)', () => {
     });
     expect(state.pointsTxCalls).toHaveLength(0);
   });
+
+  it('23505(044 UNIQUE) 는 멱등 성공 — 사전 조회를 통과한 경쟁 호출도 이중 적립하지 않는다', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { accruePointsForOrder } = await import('@/lib/db/points');
+    state.enforceLedgerUnique = true;
+
+    const first = await accruePointsForOrder(ORDER_ID, USER_ID, 28_000);
+    // 경쟁: 두 번째 호출의 사전 조회가 첫 원장 행을 아직 못 봤다.
+    state.ledgerCheckBlind = true;
+    const second = await accruePointsForOrder(ORDER_ID, USER_ID, 28_000);
+
+    expect(first).toEqual({ ok: true, accrued: 280 });
+    expect(second).toEqual({ ok: true, accrued: 0 });
+    expect(state.pointsBalance).toBe(1000 + 280);
+    expect(state.ledger.filter((r) => r.transaction_type === 'ACCRUAL')).toHaveLength(1);
+    // 진 호출은 스냅샷을 다시 쓰지 않는다.
+    expect(state.snapshotUpdates).toBe(1);
+    expect(errSpy).not.toHaveBeenCalled();
+    errSpy.mockRestore();
+  });
 });
 
 // ---------- confirmPurchase wiring ----------
@@ -363,5 +451,38 @@ describe('confirmPurchase — earn 연결 (FS-EC-02)', () => {
     expect(state.orderRow.points_accrued).toBeUndefined();
     expect(errSpy).toHaveBeenCalled();
     errSpy.mockRestore();
+  });
+});
+
+describe('confirmPurchase — 동시성 (보안 검토 P1-1, confirmed_at CAS)', () => {
+  it('이중 호출(둘 다 미확정으로 읽음) → confirmed_at CAS 진 쪽은 적립을 건너뛴다', async () => {
+    const { confirmPurchase } = await import('@/lib/db/order');
+    // 두 요청 모두 confirmed_at null 을 읽었고, 원장 사전 조회도 경쟁으로 비어 있다 —
+    // CAS 만이 이중 적립을 막는 상황.
+    state.staleConfirmedAtRead = true;
+    state.ledgerCheckBlind = true;
+
+    const first = await confirmPurchase(ORDER_ID, USER_ID);
+    const second = await confirmPurchase(ORDER_ID, USER_ID);
+
+    expect(first).toEqual({ ok: true });
+    expect(second).toEqual({ ok: true });
+    expect(state.pointsTxCalls.filter((c) => c.p_type === 'ACCRUAL')).toHaveLength(1);
+    expect(state.pointsBalance).toBe(1000 + 280);
+  });
+
+  it('동시 호출(Promise.all) → 적립 정확히 1회', async () => {
+    const { confirmPurchase } = await import('@/lib/db/order');
+    state.enforceLedgerUnique = true;
+
+    const results = await Promise.all([
+      confirmPurchase(ORDER_ID, USER_ID),
+      confirmPurchase(ORDER_ID, USER_ID),
+    ]);
+
+    expect(results).toEqual([{ ok: true }, { ok: true }]);
+    expect(state.orderRow.confirmed_at).not.toBeNull();
+    expect(state.ledger.filter((r) => r.transaction_type === 'ACCRUAL')).toHaveLength(1);
+    expect(state.pointsBalance).toBe(1000 + 280);
   });
 });
