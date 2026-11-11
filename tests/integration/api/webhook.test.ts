@@ -192,6 +192,7 @@ beforeEach(async () => {
   const { _resetRateLimit } = await import('@/lib/ratelimit');
   _resetRateLimit();
   vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'info').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -456,5 +457,43 @@ describe('PARTIAL_CANCELED · 감사 기록', () => {
     expect(res.status).toBe(200);
     expect(state.auditInserts).toHaveLength(0);
     expect(state.transitionCalls).toHaveLength(1);
+  });
+});
+
+describe('감사 본문 저장 상한 (보안 검토 P2-4·P2-5)', () => {
+  it('Toss 가 모르는 결제(위조 가능)는 본문을 저장하지 않는다', async () => {
+    const { TossApiError } = await import('@/lib/payment/toss');
+    state.toss = new TossApiError(404, 'NOT_FOUND_PAYMENT', 'not found');
+    const res = await post(delivery({ junk: 'x'.repeat(50_000) }));
+    expect(res.status).toBe(200);
+    expect(state.auditInserts).toHaveLength(1);
+    expect(state.auditInserts[0]).toMatchObject({ outcome: 'payment_not_found' });
+    expect(state.auditInserts[0].raw_payload).toEqual({ omitted: 'unverified_delivery' });
+  });
+
+  it('주문을 찾지 못한 수신도 본문을 저장하지 않는다', async () => {
+    state.order = null;
+    await post(delivery({ junk: 'y'.repeat(100) }));
+    expect(state.auditInserts[0]).toMatchObject({ outcome: 'order_not_found' });
+    expect(state.auditInserts[0].raw_payload).toEqual({ omitted: 'unverified_delivery' });
+  });
+
+  it('확인된 수신이라도 16KB 를 넘는 본문은 크기만 남긴다', async () => {
+    await post(delivery({ padding: 'z'.repeat(20_000) }));
+    const raw = state.auditInserts[0].raw_payload as { omitted: string; bytes: number };
+    expect(raw.omitted).toBe('too_large');
+    expect(raw.bytes).toBeGreaterThan(16 * 1024);
+  });
+
+  it('상한 이내의 확인된 수신은 원본 본문을 그대로 저장한다', async () => {
+    const body = delivery();
+    await post(body);
+    expect(state.auditInserts[0].raw_payload).toEqual(JSON.parse(body));
+  });
+
+  it('payment_webhook 감사 로그는 프로덕션에서 제거되지 않는 console.info 로 남긴다', async () => {
+    await post(delivery());
+    expect(console.info).toHaveBeenCalledWith(expect.stringContaining('"event":"payment_webhook"'));
+    expect(console.log).not.toHaveBeenCalledWith(expect.stringContaining('payment_webhook'));
   });
 });

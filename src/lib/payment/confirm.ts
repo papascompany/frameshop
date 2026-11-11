@@ -3,7 +3,9 @@
  *
  * Flow (security-critical, see ADR + payment.md):
  *   1. Look up the order by orderId (== orderNo). If missing → ORDER_NOT_FOUND.
- *   2. If already PAID → ALREADY_PAID (idempotent).
+ *   2. If already PAID (or past it) → ok + alreadyPaid (idempotent).
+ *      Any other non-CREATED status (CANCELLED/REFUNDED) → ORDER_NOT_PAYABLE,
+ *      Toss confirm API is NOT called.
  *   3. Compare `order.total_price === amount`. Mismatch → AMOUNT_MISMATCH,
  *      Toss confirm API is NOT called.
  *   4. Toss confirm API call (server secret key).
@@ -19,13 +21,14 @@
 import 'server-only';
 import type { PaymentKey } from '@/types/common';
 import type { ConfirmPaymentInput, ConfirmResult } from '@/types/payment';
-import type { OrderWithItems } from '@/types/order';
+import type { OrderStatus, OrderWithItems } from '@/types/order';
 import { tossClient, TossApiError, type TossConfirmResponse } from './toss';
 import { getOrder, transitionIfStatus, transitionTo } from '../db/order';
 import { consumeCouponByCode } from '../db/coupons';
 import { enqueuePrintRender } from '../render/enqueue';
 import { getServiceRoleSupabase } from '../supabase/service';
 import { notifyNewOrder } from '../notify';
+import { AMOUNT_MISMATCH_MESSAGE, ORDER_NOT_PAYABLE_MESSAGE } from './error-copy';
 
 export type ConfirmOptions = {
   /**
@@ -40,6 +43,18 @@ export type ConfirmOptions = {
 /** Toss: 이미 승인된 결제에 승인 API 를 다시 호출하면 400 ALREADY_PROCESSED_PAYMENT. */
 const ALREADY_PROCESSED = 'ALREADY_PROCESSED_PAYMENT';
 
+/**
+ * Statuses that can only be reached through PAID — a re-confirm is the
+ * idempotent success path and must not call Toss again (a fresh paymentKey
+ * would be a second charge that the state machine then refuses to record).
+ */
+const ALREADY_PAID_STATUSES: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
+  'PAID',
+  'IN_PRODUCTION',
+  'SHIPPED',
+  'DELIVERED',
+]);
+
 export async function confirmPayment(
   input: ConfirmPaymentInput,
   opts: ConfirmOptions = {},
@@ -49,20 +64,44 @@ export async function confirmPayment(
     return { ok: false, code: 'ORDER_NOT_FOUND', message: 'Order not found' };
   }
 
-  if (order.status === 'PAID') {
+  if (ALREADY_PAID_STATUSES.has(order.status)) {
     return {
       ok: true,
       orderNo: order.orderNo,
-      paymentKey: order.paymentId ?? input.paymentKey,
+      // Echo the caller's key, never the stored one: this branch runs before
+      // any amount/key check, so returning order.paymentId would hand the real
+      // paymentKey of a paid order to anyone who knows its orderNo.
+      paymentKey: input.paymentKey,
       alreadyPaid: true, // distinguishes idempotent re-confirm from fresh PAID
     };
   }
 
+  // Only a CREATED order may be charged. A CANCELLED/REFUNDED order would
+  // otherwise reach Toss, get approved (customer charged), and then fail the
+  // PAID transition after the payment_events lock — money taken, order dead.
+  if (order.status !== 'CREATED') {
+    return {
+      ok: false,
+      code: 'ORDER_NOT_PAYABLE',
+      message: ORDER_NOT_PAYABLE_MESSAGE,
+    };
+  }
+
   if (order.totalPrice !== input.amount) {
+    // Amounts go to the server log only — the response stays generic so the
+    // endpoint can't be used to read an order's total by its orderNo.
+    console.warn(
+      JSON.stringify({
+        event: 'payment_amount_mismatch',
+        orderNo: order.orderNo,
+        expected: order.totalPrice,
+        received: input.amount,
+      }),
+    );
     return {
       ok: false,
       code: 'AMOUNT_MISMATCH',
-      message: `expected ${order.totalPrice}, got ${input.amount}`,
+      message: AMOUNT_MISMATCH_MESSAGE,
     };
   }
 
@@ -364,7 +403,8 @@ export async function issueCashReceiptIfEligible(
       return;
     }
 
-    console.log(
+    // console.info: production builds strip console.log (removeConsole).
+    console.info(
       JSON.stringify({
         event: 'cash_receipt_issued',
         ctx: {

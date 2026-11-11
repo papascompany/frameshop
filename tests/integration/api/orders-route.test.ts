@@ -99,7 +99,7 @@ function makeBody(overrides: Record<string, unknown> = {}): Record<string, unkno
 
 async function call(body: Record<string, unknown>): Promise<{
   status: number;
-  body: { ok: boolean; code?: string; order?: unknown };
+  body: { ok: boolean; code?: string; message?: string; order?: unknown };
 }> {
   // 테스트 환경(NODE_ENV !== 'production')에서는 Origin/Sec-Fetch-Site 부재가
   // same-origin 으로 통과한다(isSameOrigin 계약).
@@ -111,12 +111,14 @@ async function call(body: Record<string, unknown>): Promise<{
   const res = await POST(req);
   return {
     status: res.status,
-    body: (await res.json()) as { ok: boolean; code?: string; order?: unknown },
+    body: (await res.json()) as { ok: boolean; code?: string; message?: string; order?: unknown },
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
   mockState.user = { id: 'user-1' };
   mockState.cookies = {};
   createOrderMock.mockResolvedValue(FAKE_ORDER);
@@ -226,5 +228,67 @@ describe('POST /api/orders — 레이트리밋 키 (Sec-2)', () => {
 
     const key = checkRateMock.mock.calls[0][1];
     expect(key).toBe('cookie-sid');
+  });
+});
+
+describe('POST /api/orders — 주문자 신원은 세션만 신뢰 (보안 검토 P1-4)', () => {
+  it('비로그인 요청의 body userId 는 무시하고 userId=null 로 전달한다', async () => {
+    mockState.user = null;
+
+    const { status } = await call(
+      makeBody({ userId: '99999999-9999-4999-8999-999999999999', redeemPoints: 5000, couponCode: 'WELCOME5' }),
+    );
+
+    expect(status).toBe(200);
+    const input = createOrderMock.mock.calls[0][0] as CreateOrderInput;
+    // 피해자 계정으로 적립금 차감·1인1회 쿠폰 소진·주문 귀속이 일어나면 안 된다.
+    expect(input.userId).toBeNull();
+  });
+
+  it('로그인 요청은 body userId 가 달라도 세션 userId 를 쓴다', async () => {
+    mockState.user = { id: 'user-1' };
+
+    await call(makeBody({ userId: '99999999-9999-4999-8999-999999999999' }));
+
+    const input = createOrderMock.mock.calls[0][0] as CreateOrderInput;
+    expect(input.userId).toBe('user-1');
+  });
+});
+
+describe('POST /api/orders — 오류 원문 비노출 (보안 검토 P2-7)', () => {
+  it('PHOTO_OWNERSHIP 의 남의 사진 URL 은 응답에 싣지 않는다(로그에만)', async () => {
+    const leaked = 'Photo(s) not owned by caller: https://x.supabase.co/storage/v1/object/photos/victim/a.jpg';
+    createOrderMock.mockRejectedValue(new CreateOrderError('PHOTO_OWNERSHIP', leaked));
+
+    const { status, body } = await call(makeBody());
+
+    expect(status).toBe(403);
+    expect(body.code).toBe('PHOTO_OWNERSHIP');
+    expect(body.message).not.toContain('supabase.co');
+    expect(body.message).not.toContain('victim');
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('victim'));
+  });
+
+  it('SEQUENCE_FAILED 의 DB 오류 원문은 응답에 싣지 않는다', async () => {
+    createOrderMock.mockRejectedValue(
+      new CreateOrderError('SEQUENCE_FAILED', 'duplicate key value violates unique constraint "orders_order_no_key"'),
+    );
+
+    const { status, body } = await call(makeBody());
+
+    expect(status).toBe(500);
+    expect(body.code).toBe('SEQUENCE_FAILED');
+    expect(body.message).not.toContain('orders_order_no_key');
+  });
+
+  it('예상치 못한 예외도 원문 대신 일반 문구로 500 INTERNAL', async () => {
+    createOrderMock.mockRejectedValue(new Error('relation "public.orders" does not exist'));
+
+    const { status, body } = await call(makeBody());
+
+    expect(status).toBe(500);
+    expect(body.code).toBe('INTERNAL');
+    expect(body.message).not.toContain('relation');
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('public.orders'));
   });
 });

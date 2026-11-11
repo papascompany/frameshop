@@ -88,7 +88,7 @@ export async function sweepUnconfirmedOrders(
   const outcomes: SweepOutcome[] = [];
   for (const candidate of candidates) {
     const outcome = await sweepOne(candidate, now);
-    console.log(JSON.stringify({ event: 'payment_sweep_order', ...outcome }));
+    console.info(JSON.stringify({ event: 'payment_sweep_order', ...outcome }));
     outcomes.push(outcome);
   }
   return { scanned: candidates.length, outcomes };
