@@ -51,7 +51,13 @@ export type ConfirmErrorCode =
    * Additive (2026-11-11, security review P1-2): the order is CANCELLED or
    * REFUNDED, so confirm refuses BEFORE calling Toss — no charge is made.
    */
-  | 'ORDER_NOT_PAYABLE';
+  | 'ORDER_NOT_PAYABLE'
+  /**
+   * Additive (2026-11-12, security review P1-3): the order's coupon was already
+   * used by another order (member) or its usage limit is exhausted, so confirm
+   * refuses BEFORE calling Toss — no charge is made.
+   */
+  | 'COUPON_UNAVAILABLE';
 
 export type ConfirmResult =
   | { ok: true; orderNo: OrderNo; paymentKey: PaymentKey; alreadyPaid?: boolean }

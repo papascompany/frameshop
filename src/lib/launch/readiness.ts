@@ -130,10 +130,11 @@ function describeKeyState(name: string, info: TossKeyInfo): string {
 }
 
 /**
- * 미적용이어도 기능이 동작하는 마이그레이션(043 웹훅 감사 로그 — 기록만 생략) → warn.
+ * 미적용이어도 기능이 동작하는 마이그레이션 → warn. 043 웹훅 감사 로그(기록만 생략),
+ * 045 쿠폰 주문 연결(앱 방어선은 동작 — 동시 주문·결제 경합 차단과 비회원 원장만 빠짐).
  * 그 외는 미적용 시 해당 기능이 꺼진다 → blocker.
  */
-const OPTIONAL_MIGRATIONS: ReadonlySet<string> = new Set(['043']);
+const OPTIONAL_MIGRATIONS: ReadonlySet<string> = new Set(['043', '045']);
 
 const PLACEHOLDER_MARK = '확정 필요';
 

@@ -272,7 +272,7 @@ describe('customerCancelOrder — 쿠폰 복원 위임 (FS-X-FIX-A P1-1)', () =>
     expect(result).toEqual({ ok: true });
     expect(state.orderRow.status).toBe('CANCELLED');
     expect(releaseCouponMock).toHaveBeenCalledTimes(1);
-    expect(releaseCouponMock).toHaveBeenCalledWith('WELCOME5', USER_ID);
+    expect(releaseCouponMock).toHaveBeenCalledWith('WELCOME5', USER_ID, ORDER_ID);
   });
 
   it('미결제(CREATED) 주문 취소는 쿠폰을 복원하지 않는다 (애초에 소비 전)', async () => {
