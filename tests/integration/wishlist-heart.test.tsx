@@ -8,11 +8,12 @@
  *  4. 컨텍스트/initial 없이 단독 렌더(상세 페이지)면 마운트 후 개별
  *     GET ?productIds=<id> 하이드레이션.
  *  5. WishlistHydrator 안의 하트 N개는 배치 GET **1회**로 하이드레이션된다.
+ *  6. 로그인 쿠키(`sb-*`)가 없으면 GET 을 보내지 않는다(비로그인 401·콘솔 에러 방지).
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WishlistHeart } from '@/components/wishlist/WishlistHeart';
 import { WishlistHydrator } from '@/components/wishlist/WishlistHydrator';
 import koMessages from '@/messages/ko.json';
@@ -43,9 +44,19 @@ function renderWithIntl(ui: React.ReactElement) {
   );
 }
 
+/** 로그인 상태 힌트 — 하트 하이드레이션은 `sb-*` 쿠키가 있을 때만 GET 을 보낸다. */
+const AUTH_COOKIE = 'sb-test-auth-token';
+function setAuthCookie() {
+  document.cookie = `${AUTH_COOKIE}=1; path=/`;
+}
+function clearAuthCookie() {
+  document.cookie = `${AUTH_COOKIE}=; path=/; max-age=0`;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   pushMock.mockReset();
+  clearAuthCookie();
 });
 
 describe('<WishlistHeart> 낙관 토글', () => {
@@ -141,6 +152,10 @@ describe('<WishlistHeart> 낙관 토글', () => {
 });
 
 describe('<WishlistHeart> 하이드레이션', () => {
+  beforeEach(() => {
+    setAuthCookie();
+  });
+
   it('단독 렌더(상세 페이지)면 마운트 후 개별 GET ?productIds= 로 상태를 채운다', async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse({ ok: true, wishlisted: [PRODUCT_A] }),
@@ -188,7 +203,7 @@ describe('<WishlistHeart> 하이드레이션', () => {
     );
   });
 
-  it('배치 GET 이 401(미로그인)이어도 하트는 조용히 비활성 상태로 정착한다', async () => {
+  it('배치 GET 이 401(만료된 세션)이어도 하트는 조용히 비활성 상태로 정착한다', async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse({ ok: false, code: 'UNAUTHENTICATED' }, 401),
     );
@@ -206,5 +221,37 @@ describe('<WishlistHeart> 하이드레이션', () => {
       'false',
     );
     expect(pushMock).not.toHaveBeenCalled(); // GET 401 은 리다이렉트하지 않는다
+  });
+});
+
+describe('<WishlistHeart> 비로그인(로그인 쿠키 없음)', () => {
+  it('단독 렌더여도 GET 을 보내지 않고 비활성 하트로 남는다', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, wishlisted: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithIntl(<WishlistHeart productId={PRODUCT_A} />);
+
+    // 마이크로태스크·이펙트가 모두 돈 뒤에도 요청 0회.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('wishlist-heart')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('Hydrator 도 배치 GET 없이 바로 "위시 없음"으로 정착한다', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, wishlisted: [PRODUCT_A] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithIntl(
+      <WishlistHydrator productIds={[PRODUCT_A, PRODUCT_B]}>
+        <WishlistHeart productId={PRODUCT_A} />
+        <WishlistHeart productId={PRODUCT_B} />
+      </WishlistHydrator>,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).not.toHaveBeenCalled();
+    for (const heart of screen.getAllByTestId('wishlist-heart')) {
+      expect(heart).toHaveAttribute('aria-pressed', 'false');
+    }
   });
 });

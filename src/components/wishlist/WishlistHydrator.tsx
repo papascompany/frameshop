@@ -21,6 +21,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { hasAuthCookieHint } from '@/lib/supabase/session-hint';
 
 export type WishlistHydration = {
   /** 배치 조회가 정착(성공/실패 불문)했는지. false 면 하트는 initial 값 유지. */
@@ -57,6 +58,12 @@ export function WishlistHydrator({ productIds, children }: Props) {
   useEffect(() => {
     if (idsKey.length === 0 || fetchedRef.current) return;
     fetchedRef.current = true;
+    // 비로그인은 조회해도 401 뿐 — 요청·콘솔 에러 없이 바로 "위시 없음"으로 정착.
+    // (setState 를 이펙트 본문에서 동기 호출하지 않도록 마이크로태스크로 미룬다.)
+    if (!hasAuthCookieHint()) {
+      void Promise.resolve().then(() => setState(READY_EMPTY));
+      return;
+    }
     let cancelled = false;
     fetch(`/api/account/wishlist?productIds=${encodeURIComponent(idsKey)}`)
       .then((res) =>

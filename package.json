@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --reporter=verbose",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "smoke:launch": "bash scripts/launch-smoke.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

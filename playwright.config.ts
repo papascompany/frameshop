@@ -1,6 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000';
+// E2E_BASE_URL(런칭 스모크 tests/e2e/launch.spec.ts)도 외부 대상으로 인식해
+// 한 변수만으로 실행되게 한다 — 없으면 로컬 dev 서버.
+const baseURL =
+  process.env.PLAYWRIGHT_BASE_URL ?? process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 const isExternalUrl =
   baseURL.startsWith('https://') ||
   (baseURL.startsWith('http://') && !baseURL.includes('localhost'));
