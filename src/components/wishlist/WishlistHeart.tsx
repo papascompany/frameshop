@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/cn';
+import { hasAuthCookieHint } from '@/lib/supabase/session-hint';
 import { useWishlistHydration } from './WishlistHydrator';
 
 type Props = {
@@ -50,6 +51,8 @@ export function WishlistHeart({ productId, initialWishlisted, className }: Props
   useEffect(() => {
     if (skipSelfFetch || fetchedRef.current) return;
     fetchedRef.current = true;
+    // 비로그인은 조회해도 401 뿐 — 요청 없이 비활성 하트 유지(클릭 시 401 처리는 그대로).
+    if (!hasAuthCookieHint()) return;
     let cancelled = false;
     fetch(`/api/account/wishlist?productIds=${encodeURIComponent(productId)}`)
       .then((res) =>

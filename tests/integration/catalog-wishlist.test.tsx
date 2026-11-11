@@ -11,7 +11,7 @@
 
 import { render, screen, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import koMessages from '@/messages/ko.json';
 import { asBrand } from '@/types/common';
 import type { CategoryId, ProductId } from '@/types/common';
@@ -86,6 +86,14 @@ afterEach(() => {
 });
 
 describe('catalog grid × wishlist heart', () => {
+  // 하트 배치 조회는 로그인 쿠키(`sb-*`)가 있을 때만 나간다 — 로그인 상태로 고정.
+  beforeEach(() => {
+    document.cookie = 'sb-test-auth-token=1; path=/';
+  });
+  afterEach(() => {
+    document.cookie = 'sb-test-auth-token=; path=/; max-age=0';
+  });
+
   it('카드마다 하트가 렌더되고 배치 GET 은 그리드 전체 productIds 로 1회만 나간다', async () => {
     getProductsMock.mockResolvedValue(
       listResult([
