@@ -50,6 +50,7 @@ export default async function PaymentSuccessPage({
         orderId={sp.orderId}
         amount={Number(sp.amount)}
         initialMessage={tossErrorCopy(result.code, result.message)}
+        initialCode={result.code}
       />
     </Container>
   );
