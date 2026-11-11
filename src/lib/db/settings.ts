@@ -9,6 +9,10 @@
  * deleteSetting 은 같은 태그를 즉시 만료시켜 저장 직후 결제 경로가 새 값을 쓴다.
  * 캐시 계층이 실패하면(요청 컨텍스트 밖·incrementalCache 부재 등) DB 를 직접
  * 조회한다 — 캐시 장애가 결제를 막지 않는다. DB 오류 결과는 캐시하지 않는다.
+ *
+ * 비밀값(UNCACHED_SECRET_KEYS)은 캐시하지 않는다 — Next 데이터 캐시(Vercel Data
+ * Cache·자체 호스팅 `.next/cache`)에 평문으로 남기지 않기 위해서다. 이 키들은
+ * 결제·발송 시점에만 읽혀 DB 왕복 비용이 작다.
  */
 
 import 'server-only';
@@ -23,6 +27,15 @@ export const APP_SETTINGS_TAG = 'app-settings';
  * 결제 키를 다루므로 짧게 둔다.
  */
 const SETTINGS_REVALIDATE_SECONDS = 60;
+
+/** 캐시를 거치지 않고 항상 DB 에서 읽는 비밀 키(설정 화면의 password 필드 + Slack 웹훅). */
+const UNCACHED_SECRET_KEYS: ReadonlySet<string> = new Set([
+  'toss_secret_key',
+  'toss_webhook_secret',
+  'resend_api_key',
+  'google_client_secret',
+  'slack_webhook_url',
+]);
 
 /** DB 조회 실패 — 캐시 계층 실패와 구분해 직접 조회 재시도 없이 null/{} 처리. */
 class SettingsQueryError extends Error {}
@@ -93,6 +106,14 @@ function invalidateSettingsCache(): void {
 // ─── 단건 조회 ──────────────────────────────────────────────────────────────
 
 export async function getSetting(key: string): Promise<string | null> {
+  if (UNCACHED_SECRET_KEYS.has(key)) {
+    try {
+      return await fetchSetting(key);
+    } catch (err) {
+      console.error('[settings] getSetting error:', errorMessage(err));
+      return null;
+    }
+  }
   try {
     return await getSettingCached(key);
   } catch (err) {
@@ -118,8 +139,20 @@ export async function getSettings(
   if (keys.length === 0) return {};
   // 순서·중복과 무관하게 같은 캐시 항목을 쓰도록 정규화.
   const normalized = [...new Set(keys)].sort();
+  const secretKeys = normalized.filter((key) => UNCACHED_SECRET_KEYS.has(key));
+  const plainKeys = normalized.filter((key) => !UNCACHED_SECRET_KEYS.has(key));
+  const [plain, secrets] = await Promise.all([
+    getPlainSettings(plainKeys),
+    fetchSettingsOrEmpty(secretKeys),
+  ]);
+  return { ...plain, ...secrets };
+}
+
+/** 비밀이 아닌 키 — 캐시 경유, 캐시 계층 실패 시 DB 직접 조회. */
+async function getPlainSettings(keys: string[]): Promise<Record<string, string>> {
+  if (keys.length === 0) return {};
   try {
-    return await getSettingsCached(normalized);
+    return await getSettingsCached(keys);
   } catch (err) {
     if (err instanceof SettingsQueryError) {
       console.error('[settings] getSettings error:', err.message);
@@ -127,8 +160,13 @@ export async function getSettings(
     }
     // 캐시 계층 실패 → DB 직접 조회로 폴백.
   }
+  return fetchSettingsOrEmpty(keys);
+}
+
+async function fetchSettingsOrEmpty(keys: string[]): Promise<Record<string, string>> {
+  if (keys.length === 0) return {};
   try {
-    return await fetchSettings(normalized);
+    return await fetchSettings(keys);
   } catch (err) {
     console.error('[settings] getSettings error:', errorMessage(err));
     return {};

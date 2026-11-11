@@ -25,7 +25,8 @@ export type AdminNavKey =
   | 'artworks'
   | 'landing'
   | 'shipping'
-  | 'settings';
+  | 'settings'
+  | 'launch';
 
 export type AdminNavSectionId = 'main' | 'catalog' | 'ops' | 'settings';
 
@@ -75,6 +76,8 @@ export const ADMIN_NAV: readonly AdminNavItem[] = [
 
   { key: 'shipping', href: '/admin/shipping', label: '배송 설정', section: 'settings', tileDescription: 'STANDARD/PICKUP/QUICK 요금' },
   { key: 'settings', href: '/admin/settings', label: '설정', section: 'settings', inBottomNav: true },
+  // 런칭 준비 점검(읽기 전용) — 하단바 미포함(5개 만석), 타일 미노출.
+  { key: 'launch', href: '/admin/launch', label: '런칭 점검', section: 'settings' },
 ];
 
 /** 섹션별 항목(노출 순서 보존). */

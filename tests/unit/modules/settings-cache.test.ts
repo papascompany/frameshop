@@ -174,17 +174,35 @@ describe('조회 캐시', () => {
 });
 
 describe('저장 직후 Toss 결제 경로가 새 키를 쓴다', () => {
-  it('setSetting → 태그 만료 → getEffectiveTossSecretKey 가 새 값', async () => {
+  it('시크릿 키는 캐시하지 않는다 — 읽을 때마다 DB, 저장 직후 새 값', async () => {
     h.table.set('toss_secret_key', 'test_sk_old');
     await expect(getEffectiveTossSecretKey()).resolves.toBe('test_sk_old');
 
-    // 무효화 없이 DB 만 바뀌면 캐시 값이 유지된다(캐시가 실제로 동작함을 확인).
-    h.table.set('toss_secret_key', 'test_sk_bypass');
-    await expect(getEffectiveTossSecretKey()).resolves.toBe('test_sk_old');
+    // 무효화 없이 DB 만 바뀌어도 바로 새 값 — 데이터 캐시에 평문으로 남지 않는다.
+    h.table.set('toss_secret_key', 'test_sk_direct');
+    await expect(getEffectiveTossSecretKey()).resolves.toBe('test_sk_direct');
+    expect(h.queryCount).toBe(2);
 
     await setSetting('toss_secret_key', 'live_sk_new');
     expect(h.updateTagCalls).toEqual([APP_SETTINGS_TAG]);
     await expect(getEffectiveTossSecretKey()).resolves.toBe('live_sk_new');
+  });
+
+  it('getSettings 는 일반 키만 캐시하고 시크릿 키는 매번 DB 에서 읽는다', async () => {
+    h.table.set('mail_from', 'A <a@example.com>');
+    h.table.set('resend_api_key', 're_old');
+    await expect(getSettings(['mail_from', 'resend_api_key'])).resolves.toEqual({
+      mail_from: 'A <a@example.com>',
+      resend_api_key: 're_old',
+    });
+
+    // 무효화 없이 DB 를 바꾸면: 일반 키는 캐시 값 유지, 시크릿 키는 새 값.
+    h.table.set('mail_from', 'B <b@example.com>');
+    h.table.set('resend_api_key', 're_new');
+    await expect(getSettings(['mail_from', 'resend_api_key'])).resolves.toEqual({
+      mail_from: 'A <a@example.com>',
+      resend_api_key: 're_new',
+    });
   });
 
   it('setSetting → getEffectiveTossClientKey 도 새 값', async () => {
