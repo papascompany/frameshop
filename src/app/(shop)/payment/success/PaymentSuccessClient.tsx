@@ -25,6 +25,7 @@ type Props = {
  */
 const NOT_CHARGED_CODES: ReadonlySet<string> = new Set([
   'ORDER_NOT_PAYABLE',
+  'COUPON_UNAVAILABLE',
   'ORDER_NOT_FOUND',
   'AMOUNT_MISMATCH',
   'BAD_INPUT',

@@ -62,8 +62,16 @@ const mockState: {
   tossCancelCalls: string[];
   paymentEventsInsertError: { message: string; code: string } | null;
   /** FS-X-FIX-A P1-2: records every consumeCouponByCode call the route makes. */
-  couponConsumeCalls: Array<{ code: string; userId: string | null; orderNo: string }>;
+  couponConsumeCalls: Array<{
+    code: string;
+    userId: string | null;
+    orderNo: string;
+    orderId: string;
+  }>;
   couponConsumeResult: CouponConsumeResult;
+  /** Security review P1-3: pre-approval coupon guard (checkCouponPayable). */
+  couponCheckCalls: Array<{ code: string; userId: string | null; orderId: string }>;
+  couponCheckResult: { ok: true } | { ok: false; errorCode: string };
   /** Sweep stale-lock takeover CAS (transitionIfStatus). */
   casCalls: Array<{ orderId: string; from: string; to: string; paymentKey?: string }>;
   casResult: boolean;
@@ -79,6 +87,8 @@ const mockState: {
   paymentEventsInsertError: null,
   couponConsumeCalls: [],
   couponConsumeResult: { ok: true },
+  couponCheckCalls: [],
+  couponCheckResult: { ok: true },
   casCalls: [],
   casResult: true,
 };
@@ -89,9 +99,18 @@ vi.mock('@/lib/db/coupons', () => ({
     code: string,
     userId: string | null,
     orderNo: string,
+    orderId: string,
   ): Promise<CouponConsumeResult> => {
-    mockState.couponConsumeCalls.push({ code, userId, orderNo });
+    mockState.couponConsumeCalls.push({ code, userId, orderNo, orderId });
     return mockState.couponConsumeResult;
+  },
+  checkCouponPayable: async (
+    code: string,
+    userId: string | null,
+    orderId: string,
+  ) => {
+    mockState.couponCheckCalls.push({ code, userId, orderId });
+    return mockState.couponCheckResult;
   },
 }));
 
@@ -233,6 +252,8 @@ beforeEach(() => {
   mockState.paymentEventsInsertError = null;
   mockState.couponConsumeCalls = [];
   mockState.couponConsumeResult = { ok: true };
+  mockState.couponCheckCalls = [];
+  mockState.couponCheckResult = { ok: true };
   mockState.casCalls = [];
   mockState.casResult = true;
 });
@@ -465,8 +486,18 @@ describe('POST /api/payment/confirm — 쿠폰 소비 시점 이동 (FS-X-FIX-A 
     expect(res.status).toBe(200);
     // 전이가 먼저, 소비가 그 뒤 — 소비는 PAID 를 소유한 브랜치에서만 일어난다.
     expect(mockState.transitionCalls).toHaveLength(1);
+    // 소비는 이 주문(order id)을 원장에 남긴다 — 취소 시 이 주문 것만 복원(P1-3).
     expect(mockState.couponConsumeCalls).toEqual([
-      { code: 'WELCOME5', userId: 'user-1', orderNo: '20260512-0001' },
+      {
+        code: 'WELCOME5',
+        userId: 'user-1',
+        orderNo: '20260512-0001',
+        orderId: 'order-uuid-1',
+      },
+    ]);
+    // Toss 승인 전에 승인 직전 확인을 1회 거친다.
+    expect(mockState.couponCheckCalls).toEqual([
+      { code: 'WELCOME5', userId: 'user-1', orderId: 'order-uuid-1' },
     ]);
   });
 
@@ -549,6 +580,98 @@ describe('POST /api/payment/confirm — 쿠폰 소비 시점 이동 (FS-X-FIX-A 
     expect(mockState.transitionCalls).toHaveLength(1);
     expect(mockState.couponConsumeCalls).toHaveLength(1);
     errSpy.mockRestore();
+  });
+});
+
+describe('confirmPayment — 쿠폰 승인 직전 확인 (보안 검토 P1-3)', () => {
+  beforeEach(async () => {
+    const { _resetRateLimit } = await import('@/lib/ratelimit');
+    _resetRateLimit();
+  });
+
+  const COUPON_ORDER = {
+    id: 'order-uuid-2',
+    orderNo: '20260512-0002',
+    totalPrice: 12000,
+    status: 'CREATED' as const,
+    paymentId: null,
+    couponCode: 'WELCOME5',
+    userId: 'user-1',
+  };
+
+  function req(orderId = '20260512-0002'): Request {
+    return new Request('http://localhost/api/payment/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentKey: 'pk-coupon-guard', orderId, amount: 12000 }),
+    });
+  }
+
+  it('병렬 주문의 두 번째 결제: 쿠폰이 이미 쓰였으면 409 COUPON_UNAVAILABLE — Toss 승인·전이·소비 없음', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = { ...COUPON_ORDER };
+    mockState.couponCheckResult = { ok: false, errorCode: 'COUPON_ALREADY_USED' };
+
+    const res = await POST(req());
+    const body = (await res.json()) as { ok: boolean; code: string; message: string };
+
+    expect(res.status).toBe(409);
+    expect(body).toMatchObject({ ok: false, code: 'COUPON_UNAVAILABLE' });
+    expect(body.message).toContain('승인되지 않았습니다');
+    expect(mockState.couponCheckCalls).toEqual([
+      { code: 'WELCOME5', userId: 'user-1', orderId: 'order-uuid-2' },
+    ]);
+    // 청구 전 거부 — 고객 돈이 움직이지 않는다.
+    expect(mockState.tossConfirmCalls).toHaveLength(0);
+    expect(mockState.transitionCalls).toHaveLength(0);
+    expect(mockState.couponConsumeCalls).toHaveLength(0);
+    warnSpy.mockRestore();
+  });
+
+  it('비회원 한도 소진(COUPON_EXHAUSTED)도 같은 코드로 청구 전 거부', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = { ...COUPON_ORDER, userId: null };
+    mockState.couponCheckResult = { ok: false, errorCode: 'COUPON_EXHAUSTED' };
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(409);
+    expect(mockState.couponCheckCalls).toEqual([
+      { code: 'WELCOME5', userId: null, orderId: 'order-uuid-2' },
+    ]);
+    expect(mockState.tossConfirmCalls).toHaveLength(0);
+    warnSpy.mockRestore();
+  });
+
+  it('쿠폰 없는 주문은 확인하지 않는다', async () => {
+    const { POST } = await import('@/app/api/payment/confirm/route');
+    mockState.order = { ...COUPON_ORDER, couponCode: null };
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    expect(mockState.couponCheckCalls).toHaveLength(0);
+  });
+
+  it('스윕 인수(takeOverStaleLock)는 확인을 건너뛴다 — 이미 승인(청구)됐을 수 있는 결제를 묶지 않는다', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { confirmPayment } = await import('@/lib/payment/confirm');
+    mockState.order = { ...COUPON_ORDER };
+    mockState.couponCheckResult = { ok: false, errorCode: 'COUPON_ALREADY_USED' };
+
+    const result = await confirmPayment(
+      {
+        paymentKey: asBrand<PaymentKey>('pk-sweep'),
+        orderId: asBrand<OrderNo>('20260512-0002'),
+        amount: 12000,
+      },
+      { takeOverStaleLock: true },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockState.couponCheckCalls).toHaveLength(0);
+    expect(mockState.tossConfirmCalls).toHaveLength(1);
+    warnSpy.mockRestore();
   });
 });
 

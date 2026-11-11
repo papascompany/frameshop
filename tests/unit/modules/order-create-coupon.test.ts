@@ -45,7 +45,37 @@ const state = {
   redeemRpcFails: false,
   pointsTxCalls: [] as PointsTxCall[],
   insertedOrder: undefined as Record<string, unknown> | undefined,
+  /** migration 045 `uniq_orders_active_coupon_per_user` 적용 여부(페이크 INSERT 가 재현). */
+  activeCouponIndex: true,
 };
+
+/** 페이크 orders 테이블 — 대체(supersede) CAS·getOrder·045 인덱스 판정이 같은 행을 본다. */
+type FakeOrderRow = Record<string, unknown> & {
+  id: string;
+  order_no: string;
+  user_id: string | null;
+  status: string;
+  coupon_code: string | null;
+};
+let ordersDb: FakeOrderRow[] = [];
+
+const TERMINAL_STATUSES = ['CANCELLED', 'REFUNDED'];
+
+function makeFilterBuilder<T>(run: (filters: Record<string, unknown>) => T) {
+  const filters: Record<string, unknown> = {};
+  const builder = {
+    eq(col: string, val: unknown) {
+      filters[col] = val;
+      return builder;
+    },
+    run: () => run(filters),
+  };
+  return builder;
+}
+
+function matchOrder(o: FakeOrderRow, filters: Record<string, unknown>): boolean {
+  return Object.entries(filters).every(([k, v]) => o[k] === v);
+}
 
 const VARIANT_ID = '11111111-1111-1111-1111-111111111111';
 const PRODUCT_ID = '22222222-2222-2222-2222-222222222222';
@@ -86,34 +116,99 @@ function makeChain(table: string) {
                 error: { message: 'orders insert failed (simulated)' },
               });
             }
+            const couponCode = (row.coupon_code as string | undefined) ?? null;
+            const userId = (row.user_id as string | null | undefined) ?? null;
+            if (
+              state.activeCouponIndex &&
+              userId != null &&
+              couponCode != null &&
+              ordersDb.some(
+                (o) =>
+                  o.user_id === userId &&
+                  o.coupon_code === couponCode &&
+                  !TERMINAL_STATUSES.includes(o.status),
+              )
+            ) {
+              return Promise.resolve({
+                data: null,
+                error: {
+                  code: '23505',
+                  message:
+                    'duplicate key value violates unique constraint "uniq_orders_active_coupon_per_user"',
+                },
+              });
+            }
             state.insertedOrder = row;
-            return Promise.resolve({
-              data: {
-                id: 'order-uuid-1',
-                order_no: row.order_no,
-                user_id: row.user_id ?? null,
-                status: 'CREATED',
-                total_price: row.total_price,
-                shipping_fee: row.shipping_fee,
-                shipping_method: row.shipping_method,
-                payment_id: null,
-                tracking_number: null,
-                courier: null,
-                orderer: row.orderer,
-                shipping: row.shipping,
-                created_at: new Date().toISOString(),
-                paid_at: null,
-                shipped_at: null,
-              },
-              error: null,
-            });
+            const stored: FakeOrderRow = {
+              id: `order-uuid-${ordersDb.length + 1}`,
+              order_no: row.order_no as string,
+              user_id: userId,
+              status: 'CREATED',
+              total_price: row.total_price,
+              shipping_fee: row.shipping_fee,
+              shipping_method: row.shipping_method,
+              payment_id: null,
+              tracking_number: null,
+              courier: null,
+              orderer: row.orderer,
+              shipping: row.shipping,
+              created_at: new Date().toISOString(),
+              paid_at: null,
+              shipped_at: null,
+              coupon_code: couponCode,
+              coupon_discount: (row.coupon_discount as number | undefined) ?? 0,
+              points_redeemed: (row.points_redeemed as number | undefined) ?? 0,
+            };
+            ordersDb.push(stored);
+            return Promise.resolve({ data: { ...stored }, error: null });
           },
         }),
       }),
+      // transitionIfStatus CAS: .update(patch).eq('id').eq('status', from).select('id')
+      update: (patch: Record<string, unknown>) => {
+        const b = makeFilterBuilder((filters) => {
+          const matched = ordersDb.filter((o) => matchOrder(o, filters));
+          for (const o of matched) Object.assign(o, patch);
+          return { data: matched.map((o) => ({ id: o.id })), error: null };
+        });
+        return {
+          eq(col: string, val: unknown) {
+            b.eq(col, val);
+            return this;
+          },
+          select: () => Promise.resolve(b.run()),
+        };
+      },
+      // getOrder: .select('*').eq(column, value).maybeSingle()
+      select: () => {
+        const b = makeFilterBuilder((filters) => {
+          const found = ordersDb.find((o) => matchOrder(o, filters));
+          return { data: found ? { ...found } : null, error: null };
+        });
+        return {
+          eq(col: string, val: unknown) {
+            b.eq(col, val);
+            return this;
+          },
+          maybeSingle: () => Promise.resolve(b.run()),
+        };
+      },
     };
+  }
+  if (table === 'user_points_ledger') {
+    // reversePointsForOrder 멱등 조회 — 기존 원장 없음.
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      limit: () => Promise.resolve({ data: [], error: null }),
+    };
+    return chain;
   }
   if (table === 'order_items') {
     return {
+      select: () => ({
+        eq: () => Promise.resolve({ data: [], error: null }),
+      }),
       insert: () =>
         Promise.resolve({
           error: state.orderItemsInsertFails
@@ -215,6 +310,7 @@ const couponState = {
   // (customerCancelOrder / admin actions), never to createOrder. Tracking calls here
   // lets us assert createOrder leaves the coupon untouched (reserve-only).
   releaseCalls: [] as Array<{ code: string; userId: string | null }>,
+  listCalls: [] as Array<{ userId: string; code: string }>,
 };
 
 vi.mock('@/lib/db/coupons', () => ({
@@ -235,6 +331,21 @@ vi.mock('@/lib/db/coupons', () => ({
   releaseCouponByOrder: async (code: string, userId: UserId | null) => {
     couponState.releaseCalls.push({ code, userId: userId as string | null });
     callLog.push('release');
+  },
+  // 보안 검토 P1-3: createOrder 의 미결제 주문 대체가 진행 중 주문을 조회한다.
+  listActiveCouponOrders: async (userId: UserId, code: string) => {
+    couponState.listCalls.push({ userId: userId as string, code });
+    return {
+      data: ordersDb
+        .filter(
+          (o) =>
+            o.user_id === (userId as string) &&
+            o.coupon_code === code.trim().toUpperCase() &&
+            !TERMINAL_STATUSES.includes(o.status),
+        )
+        .map((o) => ({ id: o.id, orderNo: o.order_no, status: o.status })),
+      error: null,
+    };
   },
 }));
 
@@ -320,11 +431,14 @@ beforeEach(() => {
   state.redeemRpcFails = false;
   state.pointsTxCalls = [];
   state.insertedOrder = undefined;
+  state.activeCouponIndex = true;
+  ordersDb = [];
   probes.coupons = true;
   couponProbeCalls = 0;
   couponState.validateResult = validCoupon(5000);
   couponState.validateCalls = [];
   couponState.releaseCalls = [];
+  couponState.listCalls = [];
 });
 
 afterEach(() => {
@@ -476,5 +590,83 @@ describe('createOrder — 무쿠폰 레거시 회귀 0', () => {
         'user_id',
       ].sort(),
     );
+  });
+});
+
+// ---------- 회원·쿠폰별 진행 중 주문 1건 (보안 검토 P1-3) ----------
+
+describe('createOrder — 같은 쿠폰의 진행 중 주문 1건 (보안 검토 P1-3)', () => {
+  it('병렬 주문 2건 → 두 번째 거부: 045 인덱스 23505 를 COUPON_ALREADY_USED 로 바꾸고 적립금을 환급한다', async () => {
+    const createOrder = await importCreateOrder();
+
+    const results = await Promise.allSettled([
+      createOrder(makeInput({ couponCode: 'WELCOME5', redeemPoints: 1000 })),
+      createOrder(makeInput({ couponCode: 'WELCOME5', redeemPoints: 1000 })),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toMatchObject({ code: 'COUPON_ALREADY_USED' });
+    // 진행 중 주문은 정확히 1건, 진 요청의 적립금은 환급(10000 − 1000).
+    expect(ordersDb.filter((o) => !TERMINAL_STATUSES.includes(o.status))).toHaveLength(1);
+    expect(state.pointsBalance).toBe(9000);
+  });
+
+  it('재결제(순차 재주문): 같은 쿠폰의 이전 미결제 주문을 CANCELLED 로 대체하고 그 적립금을 복원한다', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const createOrder = await importCreateOrder();
+
+    const first = await createOrder(makeInput({ couponCode: 'WELCOME5', redeemPoints: 2000 }));
+    expect(state.pointsBalance).toBe(8000);
+
+    // 결제창을 닫고 /checkout 에서 다시 결제 → 새 주문.
+    const second = await createOrder(makeInput({ couponCode: 'WELCOME5', redeemPoints: 2000 }));
+
+    expect(ordersDb.find((o) => o.id === (first.id as string))?.status).toBe('CANCELLED');
+    expect(ordersDb.find((o) => o.id === (second.id as string))?.status).toBe('CREATED');
+    // 이전 주문 사용분 복원(ADJUSTMENT +2000) 후 새 주문이 다시 2000 사용.
+    expect(state.pointsTxCalls).toContainEqual(
+      expect.objectContaining({ p_type: 'ADJUSTMENT', p_delta: 2000, p_order_id: first.id }),
+    );
+    expect(state.pointsBalance).toBe(8000);
+    expect(couponState.listCalls).toEqual([
+      { userId: 'user-1', code: 'WELCOME5' },
+      { userId: 'user-1', code: 'WELCOME5' },
+    ]);
+    warnSpy.mockRestore();
+  });
+
+  it('결제완료 계열 주문은 대체하지 않는다 — 검증 직후 결제된 경합이면 INSERT 가 거부된다', async () => {
+    const createOrder = await importCreateOrder();
+    ordersDb.push({
+      id: 'order-paid',
+      order_no: '20261112-0099',
+      user_id: 'user-1',
+      status: 'PAID',
+      coupon_code: 'WELCOME5',
+    });
+
+    const promise = createOrder(makeInput({ couponCode: 'WELCOME5' }));
+
+    await expect(promise).rejects.toMatchObject({ code: 'COUPON_ALREADY_USED' });
+    expect(ordersDb.find((o) => o.id === 'order-paid')?.status).toBe('PAID');
+  });
+
+  it('비회원 주문은 대체 대상 조회를 하지 않는다(전체 한도는 결제 직전 확인이 담당)', async () => {
+    const createOrder = await importCreateOrder();
+    // 사진 소유권 검사는 이 테스트 관심사가 아니다 — photoUrl 없는 라인으로 건너뛴다.
+    const order = await createOrder(
+      makeInput({
+        couponCode: 'WELCOME5',
+        userId: null,
+        cartItems: [{ ...makeCartItem(), photoUrl: '' }],
+      }),
+    );
+    expect(order.totalPrice).toBe(28_000);
+    expect(couponState.listCalls).toHaveLength(0);
   });
 });

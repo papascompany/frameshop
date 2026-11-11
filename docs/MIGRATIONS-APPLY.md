@@ -4,7 +4,7 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-11-11 (044 보안 하드닝 작성 — **런칭 전 필수**, 043·044 적용 대기 — 001~042 는 전부 적용됨).
+> 최종 갱신: 2026-11-12 (045 쿠폰 주문 연결 작성 — 권장, 043·044·045 적용 대기 — 001~042 는 전부 적용됨. 044 는 **런칭 전 필수**).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
@@ -42,6 +42,54 @@
 4. 앱 스모크: 로그인 → 마이페이지 주문 목록 표시(SELECT 유지 확인) · 배송완료 주문 리뷰 작성 성공.
 
 롤백 메모는 파일 하단 주석 참고(보안 회귀이므로 사유 기록 후에만).
+
+## ★ 적용 권장 — 045 (쿠폰 주문 연결 · 병렬 주문 차단, 2026-11-12 작성)
+
+> 보안 검토 **P1-3**(쿠폰 1인 1회·전체 한도를 병렬 주문으로 우회) 후속. **비파괴 + 멱등**: 데이터 행
+> 변경·삭제 없음. 컬럼 추가(NULL 허용)·NOT NULL 해제·CHECK·부분 UNIQUE 인덱스 2개만. 재실행 안전.
+> **미적용이어도 앱은 정상**(probe `isCouponOrderLedgerAvailable` + conditional-spread) — 앱 방어선
+> (결제완료 계열 주문 거부 · 이전 미결제 주문 대체 · Toss 승인 직전 쿠폰 확인)은 이미 동작한다.
+> 적용하면 남은 틈인 **"동시 주문 생성 + 동시 결제"** 와 비회원 취소 복원 정밀도가 닫힌다.
+> 적용 후 최대 60초 안에 재배포 없이 켜진다. 044 와 순서 무관(044 를 먼저 적용해도 된다).
+
+| # | 파일 | 바뀌는 것 |
+|---|---|---|
+| 045 | `045_coupon_order_link.sql` | ① 사전 점검 — 회원·쿠폰별 진행 중 주문 2건 이상이면 아무것도 바꾸지 않고 예외로 중단 ② `coupon_redemptions.order_no` 추가(사용을 일으킨 주문번호 스냅샷, probe 대상) ③ `coupon_redemptions.user_id` NULL 허용 + CHECK `coupon_redemptions_guest_has_order`(비회원 사용도 주문 단위 기록) ④ `uniq_coupon_redemptions_order` — 주문당 사용 기록 1행(부분 UNIQUE) ⑤ `uniq_orders_active_coupon_per_user` — 회원·쿠폰별 진행 중(CANCELLED/REFUNDED 아님) 주문 1건(부분 UNIQUE, 앱이 23505 를 COUPON_ALREADY_USED 로 판별 — 이름 변경 금지) |
+
+### 적용 순서
+
+1. **사전 점검(결과 0행이어야 함)** — 0행이 아니면 같은 회원이 같은 쿠폰으로 진행 중 주문을 여러 건
+   가진 것(⑤ 인덱스 생성 불가 — 파일이 스스로 예외로 멈춘다):
+   ```sql
+   SELECT user_id, coupon_code, count(*) AS n,
+          array_agg(order_no ORDER BY created_at) AS order_nos,
+          array_agg(status   ORDER BY created_at) AS statuses
+     FROM public.orders
+    WHERE user_id IS NOT NULL AND coupon_code IS NOT NULL
+      AND status NOT IN ('CANCELLED', 'REFUNDED')
+    GROUP BY user_id, coupon_code
+   HAVING count(*) > 1;
+   ```
+   행이 나오면: **CREATED(미결제)** 주문은 `/admin/orders` 에서 취소(적립금 자동 복원)한다. **결제완료 계열이
+   2건 이상**이면 P1-3 우회가 실제로 일어난 것 — 적용을 멈추고 보고(할인 회수·환불은 운영 판단).
+2. `045_coupon_order_link.sql` 전체 실행.
+3. 파일 하단 주석의 검증 쿼리 (a)~(c) — 기대값: `order_no` 컬럼 존재 · `user_id` is_nullable = YES ·
+   CHECK `coupon_redemptions_guest_has_order` 1행 · 인덱스 `uniq_coupon_redemptions_order`·
+   `uniq_orders_active_coupon_per_user` 2행.
+4. 앱 확인(60초 후): `/admin/launch`(런칭 준비 점검) 마이그레이션 항목에서 045 가 적용으로 표시.
+   쿠폰 실결제 스모크 때 `coupon_redemptions` 새 행에 `order_id`·`order_no` 가 채워지는지 확인.
+
+### 미적용 상태의 동작(배포~적용 창)
+
+- 회원 사용 기록에는 `order_id`(042 컬럼)를 이미 기록 — 취소 복원은 **그 주문이 소비했을 때만** 동작한다.
+- 비회원 사용은 기록되지 않아 취소 시 기존 동작(used_count −1)을 유지한다(정밀 판정은 045 이후).
+- 같은 회원의 **동시** 주문 생성은 둘 다 성공할 수 있고, 두 결제가 **동시에** 승인되면 둘 다 할인된다
+  (순차 결제는 승인 직전 확인이 막는다). → 045 적용 전까지는 고액·한정 쿠폰 발행 자제(기존 운영 완화책) 유지.
+
+### 롤백 메모 (045)
+
+파일 하단 주석 참고. 인덱스 DROP 은 P1-3 경합 차단을 약화시키므로 사유 기록 후에만. 비회원 행
+(`user_id IS NULL`)이 생긴 뒤에는 NOT NULL 복원 불가(그 행을 지우면 해당 주문의 복원 근거가 사라짐).
 
 ## ★ 3차 적용 대기 — 043 (결제 웹훅 정합성, 2026-10-28 작성)
 

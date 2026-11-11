@@ -282,7 +282,7 @@ export async function cancelOrderAction(
     // CREATED→CANCELLED (unpaid) cancel never consumed it (snapshot only). Fire-and-
     // forget mirror of the points reversal above (releaseCouponByOrder never throws).
     if (order.status !== 'CREATED' && order.couponCode) {
-      void releaseCouponByOrder(order.couponCode, order.userId);
+      void releaseCouponByOrder(order.couponCode, order.userId, order.id);
     }
 
     // Fire-and-forget customer notification (same pattern as shipOrderAction).
@@ -387,7 +387,7 @@ async function fullRefund(
     // paymentId), so the coupon was consumed — restore its usage slot. Fire-and-
     // forget mirror of the points reversal above (releaseCouponByOrder never throws).
     if (order.couponCode) {
-      void releaseCouponByOrder(order.couponCode, order.userId);
+      void releaseCouponByOrder(order.couponCode, order.userId, order.id);
     }
 
     // Fire-and-forget customer notification (same pattern as shipOrderAction).
