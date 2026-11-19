@@ -5,8 +5,10 @@
  * render pipeline for each, up to MAX_ATTEMPTS per job.
  *
  * Invocation: Vercel Cron (vercel.json `crons`) fires a GET request to this
- * route once daily at 01:00 UTC (Hobby plan limit). Pro plan: change
- * schedule to every-5-minutes ("*\/5 * * * *") for faster retries.
+ * route hourly ("0 * * * *", Pro plan — Hobby allows only once daily and
+ * would reject this schedule at deploy time). Not every 5 minutes: retries have
+ * no backoff, so a short outage would burn all MAX_ATTEMPTS (5) in ~25 minutes
+ * and leave the job terminal FAILED. Hourly spreads the 5 attempts over ~5 hours.
  * Vercel automatically adds the
  * `Authorization: Bearer <CRON_SECRET>` header when `CRON_SECRET` env var is
  * configured on the project.

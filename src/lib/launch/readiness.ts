@@ -489,7 +489,8 @@ function evaluateHosting(): ReadinessItem {
     title: '호스팅 플랜',
     status: 'manual',
     message:
-      'Vercel Hobby 는 상업 이용 불가(결제 처리 = 상업). Pro 전환 또는 독립 서버(docs/setup/BAREMETAL_MIGRATION_RUNBOOK.md).',
+      'Vercel Pro 사용 중(2026-11-19 확인) — 상업 이용 가능. 크론은 Pro 기준(결제 스윕 15분·렌더 재시도 1시간, vercel.json). ' +
+      'Hobby 로 내리면 상업 이용 불가이고 이 크론 주기로는 배포가 실패한다(일 1회만 허용). 독립 서버: docs/setup/BAREMETAL_MIGRATION_RUNBOOK.md.',
   };
 }
 
