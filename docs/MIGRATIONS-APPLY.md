@@ -4,13 +4,13 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-11-19 (044·045 프로덕션 적용 완료 — 001~042 + 044·045 적용됨. **043 만 적용 대기(선택)**).
+> 최종 갱신: 2026-11-19 (043·044·045 프로덕션 적용 완료 — **001~045 전부 적용됨**).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
 > (체크아웃 probe `points/receipt/surcharge` 전부 true). 상세: `shared/BLOCKERS.md` BL-010(Resolved).
 > **✅ 2차 적용 완료 (2026-08-01):** 036/037/040/041/042 — 아래 절 참조.
-> **✅ 044·045 적용 완료 (2026-11-19):** 보안 하드닝·쿠폰 주문 연결 — 아래 각 절의 "적용 기록". 이 문서는 이후 신규
+> **✅ 043·044·045 적용 완료 (2026-11-19):** 웹훅 감사 로그·보안 하드닝·쿠폰 주문 연결 — 아래 각 절의 "적용 기록". 이 문서는 이후 신규
 > 마이그레이션 적용 시의 절차 참고용으로 유지한다.
 
 ---
@@ -149,14 +149,22 @@
 파일 하단 주석 참고. 인덱스 DROP 은 P1-3 경합 차단을 약화시키므로 사유 기록 후에만. 비회원 행
 (`user_id IS NULL`)이 생긴 뒤에는 NOT NULL 복원 불가(그 행을 지우면 해당 주문의 복원 근거가 사라짐).
 
-## ★ 3차 적용 대기 — 043 (결제 웹훅 정합성, 2026-10-28 작성)
+## ✅ 적용 완료 — 043 (결제 웹훅 정합성, 2026-10-28 작성 · 2026-11-19 프로덕션 적용)
+
+> **적용 기록(2026-11-19, 044·045 와 같은 날 SQL Editor)**
+> - 사전 확인: `payment_webhook_events` 없음(0) — 신규 생성.
+> - 적용: `BEGIN;` + `043_payment_webhook_events.sql`(main `1ca133f` 원문, SHA-256 대조) + `COMMIT;` → Success.
+> - 검증: table_exists 1 · rls_enabled true · policy_count 0(service-role 전용) · 인덱스 2 · 컬럼 10 · 행 0.
+> - 앱: `/admin/launch` DB 마이그레이션 항목 "정상"(✓ 043 포함) · 프로덕션 스모크 PASS 14/FAIL 0.
+>   스모크의 웹훅 호출(DEPOSIT_CALLBACK·비JSON)은 감사 기록 전에 반환되므로 행을 남기지 않는다.
+>   **미확인**: 실제 Toss 웹훅 수신 시 행 기록 — 웹훅 등록 후 실결제 스모크에서 확인.
 
 > **비파괴 + 멱등**(신규 테이블만). **미적용이어도 웹훅 상태 반영은 정상** — 감사 기록만 생략된다
 > (probe `isWebhookAuditAvailable`). 적용하면 최대 60초 안에 재배포 없이 기록이 켜진다.
 
 | # | 파일 | 활성화되는 것 | 적용 |
 |---|---|---|---|
-| 043 | `043_payment_webhook_events.sql` | Toss 웹훅 수신 감사 로그 — 같은 결제의 후속 상태(CANCELED·PARTIAL_CANCELED 등)까지 전부 기록(결제 조회로 확인한 `toss_status` + 처리 `outcome`). RLS on, 정책 없음(service-role 전용) | ⏳ 대기 |
+| 043 | `043_payment_webhook_events.sql` | Toss 웹훅 수신 감사 로그 — 같은 결제의 후속 상태(CANCELED·PARTIAL_CANCELED 등)까지 전부 기록(결제 조회로 확인한 `toss_status` + 처리 `outcome`). RLS on, 정책 없음(service-role 전용) | ✅ 2026-11-19 |
 
 ### 검증 쿼리 (043)
 
