@@ -8,7 +8,10 @@ import { Dialog } from '@/components/ui/Dialog';
 import { deleteSettingAction, saveSettingsAction } from './actions';
 import {
   DELETABLE_SETTING_ENV_FALLBACK,
+  describeSettingDeletion,
   isDeletableSettingKey,
+  isEnvFallbackSettingKey,
+  isLegalResettableSettingKey,
   type SettingsTab as Tab,
 } from './setting-keys';
 
@@ -120,8 +123,8 @@ const LEGAL_SETTINGS: SettingMeta[] = [
     key: 'legal_draft_notice_hidden',
     label: '초안 고지 배너 숨김',
     type: 'text',
-    placeholder: 'true (숨김) / 비움 (표시)',
-    hint: '법률 검토가 끝나면 true 를 입력해 /terms·/privacy 하단의 "법률 자문 전 초안입니다" 배너를 내립니다.',
+    placeholder: 'true (숨김)',
+    hint: '법률 검토가 끝나면 true 를 입력해 /terms·/privacy 하단의 "법률 자문 전 초안입니다" 배너를 내립니다. 다시 표시하려면 저장값을 삭제하세요.',
   },
 ];
 
@@ -183,14 +186,16 @@ function SettingsSection({
     setMessage(null);
     try {
       await onDelete(deleteTarget.key);
-      const envName = isDeletableSettingKey(deleteTarget.key)
+      const envName = isEnvFallbackSettingKey(deleteTarget.key)
         ? DELETABLE_SETTING_ENV_FALLBACK[deleteTarget.key]
         : null;
       setMessage({
         ok: true,
         text: envName
           ? `${deleteTarget.label} 저장값을 삭제했습니다. 이제 환경변수 ${envName} 값이 있으면 그 값이, 없으면 미설정 상태로 동작합니다.`
-          : `${deleteTarget.label} 저장값을 삭제했습니다.`,
+          : isLegalResettableSettingKey(deleteTarget.key)
+            ? `${deleteTarget.label} 저장값을 삭제했습니다. 이제 기본 표기로 동작합니다.`
+            : `${deleteTarget.label} 저장값을 삭제했습니다.`,
       });
       setDeleteTarget(null);
     } catch (err) {
@@ -274,8 +279,8 @@ function SettingsSection({
         }}
         title="저장값 삭제"
         description={
-          deleteTarget && isDeletableSettingKey(deleteTarget.key)
-            ? `${deleteTarget.label} 저장값을 삭제합니다. 삭제 후에는 환경변수 ${DELETABLE_SETTING_ENV_FALLBACK[deleteTarget.key]} 값이 있으면 그 값이, 없으면 미설정 상태로 동작합니다.`
+          deleteTarget
+            ? (describeSettingDeletion(deleteTarget.key, deleteTarget.label) ?? undefined)
             : undefined
         }
         footer={

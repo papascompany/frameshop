@@ -4,13 +4,20 @@ import { updateTag } from 'next/cache';
 import { requireAdmin } from '@/lib/db/admin';
 import { deleteSetting, setSetting } from '@/lib/db/settings';
 import { LEGAL_SETTINGS_TAG } from '@/lib/legal/company-settings';
-import { isDeletableSettingKey } from './setting-keys';
+import {
+  isDeletableSettingKey,
+  isLegalResettableSettingKey,
+  isSettableSettingKey,
+  SETTING_VALUE_MAX_LENGTH,
+} from './setting-keys';
 
 type SaveResult = { ok: boolean; error?: string };
 
 /**
  * 설정 키-값 묶음 저장.
  * 빈 값 키는 저장하지 않음(기존 값 유지 — 마스킹 UI 특성상 빈 입력 = 변경 없음).
+ * 화이트리스트(SETTABLE_SETTING_KEYS) 밖의 키나 길이 상한을 넘는 값이 하나라도 있으면
+ * 아무것도 저장하지 않고 거부한다(부분 저장 없음).
  */
 export async function saveSettingsAction(
   settings: Record<string, string>,
@@ -21,9 +28,22 @@ export async function saveSettingsAction(
     return { ok: false, error: '관리자 권한이 필요합니다.' };
   }
 
+  if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) {
+    return { ok: false, error: '잘못된 요청입니다.' };
+  }
+  const entries = Object.entries(settings);
+  for (const [key, value] of entries) {
+    if (!isSettableSettingKey(key)) {
+      return { ok: false, error: '저장할 수 없는 설정입니다.' };
+    }
+    if (typeof value !== 'string' || value.trim().length > SETTING_VALUE_MAX_LENGTH) {
+      return { ok: false, error: `설정값이 너무 깁니다(최대 ${SETTING_VALUE_MAX_LENGTH}자).` };
+    }
+  }
+
   try {
     let touchedLegal = false;
-    for (const [key, value] of Object.entries(settings)) {
+    for (const [key, value] of entries) {
       if (value.trim() !== '') {
         await setSetting(key, value.trim());
         if (key.startsWith('company_') || key.startsWith('legal_')) {
@@ -44,8 +64,8 @@ export async function saveSettingsAction(
 }
 
 /**
- * 설정값 삭제(unset) — 화이트리스트 키만. 행을 지우면 같은 역할의 실값
- * 환경변수가 있으면 그 값으로 폴백한다. 조회 캐시는 deleteSetting 이 무효화.
+ * 설정값 삭제(unset) — 화이트리스트 키만. 결제·연동 키는 같은 역할의 실값 환경변수로,
+ * 법적 고지 값은 정적 기본값(company.ts)으로 폴백한다. 조회 캐시는 deleteSetting 이 무효화.
  */
 export async function deleteSettingAction(key: string): Promise<SaveResult> {
   try {
@@ -60,6 +80,10 @@ export async function deleteSettingAction(key: string): Promise<SaveResult> {
 
   try {
     await deleteSetting(key);
+    // 법적 고지 값은 Footer·/terms·/privacy 가 별도 태그로 캐시한다 — 삭제(기본값 복귀)도 즉시 반영.
+    if (isLegalResettableSettingKey(key)) {
+      updateTag(LEGAL_SETTINGS_TAG);
+    }
     return { ok: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : '알 수 없는 오류';

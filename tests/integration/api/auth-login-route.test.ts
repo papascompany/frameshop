@@ -16,7 +16,7 @@ type MockUser = {
 
 const state: {
   user: MockUser | null;
-  signInError: { status: number; message: string } | null;
+  signInError: { status: number; message: string; code?: string } | null;
   claimCalls: Array<{ userId: string; email: string }>;
 } = {
   user: null,
@@ -104,5 +104,35 @@ describe('POST /api/auth/login — 비회원 주문 귀속 (P1-7)', () => {
     const res = await login();
     expect(res.status).toBe(401);
     expect(state.claimCalls).toHaveLength(0);
+  });
+});
+
+describe('POST /api/auth/login — 실패 문구(한국어, 원문 비노출)', () => {
+  it('자격 증명 불일치 → 401 INVALID_CREDENTIALS, 영어 원문 없음', async () => {
+    state.signInError = { status: 400, message: 'Invalid login credentials', code: 'invalid_credentials' };
+    const res = await login();
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as { code: string; message: string };
+    expect(json.code).toBe('INVALID_CREDENTIALS');
+    expect(json.message).toBe('이메일 또는 비밀번호가 올바르지 않습니다.');
+    expect(json.message).not.toContain('Invalid');
+  });
+
+  it('메일 인증 전 → 401 EMAIL_NOT_CONFIRMED 안내', async () => {
+    state.signInError = { status: 400, message: 'Email not confirmed', code: 'email_not_confirmed' };
+    const res = await login();
+    expect(res.status).toBe(401);
+    const json = (await res.json()) as { code: string; message: string };
+    expect(json.code).toBe('EMAIL_NOT_CONFIRMED');
+    expect(json.message).toContain('인증');
+    expect(state.claimCalls).toHaveLength(0);
+  });
+
+  it('Auth 서버 오류 → 503 AUTH_UNAVAILABLE(자격 증명 탓으로 안내하지 않음)', async () => {
+    state.signInError = { status: 500, message: 'Internal Server Error', code: 'unexpected_failure' };
+    const res = await login();
+    expect(res.status).toBe(503);
+    const json = (await res.json()) as { code: string };
+    expect(json.code).toBe('AUTH_UNAVAILABLE');
   });
 });

@@ -795,4 +795,33 @@ fail-open 이다. 그래서 같은 쿠폰의 CREATED 주문 N건을 모두 결�
 
 ---
 
+## ADR-027: FROZEN `ConfirmErrorCode` 추가 값 — 청구 전 거부 코드 2종(2026-11-19 기록)
+
+**Status:** Accepted (코드는 #78·#81 로 이미 라이브 — 이 ADR 은 사후 기록. 보안 검토 후속 "FROZEN 값 추가 ADR 기록")
+
+**Context:** `src/types/payment.ts` 의 `ConfirmErrorCode` 는 FROZEN 타입(ADR-025 — 변경은 옵셔널·추가형만)이다.
+정식 오픈 전 보안 검토에서 결제 확정이 **Toss 승인 API 를 호출하기 전에** 거부해야 하는 경우가 두 가지 나왔다.
+기존 코드 집합(`AMOUNT_MISMATCH`·`ORDER_NOT_FOUND`·`TOSS_REJECTED`·`ALREADY_PAID`·`INTERNAL`)으로는
+"청구되지 않았다"는 사실을 결제 성공 페이지가 구분할 수 없었다(`INTERNAL` 이면 "결제는 정상 처리되었을 수
+있습니다" 안내가 나가 고객이 이중 결제를 우려하거나 재시도한다).
+
+**Decision:** 추가형 값 2개를 FROZEN 유니온 끝에 덧붙인다(기존 값·의미·순서 불변).
+1. `ORDER_NOT_PAYABLE`(#78, P1-2): 주문이 CANCELLED/REFUNDED — 고객 취소·쿠폰 대체(ADR-026 Postscript 2)
+   뒤 늦게 도착한 confirm. PAID 이후 상태는 기존대로 멱등 성공(`alreadyPaid`).
+2. `COUPON_UNAVAILABLE`(#81, P1-3): 회원 쿠폰을 다른 주문이 이미 썼거나 한도 소진(`checkCouponPayable`).
+   HTTP 409.
+
+두 코드 모두 **청구 전 거부**라는 같은 계약을 갖는다 — `PaymentSuccessClient` 의 `NOT_CHARGED_CODES` 에
+들어가 "결제가 진행되지 않았어요 / 청구되지 않습니다"를 보이고, 재시도 버튼과 "정상 처리되었을 수 있습니다"
+문구를 숨긴다(`tests/integration/payment-success-client.test.tsx`).
+
+**Consequences:**
+- 소비 측이 모르는 값을 받으면 기본 분기로 떨어진다 — `/api/payment/confirm` 은 HTTP 500(409 는 위 두 코드만),
+  성공 페이지는 "정상 처리되었을 수 있음" 안내(`NOT_CHARGED_CODES` 밖). 추가형이라 기존 소비자는 깨지지 않는다. 새 거부 사유를 추가할 때는 같은 규칙: 청구 전 거부면 `NOT_CHARGED_CODES` 에 넣고 테스트를
+  추가한다. **청구 후 실패(이미 승인됨)를 이 집합에 넣으면 안 된다** — 고객에게 "청구되지 않음"을 잘못 알린다.
+- 기각: 범용 `REJECTED_BEFORE_CHARGE` 하나로 묶는 안 — 고객 문구(취소된 주문 vs 쿠폰 사용 불가)와 운영 로그
+  구분이 사라져 채택하지 않음.
+
+---
+
 _(이후 ADR은 Architect/Orchestrator가 필요 시 추가)_
