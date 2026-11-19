@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { uuidLike } from '@/types/common';
 import { getServerSupabase } from '@/lib/supabase/server';
 import { getServiceRoleSupabase } from '@/lib/supabase/service';
-import { createReview, getOrderReview } from '@/lib/db/reviews';
+import { createReview, DuplicateReviewError, getOrderReview } from '@/lib/db/reviews';
 import { isSameOrigin } from '@/lib/security/same-origin';
 import { checkRate } from '@/lib/ratelimit';
 
@@ -118,8 +118,22 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ ok: true, review }, { status: 201 });
   } catch (err) {
+    // 사전 조회를 동시 요청 두 개가 함께 통과한 경우 — DB UNIQUE(046)가 한쪽을 거부한다.
+    if (err instanceof DuplicateReviewError) {
+      return NextResponse.json(
+        { ok: false, error: '이미 리뷰를 작성하셨습니다.' },
+        { status: 409 },
+      );
+    }
+    // DB 오류 원문(테이블·제약 이름)은 응답에 싣지 않고 서버 로그로만 남긴다.
+    console.error(
+      JSON.stringify({
+        event: 'review_create_failed',
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : '리뷰 작성 실패' },
+      { ok: false, error: '리뷰 작성에 실패했습니다. 잠시 후 다시 시도해주세요.' },
       { status: 500 },
     );
   }

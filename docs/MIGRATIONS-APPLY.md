@@ -4,7 +4,7 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-11-19 (043·044·045 프로덕션 적용 완료 — **001~045 전부 적용됨**).
+> 최종 갱신: 2026-11-19 (001~045 전부 적용됨 · **046 리뷰 주문당 1개 — 적용 대기(권장)**).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
@@ -148,6 +148,33 @@
 
 파일 하단 주석 참고. 인덱스 DROP 은 P1-3 경합 차단을 약화시키므로 사유 기록 후에만. 비회원 행
 (`user_id IS NULL`)이 생긴 뒤에는 NOT NULL 복원 불가(그 행을 지우면 해당 주문의 복원 근거가 사라짐).
+
+## ★ 적용 권장 — 046 (리뷰 주문당 1개, 2026-11-19 작성)
+
+> 보안 검토 후속 "리뷰 주문당 1개 DB 제약". **비파괴 + 멱등**: 인덱스 추가만. **미적용이어도 앱은 정상** —
+> `/api/reviews` 사전 조회가 중복을 막고, 남는 틈은 같은 주문에 대한 **동시 요청 두 개**뿐이다. 적용하면 DB 가
+> 한쪽을 23505 로 거부하고 앱이 409 "이미 리뷰를 작성하셨습니다." 로 응답한다(코드는 이 마이그레이션과 함께 배포).
+
+| # | 파일 | 바뀌는 것 |
+|---|---|---|
+| 046 | `046_reviews_one_per_order.sql` | ① 사전 점검 — 리뷰 2개 이상인 주문이 있으면 아무것도 바꾸지 않고 예외로 중단 ② `reviews_order_uniq` — `reviews(order_id)` 부분 UNIQUE(`order_id IS NOT NULL`) |
+
+### 적용 순서
+
+1. **사전 점검(0행이어야 함)**:
+   ```sql
+   SELECT order_id, count(*) AS n FROM public.reviews
+    WHERE order_id IS NOT NULL GROUP BY order_id HAVING count(*) > 1;
+   ```
+   행이 나오면 중복 리뷰 중 하나를 `/admin/reviews` 에서 숨기고, 삭제는 운영 판단으로 한 뒤 다시 실행한다.
+2. `BEGIN;` + `046_reviews_one_per_order.sql` + `COMMIT;` 실행.
+3. 검증: `SELECT indexname FROM pg_indexes WHERE schemaname='public' AND indexname='reviews_order_uniq';` → 1행.
+
+### 롤백 메모 (046)
+
+`DROP INDEX IF EXISTS public.reviews_order_uniq;` — 동시 요청 중복 리뷰 틈이 다시 열린다(앱 동작은 그대로).
+
+---
 
 ## ✅ 적용 완료 — 043 (결제 웹훅 정합성, 2026-10-28 작성 · 2026-11-19 프로덕션 적용)
 

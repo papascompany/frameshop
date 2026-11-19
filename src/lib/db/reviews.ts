@@ -118,6 +118,17 @@ export async function getOrderReview(orderId: string): Promise<Review | null> {
 
 // ─── 인증 사용자 ─────────────────────────────────────────────────────────────
 
+/**
+ * 같은 주문에 리뷰가 이미 있음 — 046 부분 UNIQUE(reviews_order_uniq) 위반(23505).
+ * 라우트의 사전 조회(getOrderReview)를 동시 요청 두 개가 함께 통과해도 DB 가 한쪽만 받는다.
+ */
+export class DuplicateReviewError extends Error {
+  constructor() {
+    super('DUPLICATE_REVIEW');
+    this.name = 'DuplicateReviewError';
+  }
+}
+
 export async function createReview(input: CreateReviewInput): Promise<Review> {
   const supabase = await getServerSupabase();
   const { data, error } = await supabase
@@ -134,6 +145,9 @@ export async function createReview(input: CreateReviewInput): Promise<Review> {
     .select()
     .single();
 
+  if (error?.code === '23505') {
+    throw new DuplicateReviewError();
+  }
   if (error || !data) {
     throw new Error(`[reviews] createReview failed: ${error?.message ?? 'no data'}`);
   }

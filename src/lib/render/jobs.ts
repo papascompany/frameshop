@@ -71,8 +71,11 @@ export async function createRenderJob(orderItemId: OrderItemId): Promise<void> {
  * Atomically transition job to RUNNING and increment attempts.
  * Returns true if the claim succeeded (job was PENDING/FAILED with room to retry).
  *
- * Single-region constraint: Vercel Cron fires at most one instance concurrently,
- * so a read-then-update is safe for Phase 1. Phase 2 replace with FOR UPDATE.
+ * Compare-and-set: the UPDATE only matches while the row still has the status
+ * and attempts we read, so when two claimers race (the in-process render right
+ * after payment vs. the hourly retry cron, or two overlapping cron runs) only
+ * one UPDATE matches a row and the other gets false. Without the guard both
+ * would "succeed" and render the same item twice.
  */
 export async function claimRenderJob(orderItemId: OrderItemId): Promise<boolean> {
   const supabase = getServiceRoleSupabase();
@@ -88,16 +91,19 @@ export async function claimRenderJob(orderItemId: OrderItemId): Promise<boolean>
   if (!['PENDING', 'RUNNING', 'FAILED'].includes(r.status)) return false;
   if (r.attempts >= MAX_ATTEMPTS) return false;
 
-  const { error } = await supabase
+  const { data: claimed, error } = await supabase
     .from('print_render_jobs')
     .update({
       status: 'RUNNING',
       attempts: r.attempts + 1,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', r.id);
+    .eq('id', r.id)
+    .eq('status', r.status)
+    .eq('attempts', r.attempts)
+    .select('id');
 
-  return !error;
+  return !error && Array.isArray(claimed) && claimed.length === 1;
 }
 
 /** Mark job DONE when render succeeds. */

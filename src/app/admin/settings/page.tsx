@@ -2,30 +2,13 @@ import Link from 'next/link';
 import { requireAdmin } from '@/lib/db/admin';
 import { getSettings } from '@/lib/db/settings';
 import { SettingsClient } from './SettingsClient';
-import { parseSettingsTab } from './setting-keys';
+import { parseSettingsTab, SETTABLE_SETTING_KEYS } from './setting-keys';
 
 // 어드민 설정 페이지
 export const metadata = { title: '시스템 설정 · FrameShop Admin' };
 
-const ALL_KEYS = [
-  'toss_client_key',
-  'toss_secret_key',
-  'toss_webhook_secret',
-  'admin_email',
-  'resend_api_key',
-  'mail_from',
-  'slack_webhook_url',
-  'google_client_id',
-  'google_client_secret',
-  'sentry_dsn',
-  // 법적 고지 확정 대기 값(company.ts 정적값 오버라이드) — LEGAL_SETTING_KEYS.
-  'company_email',
-  'company_mail_order_no',
-  'company_hosting',
-  'company_courier',
-  'legal_effective_date',
-  'legal_draft_notice_hidden',
-];
+/** 화면에서 다루는 키 = 저장 화이트리스트(SETTABLE_SETTING_KEYS) — 단일 출처. */
+const ALL_KEYS: string[] = [...SETTABLE_SETTING_KEYS];
 
 export default async function AdminSettingsPage({
   searchParams,

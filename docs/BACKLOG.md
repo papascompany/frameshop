@@ -1,7 +1,7 @@
 # FrameShop 백로그 (작업 예정 단일 출처)
 
 > 이 문서는 **남은/예정 작업의 단일 출처(SSOT)** 다. 완료되면 항목을 "완료" 표시하고
-> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-11-19 (마이그 044·045 프로덕션 적용 완료 — P0 주문 직접 INSERT 차단 · 2026-11-12 쿠폰 병렬 주문 우회 P1-3 코드 완료 + 결제 스윕 기아 P1-8 + 관리자 취소·환불 CAS 완료 · 2026-11-11 정식 오픈 준비 — §0 런칭 게이트 순서).
+> `shared/STATUS.md` 변경로그에 한 줄 남긴다. 최종 갱신: 2026-11-19 (남은 일 정리 — §0 "남은 일" 표 · 보안 후속 코드 완료 · 마이그 043·044·045 프로덕션 적용 — P0 닫힘 · 2026-11-12 쿠폰 병렬 주문 우회 P1-3 코드 완료 + 결제 스윕 기아 P1-8 + 관리자 취소·환불 CAS 완료 · 2026-11-11 정식 오픈 준비 — §0 런칭 게이트 순서).
 >
 > 우선순위: **P0**(운영 차단·금전/보안) · **P1**(표준 기능) · **P2**(성장·부가)
 > 의존: ⛏️ = 마이그레이션 선적용 필요(아래 §1), 🔌 = 인프라 프로비저닝 필요
@@ -9,6 +9,19 @@
 ---
 
 ## §0. 런칭 게이트 — 지금 남은 것 (2026-08-08 전수 감사)
+
+### ★ 남은 일 (2026-11-19 정리 — 코드로 끝낼 수 있는 것은 모두 반영)
+
+| 구분 | 항목 | 누가 | 메모 |
+|---|---|---|---|
+| ⏸ Toss 키 대기 | Toss 키 입력(`/admin/settings` → 결제) · 개발자센터 웹훅 등록 · 실결제 스모크 | CTO(키 발급 후) | 스모크에서 함께 확인: 배송완료 주문 리뷰 작성 · 쿠폰 원장 `order_id`/`order_no` · 웹훅 감사 행(043). 키 입력 직후 첫 스윕이 24h 지난 과거 CREATED 주문을 만료 정리 |
+| 🗄 DB 적용 대기 | 마이그 **046**(리뷰 주문당 1개) | CTO 승인 후 SQL Editor | `docs/MIGRATIONS-APPLY.md` 046 절. 미적용이어도 앱 정상 |
+| ✍ 운영값(재배포 불필요) | 제주·도서산간 추가배송비(현재 0원) | CTO | `/admin/shipping` |
+| ✍ 운영값 | 신규주문 알림: 관리자 이메일 · Resend API 키 · 발신 주소 | CTO | `/admin/settings` → 알림. Resend 는 도메인 인증(SPF/DKIM) 선행 |
+| ✍ 운영값 | 사업자·법적 고지 확정값 7개(고객문의 이메일 · 통신판매업 신고번호 · 호스팅 표기(정적 기본값 "AWS" — 실제는 Vercel) · 시행일 · 처리위탁 배송사 · 처리위탁 Vercel/Supabase) | CTO(+법률 자문) | 처리위탁 Vercel/Supabase 2건은 국외 이전 표기라 `src/lib/legal/company.ts` 수정 필요 — 법률 검토 결론 받은 뒤 반영 |
+| ⚖ 외부 | 약관·방침 법률 자문 → 초안 배너 숨김(`legal_draft_notice_hidden=true`, 되돌리기는 저장값 삭제) | CTO | |
+| 🔌 인프라 | Sentry DSN(빌드타임 env `NEXT_PUBLIC_SENTRY_DSN`, 재배포 필요) · Upstash Redis(분산 레이트리밋 env 2개) | CTO(계정 생성) | 미설정이어도 동작 — 오류 수집 없음 · 레이트리밋 인스턴스별 |
+| 🧩 런칭 후 코드(차단 아님) | 쿠폰 소비를 승인 전 원자 예약으로(결제 경로 재설계) · 부분취소 `refunded_amount` 자동 동기화 · 스윕 조회 이력 컬럼 · §4 Phase 2 하드닝(사진 버킷 RLS 명시·CSP script-src·서명 URL TTL·confirm 소유권) | 개발 | 아래 [코드] 잔여 |
 
 ### ★ 런칭 게이트 순서 (2026-11-11 갱신 — 위에서부터 차례로)
 
@@ -90,9 +103,18 @@
   최종 리뷰 GO_WITH_RISKS(차단 결함 없음). **044 프로덕션 적용 완료(2026-11-19) — P0 닫힘.**
 - ✅ **런칭 점검 화면 `/admin/launch` + app_settings 캐시(비밀 키 제외)·삭제 경로 — 완료(#76).**
 - ✅ **런칭 스모크 `scripts/launch-smoke.sh`·읽기 전용 E2E + 비로그인 위시 401 수정 — 완료(#75).**
-- **보안 후속(미수정)**: 리뷰 주문당 1개 DB 제약 ·
-  `/admin/launch` 에 044 수동 확인 항목 · `saveSettingsAction` 허용 키 검증 · `legal_draft_notice_hidden` 되돌리기 ·
-  로그인 `INVALID_CREDENTIALS` 영어 원문 · FROZEN `ConfirmErrorCode` 값 추가(ORDER_NOT_PAYABLE) ADR 기록.
+- ✅ **보안 후속 — 완료(2026-11-19).** ① 리뷰 주문당 1개: 마이그 **046** `reviews_order_uniq`(부분 UNIQUE) +
+  `createReview` 23505 → `DuplicateReviewError` → 409(사전 조회와 같은 문구), 500 응답에서 DB 오류 원문 제거
+  — **046 적용 대기**. ② `saveSettingsAction` 허용 키 검증: `SETTABLE_SETTING_KEYS` 밖의 키·2000자 초과 값이
+  하나라도 있으면 전체 거부(부분 저장 없음), 화면 조회 키와 단일 출처. ③ 법적 고지 값 되돌리기: 6개 키를
+  삭제 가능(정적 기본값 복귀 + 법적 고지 캐시 무효화) — 초안 배너는 저장값 삭제로 다시 표시. ④ 로그인 실패
+  문구 한국어화: `INVALID_CREDENTIALS`(불일치) · `EMAIL_NOT_CONFIRMED`(메일 인증 전 — Confirm email 켜짐) ·
+  `AUTH_UNAVAILABLE`(5xx·요청 한도, 503), Supabase 영어 원문 비노출. ⑤ FROZEN `ConfirmErrorCode` 추가 값 2종
+  (`ORDER_NOT_PAYABLE`·`COUPON_UNAVAILABLE`) → `shared/DECISIONS.md` ADR-027. ⑥ `/admin/launch` 044 수동 확인
+  항목 → **불필요로 종료**(044 프로덕션 적용·검증 완료 2026-11-19, 화면이 확인할 필요 없음).
+- ✅ **렌더 작업 선점 CAS — 완료(2026-11-19).** `claimRenderJob` 이 읽고-쓰기라 결제 직후 즉시 렌더와 재시도
+  크론(이제 1시간 주기)이 같은 PENDING 작업을 함께 잡으면 이중 렌더가 가능했다 → UPDATE 에 읽은
+  status·attempts 조건을 걸고 매칭 1행일 때만 성공.
 - ✅ **confirm 백스톱 — 완료(2026-10-28).** 사실관계(Toss 문서): 인증 후 10분 안에 승인 API 를
   호출하지 않으면 결제는 EXPIRED(청구 없음). 즉 기존 위험은 "돈만 빠짐"이 아니라 **고객은 결제했다고
   믿는데 주문은 CREATED 로 남고, 체크아웃에서 차감한 적립금이 묶이는 것**이었다. 3단 방어로 해소:
@@ -100,7 +122,7 @@
   스트림이 끊겨도 완주 · 재시도 버튼과 레이트리밋 버킷 공유) — 클라이언트 JS 무관.
   ② `confirmPayment` 가 `ALREADY_PROCESSED_PAYMENT` 를 결제 조회로 수렴(서버 확정·재시도·스윕 경합 시
   패자도 PAID 로 수렴. 이 경로에서는 불일치여도 **절대 취소하지 않음** — 다른 주문 결제 재사용 시 환불 방지).
-  ③ **스윕 크론** `/api/cron/payment-sweep`(매일 18:00 UTC = 03:00 KST, `src/lib/payment/sweep.ts`):
+  ③ **스윕 크론** `/api/cron/payment-sweep`(2026-11-19 부터 15분마다 — Vercel Pro, 이전엔 매일 18:00 UTC, `src/lib/payment/sweep.ts`):
   15분 지난 CREATED 주문을 orderId 결제 조회로 판정 — DONE 이면 PAID 정산(끊긴 payment_events 락은
   CAS 인수), 결제 없음/READY/EXPIRED/ABORTED/CANCELED 이고 24시간 지났으면 **CANCELLED 로 만료 +
   사용 적립금 복원**(고객 알림 없음), 조회 실패·가상계좌 대기·부분취소는 무변경. **Toss 키 미설정이면
@@ -120,7 +142,7 @@
   감사 로그 `payment_webhook_events`(마이그 043, 2026-11-19 프로덕션 적용).
 - 결제 웹훅 잔여: 취소된 주문(CANCELLED)에 승인(DONE)이 도착하면 `webhook_paid_for_inactive_order`
   로그만 남긴다(자동 환불 안 함 — 운영자 판단). PARTIAL_CANCELED 의 `refunded_amount` 자동 동기화는 미구현.
-- `app_settings` 조회 캐시(Toss 호출마다 DB 왕복) · 어드민 설정값 삭제(unset) 경로 부재.
+- ✅ ~~`app_settings` 조회 캐시(Toss 호출마다 DB 왕복) · 어드민 설정값 삭제(unset) 경로 부재.~~ → #76 으로 해소.
 - ✅ **보안 검토 후속 — 스윕 기아(P1-8) · 관리자 취소·환불 CAS — 완료(2026-11-12).**
   ① **스윕 기아**: 예전엔 오래된 순 20건만 봐서, 끝내 CREATED 로 남는 waiting·manual(가상계좌 대기·
   부분취소)·조회 실패 주문이 상위 슬롯을 매일 다시 차지하고 정작 "Toss 승인됐는데 DB 는 CREATED"
@@ -165,8 +187,7 @@
   겹치면 취소된 주문에 승인이 날 수 있음(고객 직접 취소와 같은 부류 — `webhook_paid_for_inactive_order`
   수동 환불). 한도 쿠폰의 동시 승인 경합은 소비 단계 CAS 가 카운터만 지킨다(할인은 fail-open).
   후속 후보: 소비를 Toss 승인 **전** 원자 예약으로 옮기고 승인 실패 시 그 주문 것만 복원(완전 차단 —
-  결제 경로 재설계라 별도 작업) · 부분환불 전액 도달 REFUNDED 의 쿠폰 미복원(위 항목 잔여 — 이제
-  복원이 주문 단위라 호출만 추가하면 안전).
+  결제 경로 재설계라 별도 작업) · ~~부분환불 전액 도달 REFUNDED 의 쿠폰 미복원~~ → ✅ #82(2026-11-12).
 
 ---
 
