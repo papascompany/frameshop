@@ -6,8 +6,11 @@
  * (CANCELLED + redeemed points restored). Logic lives in
  * `src/lib/payment/sweep.ts`; this route only authenticates and reports.
  *
- * Invocation: Vercel Cron (vercel.json `crons`) fires a GET once daily
- * (Hobby plan limit). Vercel adds `Authorization: Bearer <CRON_SECRET>` when
+ * Invocation: Vercel Cron (vercel.json `crons`) fires a GET every 15 minutes
+ * (Pro plan — Hobby would reject this schedule at deploy time and allows only
+ * once daily). The 15-minute cadence matches SWEEP_MIN_AGE_MS, so orders still
+ * inside the Toss checkout window are never touched, and one run (time budget
+ * ~25s) finishes long before the next. Vercel adds `Authorization: Bearer <CRON_SECRET>` when
  * `CRON_SECRET` is configured on the project. The sweep pages through
  * candidates until its time budget (SWEEP_TIME_BUDGET_MS) — keep that budget
  * plus one worst-case order under `maxDuration`.

@@ -1,13 +1,13 @@
 /**
  * 결제 백스톱 스윕 — 확정되지 않은 CREATED 주문을 Toss 의 실제 결제 상태에 맞춰 정리한다.
- * /api/cron/payment-sweep(Vercel Cron, Hobby 는 하루 1회)이 호출한다.
+ * /api/cron/payment-sweep(Vercel Cron, Pro 15분 주기 — vercel.json)이 호출한다.
  *
  * 1차 확정 경로는 성공 URL 서버 렌더(redirect-confirm.ts)다. 이 스윕은 그 경로가 끝내
  * 마무리하지 못한 주문을 orderId 결제 조회로 판정한다:
  *  - DONE        : Toss 는 승인(청구)했는데 DB 는 CREATED → confirmPayment 로 PAID 정산
  *                  (ALREADY_PROCESSED_PAYMENT 수렴 + 끊긴 payment_events 락 CAS 인수).
  *  - IN_PROGRESS : 인증만 끝나고 승인 전 → 승인 시도. 인증 후 10분 안일 때만 성공하므로
- *                  하루 1회 크론에서는 드물다(실패해도 상태 무변경).
+ *                  스윕은 생성 15분(SWEEP_MIN_AGE_MS) 이후 주문만 보므로 성공은 드물다(실패해도 상태 무변경).
  *  - 결제 없음(NOT_FOUND_PAYMENT)·READY·EXPIRED·ABORTED·CANCELED : 생성 후
  *                  SWEEP_ABANDON_AFTER_MS 가 지났으면 CANCELLED 로 만료(CAS) + 사용 적립금 복원.
  *                  쿠폰은 PAID 때만 소비되므로 되돌릴 것이 없다. 결제하지 않은 주문이라 고객
