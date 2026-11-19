@@ -4,17 +4,29 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-11-12 (045 쿠폰 주문 연결 작성 — 권장, 043·044·045 적용 대기 — 001~042 는 전부 적용됨. 044 는 **런칭 전 필수**).
+> 최종 갱신: 2026-11-19 (044·045 프로덕션 적용 완료 — 001~042 + 044·045 적용됨. **043 만 적용 대기(선택)**).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
 > (체크아웃 probe `points/receipt/surcharge` 전부 true). 상세: `shared/BLOCKERS.md` BL-010(Resolved).
-> **✅ 2차 적용 완료 (2026-08-01):** 036/037/040/041/042 — 아래 절 참조. 이 문서는 이후 신규
+> **✅ 2차 적용 완료 (2026-08-01):** 036/037/040/041/042 — 아래 절 참조.
+> **✅ 044·045 적용 완료 (2026-11-19):** 보안 하드닝·쿠폰 주문 연결 — 아래 각 절의 "적용 기록". 이 문서는 이후 신규
 > 마이그레이션 적용 시의 절차 참고용으로 유지한다.
 
 ---
 
-## ★★ 런칭 전 필수 — 044 (보안 하드닝, 2026-11-11 작성)
+## ✅ 적용 완료 — 044 (보안 하드닝, 2026-11-11 작성 · 2026-11-19 프로덕션 적용)
+
+> **적용 기록(2026-11-19, Supabase SQL Editor, 프로젝트 frameshop / main PRODUCTION)**
+> - 사전 점검: 원장 중복(1단계) 0 · 2-a 0 · 2-b 0 · 2-c 0 · 2-d 0 → 위조 행 없음.
+> - 적용: `BEGIN;` + `044_security_hardening.sql`(main `dc06080` 원문, 에디터 내용 SHA-256 을 파일과 대조) + `COMMIT;` → Success.
+> - 검증 (a)~(e): orders INSERT 정책 0 · anon/authenticated 의 orders·order_items INSERT/UPDATE/DELETE 전부 false,
+>   authenticated SELECT true · `next_order_no` 실행권 authenticated/anon false, service_role true · reviews 정책
+>   `public_read`, `reviews_owner_insert_verified` · photos 정책 `photos_owner_select`, `photos_owner_delete` ·
+>   두 함수 `search_path=public` · 인덱스 `user_points_ledger_order_type_uniq` 1.
+>   추가 확인: service_role 의 orders/order_items INSERT·UPDATE, `apply_points_transaction` EXECUTE 모두 true(앱 쓰기 경로 유지).
+> - 앱: 프로덕션 스모크 PASS 14/FAIL 0 · 로그인 상태 `/account/orders` 정상 렌더 · 적용 후 1시간 런타임 오류 0.
+>   **미확인**: 배송완료 주문 리뷰 작성(해당 주문 없음) — 첫 배송완료 주문에서 확인.
 
 > **정식 오픈·Toss 키 입력 전에 반드시 적용.** 정식 오픈 전 보안 검토의 P0(로그인 사용자가 PostgREST
 > 로 `orders` 를 직접 INSERT → 적립금 무한 발행)를 닫는다. 코드만 배포해서는 막히지 않는다.
@@ -81,7 +93,15 @@
 
 롤백 메모는 파일 하단 주석 참고(보안 회귀이므로 사유 기록 후에만).
 
-## ★ 적용 권장 — 045 (쿠폰 주문 연결 · 병렬 주문 차단, 2026-11-12 작성)
+## ✅ 적용 완료 — 045 (쿠폰 주문 연결 · 병렬 주문 차단, 2026-11-12 작성 · 2026-11-19 프로덕션 적용)
+
+> **적용 기록(2026-11-19, 044 직후 같은 세션)**
+> - 사전 점검: 회원·쿠폰별 진행 중 주문 중복 0.
+> - 적용: `BEGIN;` + `045_coupon_order_link.sql`(main `dc06080` 원문, SHA-256 대조) + `COMMIT;` → Success.
+> - 검증 (a)~(c): `order_no` 컬럼 1 · `user_id` is_nullable YES · CHECK `coupon_redemptions_guest_has_order` 1 ·
+>   인덱스 `uniq_coupon_redemptions_order`·`uniq_orders_active_coupon_per_user` 2.
+> - 앱: `/admin/launch` 마이그레이션 항목에 "✓ 045 쿠폰 주문 연결(병렬 주문 차단)" 표시.
+>   **미확인**: 쿠폰 실결제 시 `coupon_redemptions` 새 행의 `order_id`·`order_no` 기록 — 실결제 스모크(게이트 8번)에서 확인.
 
 > 보안 검토 **P1-3**(쿠폰 1인 1회·전체 한도를 병렬 주문으로 우회) 후속. **비파괴 + 멱등**: 데이터 행
 > 변경·삭제 없음. 컬럼 추가(NULL 허용)·NOT NULL 해제·CHECK·부분 UNIQUE 인덱스 2개만. 재실행 안전.
