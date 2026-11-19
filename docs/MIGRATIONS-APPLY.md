@@ -4,7 +4,7 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-11-19 (001~045 전부 적용됨 · **046 리뷰 주문당 1개 — 적용 대기(권장)**).
+> 최종 갱신: 2026-11-19 (001~046 적용됨 · 단 **028 인덱스 3개·025 인덱스 1개가 프로덕션에 없음** — 아래 "누락 인덱스" 절).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
@@ -149,7 +149,13 @@
 파일 하단 주석 참고. 인덱스 DROP 은 P1-3 경합 차단을 약화시키므로 사유 기록 후에만. 비회원 행
 (`user_id IS NULL`)이 생긴 뒤에는 NOT NULL 복원 불가(그 행을 지우면 해당 주문의 복원 근거가 사라짐).
 
-## ★ 적용 권장 — 046 (리뷰 주문당 1개, 2026-11-19 작성)
+## ✅ 적용 완료 — 046 (리뷰 주문당 1개, 2026-11-19 작성 · 같은 날 프로덕션 적용)
+
+> **적용 기록(2026-11-19, PR #87 배포 직후)**
+> - 사전 점검: 리뷰 2개 이상인 주문 0 · reviews 0행 · 인덱스 없음.
+> - 적용: `BEGIN;` + `046_reviews_one_per_order.sql`(main `3fdc95c` 원문, SHA-256 대조) + `COMMIT;` → Success.
+> - 검증: `reviews_order_uniq` = `CREATE UNIQUE INDEX ... ON public.reviews USING btree (order_id) WHERE (order_id IS NOT NULL)`.
+>   **미확인**: 실제 리뷰 작성(배송완료 주문 없음) — 실결제 스모크 후 첫 배송완료 주문에서 확인.
 
 > 보안 검토 후속 "리뷰 주문당 1개 DB 제약". **비파괴 + 멱등**: 인덱스 추가만. **미적용이어도 앱은 정상** —
 > `/api/reviews` 사전 조회가 중복을 막고, 남는 틈은 같은 주문에 대한 **동시 요청 두 개**뿐이다. 적용하면 DB 가
@@ -173,6 +179,27 @@
 ### 롤백 메모 (046)
 
 `DROP INDEX IF EXISTS public.reviews_order_uniq;` — 동시 요청 중복 리뷰 틈이 다시 열린다(앱 동작은 그대로).
+
+---
+
+## ⚠ 누락 인덱스 — 028(3개)·025(1개) (2026-11-19 발견, 미조치)
+
+046 검증 중 마이그레이션 파일의 인덱스 이름 53개를 프로덕션 `pg_indexes` 와 대조했더니 4개가 없었다.
+전부 **비UNIQUE 성능 인덱스**라 기능·보안 영향은 없고, 현재 데이터가 적어(reviews 0행) 체감 영향도 없다.
+
+| 인덱스 | 파일 | 용도 |
+|---|---|---|
+| `reviews_public_created_idx` | `028_reviews_indexes.sql` | 공개 리뷰 최신순 |
+| `reviews_product_public_created_idx` | `028_reviews_indexes.sql` | 상품별 공개 리뷰 |
+| `reviews_order_idx` | `028_reviews_indexes.sql` | 주문별 리뷰 조회 — 046 `reviews_order_uniq` 가 같은 컬럼을 덮으므로 사실상 불필요 |
+| `landing_sections_type_idx` | `025_landing_sections.sql` | 랜딩 섹션 유형·정렬 |
+
+추정 원인: 028 은 적용 기록에서 빠졌고, `landing_sections` 는 SQL Editor 스니펫("Landing Page Sections Management")으로
+만들어져 025 의 인덱스 문장이 실행되지 않은 것으로 보인다. 같은 대조에서 **RLS 꺼진 public 테이블은 0개**였다
+(`landing_sections`·`reviews` 모두 RLS on, 정책 2개).
+
+조치(선택, 비파괴·멱등): `028_reviews_indexes.sql` 전체 + 025 의 `CREATE INDEX IF NOT EXISTS landing_sections_type_idx ...` 한 문장을
+`BEGIN…COMMIT` 으로 실행. 데이터가 늘기 전에 하는 것을 권장.
 
 ---
 
