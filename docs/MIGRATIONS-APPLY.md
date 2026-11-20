@@ -4,7 +4,7 @@
 > (papascompany 계정)로는 접근 불가. **CTO 가 Supabase 대시보드 → SQL Editor 에서 직접 실행**해야 한다.
 > **안전성**: 아래 마이그레이션은 전부 **비파괴(non-destructive) + 멱등(idempotent)** — `IF NOT EXISTS` /
 > `OR REPLACE` / `DROP POLICY IF EXISTS` 로 작성돼 **여러 번 실행해도 안전**하다. 적용 중에도 앱은 정상.
-> 최종 갱신: 2026-11-19 (001~046 적용됨 · 단 **028 인덱스 3개·025 인덱스 1개가 프로덕션에 없음** — 아래 "누락 인덱스" 절).
+> 최종 갱신: 2026-11-20 (**001~046 전부 적용 + 마이그 파일 인덱스 52개 전부 프로덕션 존재 확인** — 누락 4개 2026-11-20 보충).
 >
 > **✅ 1차 적용 완료 (2026-07-06):** 029~035 + 038/039 전부 프로덕션 DB(yohan73/frameshop)에 적용됨 —
 > CTO 브라우저 로그인 후 SQL Editor에서 통합 실행, 검증 쿼리 24행 일치, 런타임 자동 활성화 확증
@@ -182,9 +182,9 @@
 
 ---
 
-## ⚠ 누락 인덱스 — 028(3개)·025(1개) (2026-11-19 발견, 미조치)
+## ✅ 누락 인덱스 보충 — 028(3개)·025(1개) (2026-11-19 발견 · 2026-11-20 적용)
 
-046 검증 중 마이그레이션 파일의 인덱스 이름 53개를 프로덕션 `pg_indexes` 와 대조했더니 4개가 없었다.
+046 검증 중 마이그레이션 파일의 인덱스 이름 52개를 프로덕션 `pg_indexes` 와 대조했더니 4개가 없었다.
 전부 **비UNIQUE 성능 인덱스**라 기능·보안 영향은 없고, 현재 데이터가 적어(reviews 0행) 체감 영향도 없다.
 
 | 인덱스 | 파일 | 용도 |
@@ -198,8 +198,10 @@
 만들어져 025 의 인덱스 문장이 실행되지 않은 것으로 보인다. 같은 대조에서 **RLS 꺼진 public 테이블은 0개**였다
 (`landing_sections`·`reviews` 모두 RLS on, 정책 2개).
 
-조치(선택, 비파괴·멱등): `028_reviews_indexes.sql` 전체 + 025 의 `CREATE INDEX IF NOT EXISTS landing_sections_type_idx ...` 한 문장을
-`BEGIN…COMMIT` 으로 실행. 데이터가 늘기 전에 하는 것을 권장.
+> **적용 기록(2026-11-20)**: 대상 컬럼 존재 확인(`reviews`: is_public·created_at·product_id·order_id, `landing_sections`: section_type·sort_order) →
+> `BEGIN;` + `028_reviews_indexes.sql` 원문 + 025 의 `landing_sections_type_idx` 문장 + `COMMIT;`(SHA-256 대조) → Success →
+> 재대조: 마이그 파일 인덱스 **52개 중 누락 0**. `reviews_order_idx` 는 046 `reviews_order_uniq` 와 같은 컬럼이라 사실상 중복이지만,
+> 저장소 파일과 프로덕션을 일치시키려고 028 원문 그대로 적용했다(쓰기 비용 무시할 수준).
 
 ---
 

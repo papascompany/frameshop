@@ -16,7 +16,7 @@
 |---|---|---|---|
 | ⏸ Toss 키 대기 | Toss 키 입력(`/admin/settings` → 결제) · 개발자센터 웹훅 등록 · 실결제 스모크 | CTO(키 발급 후) | 스모크에서 함께 확인: 배송완료 주문 리뷰 작성 · 쿠폰 원장 `order_id`/`order_no` · 웹훅 감사 행(043). 키 입력 직후 첫 스윕이 24h 지난 과거 CREATED 주문을 만료 정리 |
 | ✅ DB | ~~마이그 **046**(리뷰 주문당 1개)~~ **2026-11-19 프로덕션 적용·검증** | — | `docs/MIGRATIONS-APPLY.md` 046 절 |
-| 🗄 DB(선택) | **누락 성능 인덱스 4개**(028 의 reviews 3개 · 025 의 `landing_sections_type_idx`) — 046 검증 중 발견 | CTO 승인 후 SQL Editor | 비UNIQUE 성능 인덱스라 기능·보안 영향 없음. 데이터가 늘기 전에 적용 권장(`docs/MIGRATIONS-APPLY.md` "누락 인덱스" 절) |
+| ✅ DB | ~~**누락 성능 인덱스 4개**(028 의 reviews 3개 · 025 의 `landing_sections_type_idx`)~~ **2026-11-20 보충 — 마이그 파일 인덱스 52개 전부 존재** | — | `docs/MIGRATIONS-APPLY.md` "누락 인덱스 보충" 절 |
 | ✍ 운영값(재배포 불필요) | 제주·도서산간 추가배송비(현재 0원) | CTO | `/admin/shipping` |
 | ✍ 운영값 | 신규주문 알림: 관리자 이메일 · Resend API 키 · 발신 주소 | CTO | `/admin/settings` → 알림. Resend 는 도메인 인증(SPF/DKIM) 선행 |
 | ✍ 운영값 | 사업자·법적 고지 확정값 7개(고객문의 이메일 · 통신판매업 신고번호 · 호스팅 표기(정적 기본값 "AWS" — 실제는 Vercel) · 시행일 · 처리위탁 배송사 · 처리위탁 Vercel/Supabase) | CTO(+법률 자문) | 처리위탁 Vercel/Supabase 2건은 국외 이전 표기라 `src/lib/legal/company.ts` 수정 필요 — 법률 검토 결론 받은 뒤 반영 |
